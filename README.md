@@ -1,14 +1,20 @@
+<p align="center">
+  <img src="assets/title.png" alt="svg 3dx studio" width="360"/>
+</p>
+
 # svg3dx-studio
 
 **svg3dx 编辑器**：Vite + Vue 3 + TDesign + three.js。打开 / 缓存本地文件，浏览预览，进入编辑页新增体元并保存。
 
-渲染与参数面板复用 [svg3dx-viewer](../svg3dx-viewer)。
+渲染与参数面板复用 [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer)。
 
-| 相关仓库 | 职责 |
-|----------|------|
-| [svg3dx](../svg3dx) | 格式规范与 samples |
-| [svg3dx-core](../svg3dx-core) | 解析求值引擎 |
-| [svg3dx-viewer](../svg3dx-viewer) | 查看器组件 |
+## 关联库
+
+| 仓库 | 职责 |
+|------|------|
+| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | 格式规范与 samples |
+| [svg3dx-core](https://github.com/xiaohunqupo/svg3dx-core) | 解析求值引擎 |
+| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | 查看器组件 |
 | **svg3dx-studio**（本仓） | 编辑器应用 |
 
 ## 开发
