@@ -41,6 +41,15 @@ npm install
 npm run dev
 ```
 
+## CI
+
+GitHub Actions（`.github/workflows/ci.yml`）在 `main` / PR 上：
+
+1. 检出并列仓 `svg3dx-core`、`svg3dx-viewer`、`svg3dx`
+2. `wasm-pack` → core `pkg/`
+3. viewer / studio 分别 `npm ci`，再 `npm run build`（vue-tsc + Vite）
+4. 上传 `dist` 产物
+
 ## 页面
 
 ### 浏览（`/`）
