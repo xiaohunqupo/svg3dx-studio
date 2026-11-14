@@ -16,6 +16,6 @@ export type GeometryKind =
   | "wedge"
   | "pyramid"
   | "prism"
-  | "cutcylinder";
+  | "sector-cylinder";
 
 export type AddChildKind = "group" | GeometryKind;

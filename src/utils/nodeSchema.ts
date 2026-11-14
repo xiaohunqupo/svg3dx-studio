@@ -63,7 +63,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "height" },
     { name: "normal" },
   ],
-  cutcylinder: [
+  "sector-cylinder": [
     { name: "diameter" },
     { name: "bottomCenterPt" },
     { name: "topCenterPt" },

@@ -349,7 +349,7 @@ function kindIcon(kind: string): Component {
     case "cylinder":
     case "cone":
     case "torus":
-    case "cutcylinder":
+    case "sector-cylinder":
     case "pipe":
       return CircleIcon;
     case "extrude":

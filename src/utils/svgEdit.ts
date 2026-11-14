@@ -11,7 +11,7 @@ const DEFAULT_SNIPPETS: Record<GeometryKind, string> = {
   wedge: `<s3dx:wedge length="80" width="60" height="40" lengthVec="1 0 0" widthVec="0 1 0"/>`,
   pyramid: `<s3dx:pyramid length="80" width="80" height="60" lengthVec="1 0 0" widthVec="0 1 0"/>`,
   prism: `<s3dx:prism points="0 0 0  60 0 0  60 40 0  0 40 0" height="40"/>`,
-  cutcylinder: `<s3dx:cutcylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
+  "sector-cylinder": `<s3dx:sector-cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
 };
 
 function ensureSvgShell(content: string): string {
@@ -259,7 +259,7 @@ export const BASIC_SOLID_KINDS: GeometryKind[] = [
   "torus",
   "wedge",
   "prism",
-  "cutcylinder",
+  "sector-cylinder",
   "pyramid",
 ];
 
@@ -272,6 +272,6 @@ export const PRIMITIVE_MENU: { kind: GeometryKind; labelZh: string; labelEn: str
     { kind: "torus", labelZh: "圆环", labelEn: "Torus" },
     { kind: "wedge", labelZh: "楔体", labelEn: "Wedge" },
     { kind: "prism", labelZh: "棱柱", labelEn: "Prism" },
-    { kind: "cutcylinder", labelZh: "扇形柱", labelEn: "Cut Cylinder" },
+    { kind: "sector-cylinder", labelZh: "扇形柱", labelEn: "Sector Cylinder" },
     { kind: "pyramid", labelZh: "棱锥", labelEn: "Pyramid" },
   ];
