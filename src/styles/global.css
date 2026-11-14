@@ -1,0 +1,31 @@
+:root {
+  color-scheme: light;
+  --studio-bg: #e8eef2;
+  --studio-panel: #ffffff;
+  --studio-ink: #1a2430;
+  --studio-muted: #5b6b7c;
+  --studio-line: #cfd8e3;
+  --studio-accent: #2f6fed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--studio-bg);
+  color: var(--studio-ink);
+}
+
+button {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
