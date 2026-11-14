@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch, type Component } from "vue";
+import { computed, h, nextTick, ref, watch, type Component } from "vue";
 import {
   AddAndSubtractIcon,
   AddIcon,
@@ -9,16 +9,19 @@ import {
   Chart3DFilledIcon,
   ChartBubbleIcon,
   CircleIcon,
+  DeleteIcon,
   FolderIcon,
   FrameIcon,
   GitBranchIcon,
   LayersIcon,
   Link1Icon,
+  MoreIcon,
   PaletteIcon,
   RootListIcon,
   ViewListIcon,
   WidgetIcon,
 } from "tdesign-icons-vue-next";
+import type { DropdownOption } from "tdesign-vue-next";
 import {
   type EvaluationResult,
   type GeometryInstruction,
@@ -28,34 +31,50 @@ import {
   extractClassRules,
   extractClassedGroups,
   extractDefsGroups,
+  extractRootProps,
   propsForClasses,
 } from "@/utils/styleClasses";
+import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import { locale, useI18n } from "@/i18n";
+import type { AddChildKind, GeometryKind } from "@/types/file";
+import { PRIMITIVE_MENU } from "@/utils/svgEdit";
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
 export type TreeSelectPayload =
-  | { kind: "geometry"; path: string; node: GeometryInstruction }
+  | {
+      kind: "geometry";
+      path: string;
+      node: GeometryInstruction;
+      /** Class attribute from the element / ancestor group when known. */
+      className?: string;
+    }
   | { kind: "model"; path: string; modelId: string }
   | {
       kind: "style";
       path: string;
-      /** CSS class name(s) on the group, space-joined. */
+      /** CSS class name(s) on the group, space-joined — or `:root`. */
       name: string;
       groupId: string;
       props: Record<string, string>;
       resolved: Record<string, Value>;
+      /** Global `:root` rule vs class rule attached to a group. */
+      scope?: "root" | "class";
     };
 
 const props = defineProps<{
   result: EvaluationResult | null;
   /** Raw SVG text — used to list style classes applied on groups. */
   content?: string;
+  /** Show panel skeleton while document is evaluating. */
+  loading?: boolean;
 }>();
 
 const emit = defineEmits<{
   select: [payload: TreeSelectPayload];
   addGroup: [];
+  addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
+  deleteNode: [payload: { path: string; groupId: string }];
 }>();
 
 const { t, tagLabel } = useI18n();
@@ -77,23 +96,224 @@ type TreeItem = {
     styleGroupId?: string;
     styleProps?: Record<string, string>;
     styleResolved?: Record<string, Value>;
-    /** Section action: show add button on defs. */
-    action?: "add-group";
+    styleScope?: "root" | "class";
+    /** defs section → empty group; group node → child menu */
+    action?: "add-group" | "add-child";
+    /** Own `id` on `<s3dx:use>` when present. */
+    useId?: string;
+    /** Label is only the href target (no own id) — render muted. */
+    useTargetLabel?: boolean;
   };
 };
 
-type TreeExpose = {
-  appendTo: (value: string | number, newData: TreeItem | TreeItem[]) => void;
-  getItem?: (value: string | number) => { data?: TreeItem } | undefined;
-};
-
-const treeRef = ref<TreeExpose | null>(null);
 const treeData = ref<TreeItem[]>([]);
 const actived = ref<string[]>([]);
 const expanded = ref<string[]>(["models", "defs", "style"]);
 
-/** Skip one content-driven rebuild after incremental append. */
-let skipContentSync = false;
+const PRIMITIVE_KIND_SET = new Set<string>(PRIMITIVE_MENU.map((p) => p.kind));
+
+function attrOf(attrs: string, name: string): string | null {
+  const re = new RegExp(
+    `(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    "i"
+  );
+  const m = re.exec(attrs);
+  return m ? (m[1] ?? m[2] ?? "").trim() || null : null;
+}
+
+/** Inner XML of `<g id="…">…</g>` (first match), or null. */
+function groupInnerXml(svg: string, groupId: string): string | null {
+  const openRe = /<g\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(svg))) {
+    const attrs = m[1] ?? "";
+    if (attrOf(attrs, "id") !== groupId) continue;
+    const full = m[0];
+    if (/\/\s*>$/.test(full)) return "";
+    const start = m.index + full.length;
+    let depth = 1;
+    const tokenRe = /<\/?g\b[^>]*\/?>/gi;
+    tokenRe.lastIndex = start;
+    let tm: RegExpExecArray | null;
+    while ((tm = tokenRe.exec(svg))) {
+      const tok = tm[0];
+      if (/^<\//.test(tok)) {
+        depth -= 1;
+        if (depth === 0) return svg.slice(start, tm.index);
+      } else if (!/\/\s*>$/.test(tok)) {
+        depth += 1;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Build tree children from a group's markup when evaluation has no group
+ * (unused / not yet referenced defs). Paths match mapGeometry: parent.0, …
+ */
+function childrenFromGroupMarkup(
+  content: string,
+  groupId: string,
+  parentPath: string,
+  classById: Map<string, string>
+): TreeItem[] {
+  const inner = groupInnerXml(content, groupId);
+  if (!inner) return [];
+  const items: TreeItem[] = [];
+  let depth = 0;
+  const re = /<\/?([A-Za-z_][\w:.-]*)\b([^>]*?)\/?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(inner))) {
+    const full = m[0];
+    const rawName = m[1];
+    const attrs = m[2] ?? "";
+    const selfClosing = /\/\s*>$/.test(full);
+    const isClose = /^<\//.test(full);
+    if (isClose) {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0) {
+      const local = rawName.includes(":")
+        ? rawName.slice(rawName.lastIndexOf(":") + 1)
+        : rawName;
+      const idx = items.length;
+      const path = `${parentPath}.${idx}`;
+      if (local.toLowerCase() === "g") {
+        const id = attrOf(attrs, "id") ?? `g-${idx}`;
+        const classAttr = attrOf(attrs, "class");
+        items.push({
+          value: path,
+          label: id,
+          children: childrenFromGroupMarkup(content, id, path, classById),
+          meta: {
+            kind: "geometry",
+            icon: FolderIcon,
+            node: syntheticGroup(id),
+            className:
+              classAttr?.split(/\s+/).filter(Boolean).join(" ") ||
+              classById.get(id),
+            action: "add-child",
+          },
+        });
+      } else if (local.toLowerCase() === "use") {
+        const href = attrOf(attrs, "href") ?? "";
+        const groupId = href.replace(/^#/, "");
+        items.push(
+          makeUseTreeItem(path, groupId, attrOf(attrs, "id"))
+        );
+      } else if (PRIMITIVE_KIND_SET.has(local.toLowerCase())) {
+        const kind = local.toLowerCase() as GeometryKind;
+        items.push({
+          value: path,
+          label: kind,
+          meta: {
+            kind: "geometry",
+            icon: kindIcon(kind),
+            node: syntheticPrimitive(kind, parentPath),
+          },
+        });
+      } else {
+        items.push({
+          value: path,
+          label: local.toLowerCase(),
+          meta: {
+            kind: "geometry",
+            icon: kindIcon(local.toLowerCase()),
+            node: null,
+          },
+        });
+      }
+    }
+    if (!selfClosing) depth += 1;
+  }
+  return items;
+}
+
+function ensureExpanded(paths: string[]): void {
+  const next = new Set(expanded.value);
+  for (const p of paths) {
+    if (p) next.add(p);
+  }
+  expanded.value = [...next];
+}
+
+function ancestorPaths(path: string): string[] {
+  if (path.startsWith("model:")) {
+    const parts = ["models"];
+    const m = /^model:([^.]+)(.*)$/.exec(path);
+    if (!m) return parts;
+    parts.push(`model:${m[1]}`);
+    const rest = m[2];
+    if (!rest) return parts;
+    const segs = rest.replace(/^\./, "").split(".").filter(Boolean);
+    let cur = `model:${m[1]}`;
+    for (let i = 0; i < segs.length - 1; i++) {
+      cur = `${cur}.${segs[i]}`;
+      parts.push(cur);
+    }
+    return parts;
+  }
+  if (path.startsWith("style:")) return ["style"];
+  const parts: string[] = ["defs"];
+  const m = /^(defs:[^.]+|i\d+)(.*)$/.exec(path);
+  if (!m) return path.includes(":") ? [path.split(".")[0]!] : parts;
+  const root = m[1]!;
+  parts.push(root);
+  const rest = m[2];
+  if (!rest) return parts;
+  const segs = rest.replace(/^\./, "").split(".").filter(Boolean);
+  let cur = root;
+  for (let i = 0; i < segs.length - 1; i++) {
+    cur = `${cur}.${segs[i]}`;
+    parts.push(cur);
+  }
+  return parts;
+}
+
+function activatePath(path: string): void {
+  onActive([path]);
+}
+
+/**
+ * Programmatic selection (e.g. viewport pick → tree).
+ * Expands ancestors and emits the same `select` payload as a user click.
+ */
+function selectPath(path: string | null | undefined): void {
+  if (!path) {
+    actived.value = [];
+    return;
+  }
+  ensureExpanded(ancestorPaths(path));
+  void nextTick(() => {
+    onActive([path]);
+  });
+}
+
+/** Select last child under parent, or the path itself. */
+function focusAfterEdit(
+  parentPath: string,
+  mode: "last-child" | "self" = "last-child"
+): void {
+  ensureExpanded([
+    "models",
+    "defs",
+    "style",
+    ...ancestorPaths(parentPath),
+    parentPath,
+  ]);
+  if (mode === "self") {
+    if (findItem(treeData.value, parentPath)) activatePath(parentPath);
+    else actived.value = [parentPath];
+    return;
+  }
+  const parent = findItem(treeData.value, parentPath);
+  const last = parent?.children?.[parent.children.length - 1];
+  if (last) activatePath(last.value);
+  else if (parent?.meta.node) activatePath(parentPath);
+}
 
 const KNOWN_MODES = new Set(["solid", "wireframe", "lite-solid", "hidden-line"]);
 
@@ -117,13 +337,8 @@ function modelModeIcon(mode: string): Component {
   }
 }
 
-function geometryIcon(inst: GeometryInstruction): Component {
-  if (inst.type === "group") return FolderIcon;
-  if (inst.type === "bool_op") {
-    return inst.op === "subtract" ? AddAndSubtractIcon : GitBranchIcon;
-  }
-  if (inst.type === "instance") return Link1Icon;
-  switch (inst.kind) {
+function kindIcon(kind: string): Component {
+  switch (kind) {
     case "box":
     case "wedge":
     case "prism":
@@ -145,17 +360,67 @@ function geometryIcon(inst: GeometryInstruction): Component {
     case "mesh":
     case "triangles":
       return LayersIcon;
+    case "group":
+      return FolderIcon;
     default:
       return WidgetIcon;
   }
 }
 
-function shortId(id: string): string {
+function geometryIcon(inst: GeometryInstruction): Component {
+  if (inst.type === "group") return FolderIcon;
+  if (inst.type === "bool_op") {
+    return inst.op === "subtract" ? AddAndSubtractIcon : GitBranchIcon;
+  }
+  if (inst.type === "instance") return Link1Icon;
+  return kindIcon(inst.kind);
+}
+
+function menuLabel(zh: string, en: string): string {
+  return locale.value === "zh" ? zh : en;
+}
+
+const solidMenuOptions = computed<DropdownOption[]>(() =>
+  PRIMITIVE_MENU.map((p) => ({
+    content: menuLabel(p.labelZh, p.labelEn),
+    value: p.kind,
+    prefixIcon: () => h(kindIcon(p.kind)),
+  }))
+);
+
+/** Group row “more” menu: add group / add child submenu / delete. */
+const groupMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.addGroup"),
+    value: "group",
+    prefixIcon: () => h(FolderIcon),
+  },
+  {
+    content: t("app.addChild"),
+    value: "__add-child",
+    prefixIcon: () => h(AddIcon),
+    children: solidMenuOptions.value,
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+function shortId(id: string | undefined | null): string {
+  if (!id) return "";
   const parts = id.split("/");
   return parts[parts.length - 1] || id;
 }
 
-function labelOf(inst: GeometryInstruction): string {
+function labelOf(inst: GeometryInstruction, useId?: string): string {
   switch (inst.type) {
     case "primitive":
       return inst.kind;
@@ -164,10 +429,67 @@ function labelOf(inst: GeometryInstruction): string {
     case "bool_op":
       return `bool-${inst.op}`;
     case "instance":
-      return tagLabel("use");
+      return useId?.trim() || (inst.group_id ? `#${inst.group_id}` : "");
     default:
       return "?";
   }
+}
+
+/** Parse `<s3dx:use>` children of a model from raw SVG (keeps optional use `id`). */
+function extractModelUses(
+  svg: string,
+  modelId: string
+): { id: string | null; groupId: string }[] {
+  const openRe = /<s3dx:model\b([^>]*)>/gi;
+  let m: RegExpExecArray | null;
+  let openEnd = -1;
+  while ((m = openRe.exec(svg))) {
+    if (attrOf(m[1] ?? "", "id") !== modelId) continue;
+    openEnd = m.index + m[0].length;
+    break;
+  }
+  if (openEnd < 0) return [];
+
+  const closeRe = /<\/s3dx:model\s*>/gi;
+  closeRe.lastIndex = openEnd;
+  const close = closeRe.exec(svg);
+  if (!close) return [];
+  const body = svg.slice(openEnd, close.index);
+  const out: { id: string | null; groupId: string }[] = [];
+  const useRe = /<s3dx:use\b([^>]*)\/?>/gi;
+  let um: RegExpExecArray | null;
+  while ((um = useRe.exec(body))) {
+    const attrs = um[1] ?? "";
+    const href = attrOf(attrs, "href");
+    if (!href) continue;
+    out.push({
+      id: attrOf(attrs, "id"),
+      groupId: href.replace(/^#/, ""),
+    });
+  }
+  return out;
+}
+
+function makeUseTreeItem(
+  path: string,
+  groupId: string,
+  useId: string | null | undefined,
+  transformM?: number[]
+): TreeItem {
+  const id = useId?.trim() || undefined;
+  // Own id → primary label; otherwise show target group id (full text, muted).
+  const label = id || (groupId ? `#${groupId}` : "");
+  return {
+    value: path,
+    label,
+    meta: {
+      kind: "geometry",
+      icon: Link1Icon,
+      node: syntheticInstance(groupId, path, transformM),
+      useId: id,
+      useTargetLabel: !id && !!groupId,
+    },
+  };
 }
 
 function findGroupById(
@@ -199,6 +521,8 @@ function mapGeometry(
       icon: geometryIcon(inst),
       node: inst,
       className,
+      action:
+        inst.type === "group" && inst.id ? ("add-child" as const) : undefined,
     },
     children: childrenOf(inst).map((c, i) =>
       mapGeometry(c, `${path}.${i}`, classById)
@@ -217,25 +541,40 @@ function syntheticGroup(id: string): GeometryInstruction {
   };
 }
 
+/** Prefer eval when in sync with markup; otherwise build from document. */
 function makeDefsGroupItem(
   id: string,
   className: string | undefined,
   evaluated: GeometryInstruction | undefined,
-  classById: Map<string, string>
+  classById: Map<string, string>,
+  content?: string
 ): TreeItem {
-  if (evaluated) {
-    const item = mapGeometry(evaluated, `defs:${id}`, classById);
+  const path = `defs:${id}`;
+  const contentKids = content
+    ? childrenFromGroupMarkup(content, id, path, classById)
+    : [];
+
+  if (
+    evaluated &&
+    (contentKids.length === 0 ||
+      childrenOf(evaluated).length === contentKids.length)
+  ) {
+    const item = mapGeometry(evaluated, path, classById);
     if (className) item.meta.className = className;
+    item.meta.action = "add-child";
     return item;
   }
+
   return {
-    value: `defs:${id}`,
+    value: path,
     label: id,
+    children: contentKids,
     meta: {
       kind: "geometry",
       icon: FolderIcon,
-      node: syntheticGroup(id),
+      node: evaluated ?? syntheticGroup(id),
       className,
+      action: "add-child",
     },
   };
 }
@@ -261,7 +600,7 @@ function buildDefsChildren(
     seen.add(g.id);
     const className = g.classes.join(" ") || classById.get(g.id) || undefined;
     children.push(
-      makeDefsGroupItem(g.id, className, evalById.get(g.id), classById)
+      makeDefsGroupItem(g.id, className, evalById.get(g.id), classById, content)
     );
   }
 
@@ -299,6 +638,14 @@ function buildTree(
           modelId: m.id,
           modelMode: m.mode,
         },
+        children: (() => {
+          const fromXml = content ? extractModelUses(content, m.id) : [];
+          return m.uses.map((u, i) => {
+            const path = `model:${m.id}.${i}`;
+            const useId = fromXml[i]?.id ?? null;
+            return makeUseTreeItem(path, u.group_id, useId, u.transform?.m);
+          });
+        })(),
       })),
     },
     {
@@ -311,37 +658,62 @@ function buildTree(
       value: "style",
       label: tagLabel("style"),
       meta: { kind: "section", icon: PaletteIcon },
-      children: classedGroups.map((g) => {
-        const primary = g.classes[0] ?? "";
-        const className = g.classes.join(" ");
-        const groupNode = findGroupById(result.instructions, g.id);
-        return {
-          value: `style:${g.id}`,
-          label: className,
+      children: [
+        {
+          value: "style::root",
+          label: tagLabel("root"),
           meta: {
-            kind: "style",
-            icon: BrushIcon,
-            styleName: className,
-            styleGroupId: g.id,
-            className,
-            styleProps: classRules[primary]
-              ? { ...classRules[primary] }
-              : propsForClasses(classRules, g.classes),
-            styleResolved: groupNode?.styles ?? {},
+            kind: "style" as const,
+            icon: RootListIcon,
+            styleName: ":root",
+            styleGroupId: "",
+            styleScope: "root" as const,
+            styleProps: extractRootProps(content),
+            styleResolved: {},
           },
-        };
-      }),
+        },
+        ...classedGroups.map((g) => {
+          const primary = g.classes[0] ?? "";
+          const className = g.classes.join(" ");
+          const groupNode = findGroupById(result.instructions, g.id);
+          return {
+            value: `style:${g.id}`,
+            label: className,
+            meta: {
+              kind: "style" as const,
+              icon: BrushIcon,
+              styleName: className,
+              styleGroupId: g.id,
+              className,
+              styleScope: "class" as const,
+              styleProps: classRules[primary]
+                ? { ...classRules[primary] }
+                : propsForClasses(classRules, g.classes),
+              styleResolved: groupNode?.styles ?? {},
+            },
+          };
+        }),
+      ],
     },
   ];
 }
 
-function defsChildIds(items: TreeItem[]): string[] {
-  const defs = items.find((n) => n.value === "defs");
-  return (defs?.children ?? [])
-    .map((c) => c.value.replace(/^defs:/, ""))
-    .filter(Boolean);
+function styleOnlyKey(svg: string): string {
+  return svg.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "<style/>");
 }
 
+function defsStructureKey(content: string): string {
+  return extractDefsGroups(content)
+    .map((g) => {
+      const inner = (groupInnerXml(content, g.id) ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return `${g.id}#${inner}`;
+    })
+    .join("\n");
+}
+
+/** Official TDesign pattern: replace `:data`; tree watches and rebuilds. */
 function rebuildTree(): void {
   if (!props.result) {
     treeData.value = [];
@@ -351,40 +723,16 @@ function rebuildTree(): void {
 }
 
 /**
- * Incrementally append a defs group via TDesign `appendTo` — avoids replacing
- * the whole tree data (which remounts every node under defs).
+ * After document edit: refresh `:data` from content+result, then focus.
  */
-function appendDefsGroup(id: string): void {
-  if (!id) return;
-  const value = `defs:${id}`;
-  if (findItem(treeData.value, value)) return;
-
-  const item = makeDefsGroupItem(id, undefined, undefined, new Map());
-
-  const defs = treeData.value.find((n) => n.value === "defs");
-  if (defs) {
-    if (!defs.children) defs.children = [];
-    defs.children.push(item);
-  }
-
-  skipContentSync = true;
-  if (!expanded.value.includes("defs")) {
-    expanded.value = [...expanded.value, "defs"];
-  }
-
+function syncAfterEdit(
+  parentPath?: string,
+  opts?: { select?: "last-child" | "self" }
+): void {
+  const parent = parentPath ?? "defs";
+  rebuildTree();
   void nextTick(() => {
-    try {
-      treeRef.value?.appendTo("defs", item);
-    } catch {
-      // If appendTo fails (tree not ready), fall back to a full rebuild once.
-      rebuildTree();
-    }
-    actived.value = [value];
-    emit("select", {
-      kind: "geometry",
-      path: value,
-      node: item.meta.node as GeometryInstruction,
-    });
+    focusAfterEdit(parent, opts?.select ?? "last-child");
   });
 }
 
@@ -394,7 +742,12 @@ function resultStructureKey(r: EvaluationResult): string {
     return `${inst.node_id}(${kids})`;
   };
   return [
-    r.models.map((m) => `${m.id}:${m.mode}:${m.active}`).join("|"),
+    r.models
+      .map(
+        (m) =>
+          `${m.id}:${m.mode}:${m.active}:${m.uses.map((u) => u.group_id).join(",")}`
+      )
+      .join("|"),
     r.instructions.map(walk).join("|"),
   ].join("||");
 }
@@ -406,13 +759,17 @@ watch(
       treeData.value = [];
       return;
     }
-    if (r && !prev) {
+    if (!prev) {
       rebuildTree();
-      expanded.value = ["models", "defs", "style"];
+      expanded.value = [
+        "models",
+        "defs",
+        "style",
+        ...r.models.map((m) => `model:${m.id}`),
+      ];
       return;
     }
-    // Same evaluated structure (e.g. empty defs group add) — keep tree nodes.
-    if (prev && resultStructureKey(prev) === resultStructureKey(r) && treeData.value.length) {
+    if (resultStructureKey(prev) === resultStructureKey(r) && treeData.value.length) {
       return;
     }
     rebuildTree();
@@ -422,31 +779,9 @@ watch(
 watch(
   () => props.content,
   (content, prev) => {
-    if (skipContentSync) {
-      skipContentSync = false;
-      return;
-    }
-    if (!props.result || !content) return;
-    if (content === prev) return;
-
-    // Only rebuild when defs group set actually changes in a non-append way.
-    // Pure append of one trailing group is handled by appendDefsGroup.
-    const nextIds = extractDefsGroups(content).map((g) => g.id);
-    const curIds = defsChildIds(treeData.value);
-    const isSingleAppend =
-      nextIds.length === curIds.length + 1 &&
-      curIds.every((id, i) => id === nextIds[i]);
-    if (isSingleAppend) {
-      const newId = nextIds[nextIds.length - 1];
-      if (newId && !findItem(treeData.value, `defs:${newId}`)) {
-        appendDefsGroup(newId);
-      }
-      return;
-    }
-    if (nextIds.join("\0") === curIds.join("\0")) {
-      // Same defs set (e.g. style param edit) — keep tree nodes stable.
-      return;
-    }
+    if (!props.result || !content || content === prev) return;
+    if (prev && styleOnlyKey(prev) === styleOnlyKey(content)) return;
+    if (prev && defsStructureKey(prev) === defsStructureKey(content)) return;
     rebuildTree();
   }
 );
@@ -476,17 +811,28 @@ function onActive(values: Array<string | number>): void {
   if (!item) return;
   const { meta } = item;
   if (meta.kind === "geometry" && meta.node) {
-    emit("select", { kind: "geometry", path, node: meta.node });
+    emit("select", {
+      kind: "geometry",
+      path,
+      node: meta.node,
+      className: meta.className,
+    });
   } else if (meta.kind === "model" && meta.modelId) {
     emit("select", { kind: "model", path, modelId: meta.modelId });
   } else if (meta.kind === "style" && meta.styleName !== undefined) {
+    const scope = meta.styleScope ?? "class";
+    const liveProps =
+      scope === "root"
+        ? extractRootProps(props.content ?? "")
+        : (meta.styleProps ?? {});
     emit("select", {
       kind: "style",
       path,
       name: meta.styleName,
       groupId: meta.styleGroupId ?? "",
-      props: meta.styleProps ?? {},
+      props: liveProps,
       resolved: meta.styleResolved ?? {},
+      scope,
     });
   }
 }
@@ -494,7 +840,10 @@ function onActive(values: Array<string | number>): void {
 function labelHint(item: TreeItem | undefined): string {
   const meta = item?.meta;
   if (!meta) return "";
-  if (meta.kind === "style") return meta.styleGroupId ?? "";
+  if (meta.kind === "style") {
+    if (meta.styleScope === "root") return ":root";
+    return meta.styleGroupId ?? "";
+  }
   if (meta.className) return meta.className;
   if (meta.kind === "model" && meta.modelMode) {
     return KNOWN_MODES.has(meta.modelMode)
@@ -503,7 +852,11 @@ function labelHint(item: TreeItem | undefined): string {
   }
   if (meta.kind === "geometry" && meta.node) {
     const n = meta.node;
-    if (n.type === "instance") return `#${n.group_id}`;
+    if (n.type === "instance") {
+      // Target already in label when no own id; with own id, hint shows target.
+      if (meta.useId && n.group_id) return `#${n.group_id}`;
+      return "";
+    }
     if (n.type === "group" && n.id) return "";
     return shortId(n.node_id);
   }
@@ -514,6 +867,67 @@ function onAddGroup(ev: Event): void {
   ev.preventDefault();
   ev.stopPropagation();
   emit("addGroup");
+}
+
+function isAddChildKind(v: unknown): v is AddChildKind {
+  if (v === "group") return true;
+  return PRIMITIVE_MENU.some((p) => p.kind === v);
+}
+
+function groupIdOf(item: TreeItem): string | undefined {
+  if (item.meta.node?.type === "group") {
+    return item.meta.node.id ?? item.meta.node.node_id;
+  }
+  return undefined;
+}
+
+function onGroupMoreClick(
+  parent: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  if (value === "__add-child" || value === "__divider") return;
+
+  const groupId = groupIdOf(parent);
+  if (!groupId) return;
+
+  if (value === "delete") {
+    emit("deleteNode", { path: parent.value, groupId });
+    return;
+  }
+  if (!isAddChildKind(value)) return;
+  emit("addChild", {
+    parentPath: parent.value,
+    parentGroupId: groupId,
+    kind: value,
+  });
+}
+
+function syntheticPrimitive(kind: GeometryKind, parentPath: string): GeometryInstruction {
+  return {
+    type: "primitive",
+    node_id: `${parentPath}/${kind}:new`,
+    kind,
+    params: {},
+    styles: {},
+    transform: { m: [...IDENTITY_M] },
+  };
+}
+
+function syntheticInstance(
+  groupId: string,
+  path: string,
+  transformM?: number[]
+): GeometryInstruction {
+  return {
+    type: "instance",
+    node_id: `${path}/use`,
+    group_id: groupId,
+    styles: {},
+    transform: {
+      m: transformM?.length ? [...transformM] : [...IDENTITY_M],
+    },
+  };
 }
 
 function onExpand(values: Array<string | number | bigint>): void {
@@ -527,20 +941,19 @@ function onActiveSafe(
   onActive(values.map(String));
 }
 
-defineExpose({ appendDefsGroup });
+defineExpose({ syncAfterEdit, selectPath });
 </script>
 
 <template>
   <aside class="node-tree-panel">
     <div class="panel-head">{{ t("app.nodes") }}</div>
-    <div v-if="!result" class="empty">{{ t("app.notLoaded") }}</div>
+    <PanelSkeleton v-if="loading && !treeData.length" :rows="8" />
     <t-tree
       v-else
-      ref="treeRef"
       :data="treeData"
       hover
       activable
-      transition
+      :transition="false"
       :label="true"
       :actived="actived"
       :expanded="expanded"
@@ -551,27 +964,63 @@ defineExpose({ appendDefsGroup });
       <template #label="{ node }">
         <span class="tree-label">
           <component
-            :is="(node.data as TreeItem | undefined)?.meta?.icon ?? RootListIcon"
+            :is="(node.data as TreeItem | undefined)?.meta?.icon || RootListIcon"
             class="tree-type-icon"
             size="16px"
           />
-          <span class="tree-label-text">{{ node.label }}</span>
+          <span
+            v-if="node.label"
+            class="tree-label-text"
+            :class="{
+              'is-use-target': (node.data as TreeItem | undefined)?.meta?.useTargetLabel,
+            }"
+          >{{ node.label }}</span>
           <span
             v-if="labelHint(node.data as TreeItem | undefined)"
             class="tree-label-hint"
           >{{ labelHint(node.data as TreeItem | undefined) }}</span>
-          <button
-            v-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-group'"
-            type="button"
-            class="tree-action"
-            :title="t('app.addGroup')"
-            :aria-label="t('app.addGroup')"
-            @click="onAddGroup"
-            @mousedown.stop
-          >
-            <AddIcon size="14px" />
-          </button>
         </span>
+      </template>
+      <template #operations="{ node }">
+        <t-button
+          v-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-group'"
+          class="tree-action"
+          theme="primary"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.addGroup')"
+          :aria-label="t('app.addGroup')"
+          @click="onAddGroup"
+          @mousedown.stop
+        >
+          <template #icon><AddIcon /></template>
+        </t-button>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-child'"
+          :options="groupMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          :max-height="420"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onGroupMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <span v-else class="tree-action-spacer" aria-hidden="true" />
       </template>
     </t-tree>
   </aside>
@@ -605,13 +1054,11 @@ defineExpose({ appendDefsGroup });
 }
 
 :deep(.tree-label) {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-  padding-right: 2px;
+  max-width: 100%;
 }
 
 :deep(.tree-label-text) {
@@ -620,6 +1067,12 @@ defineExpose({ appendDefsGroup });
   white-space: nowrap;
   font-size: 13px;
   min-width: 0;
+}
+
+:deep(.tree-label-text.is-use-target) {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--studio-muted);
 }
 
 :deep(.tree-label-hint) {
@@ -633,37 +1086,43 @@ defineExpose({ appendDefsGroup });
   opacity: 0.85;
 }
 
-:deep(.tree-action) {
-  flex-shrink: 0;
-  margin-left: auto;
+:deep(.t-tree__operations .tree-action.t-button),
+:deep(.t-tree__operations .tree-action.t-button .t-icon) {
+  color: var(--studio-accent);
+}
+
+:deep(.t-tree__operations .tree-action.t-button:hover),
+:deep(.t-tree__operations .tree-action.t-button:focus) {
+  color: var(--studio-accent);
+  background: rgba(47, 111, 237, 0.08);
+}
+
+:deep(.t-tree__operations .t-dropdown),
+:deep(.t-tree__operations .t-popup__reference) {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--studio-muted);
-  cursor: pointer;
-}
-
-:deep(.tree-action:hover) {
-  background: rgba(0, 0, 0, 0.06);
-  color: var(--studio-text, #333);
-}
-
-:deep(.t-tree__item) {
-  position: relative;
 }
 
 :deep(.t-tree__label) {
-  display: flex !important;
+  display: flex;
   align-items: center;
-  overflow: visible;
-  width: 100%;
-  flex: 1;
   min-width: 0;
+}
+
+:deep(.t-tree__operations) {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+:deep(.t-tree__operations:empty) {
+  display: none;
+}
+
+.tree-action-spacer {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  overflow: hidden;
 }
 </style>

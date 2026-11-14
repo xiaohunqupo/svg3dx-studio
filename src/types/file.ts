@@ -6,6 +6,7 @@ export interface StudioFile {
   dirty?: boolean;
 }
 
+/** Basic solids from svg3dx draft 0.1 §3.2.2. */
 export type GeometryKind =
   | "box"
   | "cylinder"
@@ -14,4 +15,7 @@ export type GeometryKind =
   | "torus"
   | "wedge"
   | "pyramid"
-  | "prism";
+  | "prism"
+  | "cutcylinder";
+
+export type AddChildKind = "group" | GeometryKind;

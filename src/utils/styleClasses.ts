@@ -13,6 +13,16 @@ function attr(attrs: string, name: string): string | null {
   return m ? (m[1] ?? m[2] ?? "").trim() || null : null;
 }
 
+function parseRuleBody(body: string): Record<string, string> {
+  const props: Record<string, string> = {};
+  const propRe = /(--[A-Za-z_][\w-]*|[A-Za-z_][\w-]*)\s*:\s*([^;]+)/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = propRe.exec(body))) {
+    props[pm[1].trim()] = pm[2].trim();
+  }
+  return props;
+}
+
 /** Parse `.class { ... }` rules from `<style>` blocks. */
 export function extractClassRules(svgText: string): ClassRuleMap {
   const out: ClassRuleMap = {};
@@ -25,13 +35,29 @@ export function extractClassRules(svgText: string): ClassRuleMap {
     while ((rm = ruleRe.exec(css))) {
       const className = rm[1];
       const body = rm[2];
-      const props: Record<string, string> = { ...(out[className] ?? {}) };
-      const propRe = /(--[A-Za-z_][\w-]*|[A-Za-z_][\w-]*)\s*:\s*([^;]+)/g;
-      let pm: RegExpExecArray | null;
-      while ((pm = propRe.exec(body))) {
-        props[pm[1].trim()] = pm[2].trim();
-      }
-      out[className] = props;
+      out[className] = {
+        ...(out[className] ?? {}),
+        ...parseRuleBody(body),
+      };
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse `:root { ... }` custom properties from `<style>` blocks
+ * (external / global params).
+ */
+export function extractRootProps(svgText: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let sm: RegExpExecArray | null;
+  while ((sm = styleRe.exec(svgText))) {
+    const css = sm[1];
+    const ruleRe = /:root\s*\{([^}]*)\}/gi;
+    let rm: RegExpExecArray | null;
+    while ((rm = ruleRe.exec(css))) {
+      Object.assign(out, parseRuleBody(rm[1] ?? ""));
     }
   }
   return out;
@@ -142,33 +168,32 @@ function formatRuleBody(props: Record<string, string>): string {
   );
 }
 
-/**
- * Replace (or insert) a single `.className { … }` rule inside the first `<style>` block.
- * Creates a `<style>` block when missing.
- */
-export function setClassRuleProps(
-  svgText: string,
-  className: string,
+function normalizePropMap(
   props: Record<string, string>
-): string {
-  const cls = className.trim().replace(/^\./, "");
-  if (!cls) return svgText;
-
+): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [k, v] of Object.entries(props)) {
     const name = normalizePropName(k);
     if (!name) continue;
-    normalized[name] = String(v).trim();
+    const value = String(v).trim();
+    // Empty values are not persisted — omit from the rule.
+    if (!value) continue;
+    normalized[name] = value;
   }
+  return normalized;
+}
 
-  const ruleText = `.${cls} {${formatRuleBody(normalized)}}`;
+function upsertStyleRule(
+  svgText: string,
+  ruleText: string,
+  matchRe: RegExp
+): string {
   const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/i;
   const m = styleRe.exec(svgText);
   if (m) {
     const css = m[1];
-    const ruleRe = new RegExp(`\\.${escapeRegExp(cls)}\\s*\\{[^}]*\\}`, "m");
-    const newCss = ruleRe.test(css)
-      ? css.replace(ruleRe, ruleText)
+    const newCss = matchRe.test(css)
+      ? css.replace(matchRe, ruleText)
       : `${css.replace(/\s*$/, "")}\n    ${ruleText}\n  `;
     const start = m.index;
     const end = start + m[0].length;
@@ -184,4 +209,36 @@ export function setClassRuleProps(
     return svgText.replace(/<svg\b[^>]*>/i, (tag) => `${tag}\n${styleBlock}`);
   }
   return styleBlock + svgText;
+}
+
+/**
+ * Replace (or insert) a single `.className { … }` rule inside the first `<style>` block.
+ * Creates a `<style>` block when missing.
+ */
+export function setClassRuleProps(
+  svgText: string,
+  className: string,
+  props: Record<string, string>
+): string {
+  const cls = className.trim().replace(/^\./, "");
+  if (!cls) return svgText;
+  const normalized = normalizePropMap(props);
+  const ruleText = `.${cls} {${formatRuleBody(normalized)}}`;
+  return upsertStyleRule(
+    svgText,
+    ruleText,
+    new RegExp(`\\.${escapeRegExp(cls)}\\s*\\{[^}]*\\}`, "m")
+  );
+}
+
+/**
+ * Replace (or insert) the `:root { … }` rule (global / external params).
+ */
+export function setRootRuleProps(
+  svgText: string,
+  props: Record<string, string>
+): string {
+  const normalized = normalizePropMap(props);
+  const ruleText = `:root {${formatRuleBody(normalized)}}`;
+  return upsertStyleRule(svgText, ruleText, /:root\s*\{[^}]*\}/m);
 }

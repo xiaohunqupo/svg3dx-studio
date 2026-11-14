@@ -9,10 +9,13 @@ import {
 const props = withDefaults(
   defineProps<{
     content: string;
+    /** Prefer this `s3dx:model` id when evaluating / displaying. */
+    model?: string;
     paramsEl?: HTMLElement | null;
     background?: number | string;
   }>(),
   {
+    model: undefined,
     paramsEl: null,
     background: 0xe8eef2,
   }
@@ -64,6 +67,7 @@ async function ensureViewer(): Promise<EmbedViewer | null> {
   embed = await createViewer(host.value, {
     paramsEl: props.paramsEl ?? undefined,
     background: props.background,
+    model: props.model,
     onResult: (r) => emit("result", r),
     onWarnings: (w) => w.forEach((m) => console.warn("[svg3dx]", m)),
   });
@@ -111,6 +115,14 @@ watch(
       return;
     }
     void loadContent(text, { soft: isStyleOnlyChange(from, text) });
+  }
+);
+
+watch(
+  () => props.model,
+  (model) => {
+    if (!embed) return;
+    void embed.setModel(model || undefined, { fitCamera: true });
   }
 );
 

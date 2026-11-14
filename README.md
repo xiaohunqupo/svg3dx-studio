@@ -8,6 +8,13 @@
 
 渲染与参数面板复用 [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer)。
 
+视口分层（均在本仓，不单独开库）：
+
+| 层 | 用途 |
+|----|------|
+| `ViewerHost` + `svg3dx-viewer` | 浏览页：轻量显示（无点击选中） |
+| `InteractHost` + `src/interact` | 编辑页：点击拾取 / 高亮等视口交互（不含文档编辑本身） |
+
 ## 关联库
 
 | 仓库 | 职责 |
@@ -44,7 +51,7 @@ npm run dev
 
 - 上侧：返回浏览、新增体元菜单、保存 / 导出
 - 左侧：求值后的 Models / Geometry 节点树
-- 中央：三维视口与交互
+- 中央：`InteractHost` 视口（基于 viewer 的交互层）
 - 右侧：外部参数 + 选中节点 JSON
 - 保存写入浏览器 IndexedDB 本地缓存
 

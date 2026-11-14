@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ChevronLeftIcon,
@@ -13,17 +13,21 @@ import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
 import NodeTreePanel, {
   type TreeSelectPayload,
 } from "@/components/NodeTreePanel.vue";
-import ViewerHost from "@/components/ViewerHost.vue";
+import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
+import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
+import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
+import InteractHost from "@/components/InteractHost.vue";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
+import type { AddChildKind } from "@/types/file";
 import { downloadText } from "@/utils/storage";
 import {
+  insertChildIntoGroup,
   insertEmptyGroup,
-  insertPrimitive,
-  PRIMITIVE_MENU,
+  removeGroupById,
 } from "@/utils/svgEdit";
-import { setClassRuleProps } from "@/utils/styleClasses";
-import type { GeometryKind } from "@/types/file";
+import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
+import { applyAttrsAtPath } from "@/utils/nodeXmlEdit";
 
 const props = defineProps<{ id: string }>();
 
@@ -32,18 +36,69 @@ const router = useRouter();
 const route = useRoute();
 const { t } = useI18n();
 
+const TREE_W_KEY = "svg3dx.studio.treeWidth";
+const INSPECTOR_W_KEY = "svg3dx.studio.inspectorWidth";
+const TREE_W_MIN = 180;
+const TREE_W_MAX = 480;
+const INSPECTOR_W_MIN = 220;
+const INSPECTOR_W_MAX = 520;
+const TREE_W_DEFAULT = 260;
+const INSPECTOR_W_DEFAULT = 280;
+
+function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const n = Number(localStorage.getItem(key));
+    if (Number.isFinite(n)) return Math.min(max, Math.max(min, n));
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 const result = ref<EvaluationResult | null>(null);
 const selected = ref<TreeSelectPayload | null>(null);
 const status = ref("");
 const draftContent = ref("");
-const treePanel = ref<{ appendDefsGroup: (id: string) => void } | null>(null);
+/** Currently displayed `s3dx:model` id. */
+const activeModelId = ref("");
+const treeWidth = ref(readStoredWidth(TREE_W_KEY, TREE_W_DEFAULT, TREE_W_MIN, TREE_W_MAX));
+const inspectorWidth = ref(
+  readStoredWidth(INSPECTOR_W_KEY, INSPECTOR_W_DEFAULT, INSPECTOR_W_MIN, INSPECTOR_W_MAX)
+);
+const resizing = ref<"tree" | "inspector" | null>(null);
+const treePanel = ref<{
+  syncAfterEdit: (
+    parentPath?: string,
+    opts?: { select?: "last-child" | "self" }
+  ) => void;
+  selectPath: (path: string | null | undefined) => void;
+} | null>(null);
+const interactHost = ref<{
+  setHighlight: (path: string | null | undefined) => void;
+} | null>(null);
+
+const workspaceEl = ref<HTMLElement | null>(null);
+const workspaceStyle = computed(() => ({
+  gridTemplateColumns: `${treeWidth.value}px 0px minmax(0, 1fr) 0px ${inspectorWidth.value}px`,
+}));
+
+const bootstrapping = ref(true);
 
 const file = computed(() => store.getById(props.id) ?? null);
 const dirty = computed(() => file.value?.dirty || draftContent.value !== (file.value?.content ?? ""));
+const pageReady = computed(() => store.ready && !!file.value && !bootstrapping.value);
+const contentLoading = computed(
+  () => pageReady.value && !!draftContent.value && !result.value
+);
 
 onMounted(async () => {
+  window.addEventListener("pointermove", onResizeMove);
+  window.addEventListener("pointerup", stopResize);
+  window.addEventListener("pointercancel", stopResize);
+  bootstrapping.value = true;
   if (!store.ready) await store.hydrate();
   syncFromStore();
+  bootstrapping.value = false;
 });
 
 watch(
@@ -67,37 +122,89 @@ function syncFromStore(): void {
   draftContent.value = f.content;
   selected.value = null;
   result.value = null;
+  activeModelId.value = "";
 }
 
 function goBrowse(): void {
   router.push({ name: "browse" });
 }
 
-async function onAddPrimitive(kind: GeometryKind): Promise<void> {
-  if (!file.value) return;
-  const next = insertPrimitive(draftContent.value, kind);
-  draftContent.value = next;
-  await store.updateContent(file.value.id, next, true);
-  status.value = `${t("app.addedPrimitive")} ${kind}`;
-  MessagePlugin.success(`${t("app.addedPrimitive")} ${kind}`);
+function syncActiveModelFromResult(r: EvaluationResult | null): void {
+  if (!r?.models?.length) {
+    activeModelId.value = "";
+    return;
+  }
+  const ids = new Set(r.models.map((m) => m.id));
+  // Prefer evaluator active model so viewport Model bar stays the source of truth.
+  if (r.active_model && ids.has(r.active_model)) {
+    activeModelId.value = r.active_model;
+    return;
+  }
+  if (activeModelId.value && ids.has(activeModelId.value)) return;
+  activeModelId.value =
+    r.models.find((m) => m.active)?.id ?? r.models[0]!.id;
+}
+
+function onResult(r: EvaluationResult): void {
+  result.value = r;
+  syncActiveModelFromResult(r);
 }
 
 async function onAddGroup(): Promise<void> {
   if (!file.value) return;
   const { content, id } = insertEmptyGroup(draftContent.value);
-  // Append tree node first (TDesign appendTo), then update document —
-  // content watch will see a single-append and skip full rebuild.
-  treePanel.value?.appendDefsGroup(id);
   draftContent.value = content;
   await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("defs");
   status.value = `${t("app.addedGroup")} ${id}`;
   MessagePlugin.success(`${t("app.addedGroup")} ${id}`);
 }
 
-function onPrimitiveMenu(item: { value?: string | number | object }): void {
-  const v = item?.value;
-  if (v === undefined || (typeof v !== "string" && typeof v !== "number")) return;
-  void onAddPrimitive(String(v) as GeometryKind);
+async function onAddChild(payload: {
+  parentPath: string;
+  parentGroupId: string;
+  kind: AddChildKind;
+}): Promise<void> {
+  if (!file.value) return;
+  const { content, childId, kind } = insertChildIntoGroup(
+    draftContent.value,
+    payload.parentGroupId,
+    payload.kind
+  );
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(payload.parentPath);
+  const name = childId ?? kind;
+  status.value = `${t("app.addedChild")} ${name}`;
+  MessagePlugin.success(`${t("app.addedChild")} ${name}`);
+}
+
+function treeParentPath(path: string): string {
+  if (path.includes(".")) return path.replace(/\.[^.]+$/, "");
+  if (path.startsWith("defs:")) return "defs";
+  return "defs";
+}
+
+async function onDeleteNode(payload: {
+  path: string;
+  groupId: string;
+}): Promise<void> {
+  if (!file.value) return;
+  const content = removeGroupById(draftContent.value, payload.groupId);
+  if (content === draftContent.value) return;
+  const selectPath = treeParentPath(payload.path);
+  draftContent.value = content;
+  if (selected.value?.kind === "geometry" && selected.value.path === payload.path) {
+    selected.value = null;
+    interactHost.value?.setHighlight(null);
+  }
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
+  status.value = `${t("app.deletedNode")} ${payload.groupId}`;
+  MessagePlugin.success(`${t("app.deletedNode")} ${payload.groupId}`);
 }
 
 async function onSave(): Promise<void> {
@@ -116,15 +223,32 @@ function onDownload(): void {
 
 function onSelect(payload: TreeSelectPayload): void {
   selected.value = payload;
+  interactHost.value?.setHighlight(payload.path);
+}
+
+function onViewportPick(path: string | null): void {
+  if (!path) {
+    selected.value = null;
+    treePanel.value?.selectPath(null);
+    interactHost.value?.setHighlight(null);
+    return;
+  }
+  treePanel.value?.selectPath(path);
 }
 
 async function onStyleParamsChange(propsMap: Record<string, string>): Promise<void> {
   const sel = selected.value;
   if (!sel || sel.kind !== "style" || !file.value) return;
-  const className = sel.name.split(/\s+/).filter(Boolean)[0];
+
+  const isRoot = sel.scope === "root" || sel.name === ":root";
+  const className = isRoot
+    ? ":root"
+    : sel.name.split(/\s+/).filter(Boolean)[0];
   if (!className) return;
 
-  const next = setClassRuleProps(draftContent.value, className, propsMap);
+  const next = isRoot
+    ? setRootRuleProps(draftContent.value, propsMap)
+    : setClassRuleProps(draftContent.value, className, propsMap);
   if (next === draftContent.value) {
     selected.value = { ...sel, props: propsMap };
     return;
@@ -132,12 +256,75 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
   draftContent.value = next;
   selected.value = { ...sel, props: propsMap };
   await store.updateContent(file.value.id, next, true);
-  status.value = `${t("app.updatedStyle")} .${className}`;
+  status.value = `${t("app.updatedStyle")} ${isRoot ? ":root" : `.${className}`}`;
 }
+
+async function onNodeAttrsChange(payload: {
+  path: string;
+  updates: Record<string, string>;
+}): Promise<void> {
+  if (!file.value) return;
+  const next = applyAttrsAtPath(draftContent.value, payload.path, payload.updates);
+  if (!next || next === draftContent.value) return;
+  draftContent.value = next;
+  await store.updateContent(file.value.id, next, true);
+  status.value = t("app.updatedNode");
+}
+
+function persistWidths(): void {
+  try {
+    localStorage.setItem(TREE_W_KEY, String(treeWidth.value));
+    localStorage.setItem(INSPECTOR_W_KEY, String(inspectorWidth.value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function onResizeMove(ev: PointerEvent): void {
+  const side = resizing.value;
+  const root = workspaceEl.value;
+  if (!side || !root) return;
+  const rect = root.getBoundingClientRect();
+  if (side === "tree") {
+    treeWidth.value = Math.min(
+      TREE_W_MAX,
+      Math.max(TREE_W_MIN, ev.clientX - rect.left)
+    );
+  } else {
+    inspectorWidth.value = Math.min(
+      INSPECTOR_W_MAX,
+      Math.max(INSPECTOR_W_MIN, rect.right - ev.clientX)
+    );
+  }
+}
+
+function stopResize(): void {
+  if (!resizing.value) return;
+  resizing.value = null;
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  persistWidths();
+}
+
+function startResize(side: "tree" | "inspector", ev: PointerEvent): void {
+  ev.preventDefault();
+  resizing.value = side;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onResizeMove);
+  window.removeEventListener("pointerup", stopResize);
+  window.removeEventListener("pointercancel", stopResize);
+  stopResize();
+});
 </script>
 
 <template>
-  <div v-if="file" class="edit-page">
+  <EditPageSkeleton v-if="!pageReady" />
+
+  <div v-else-if="file" class="edit-page">
     <header class="topbar">
       <div class="left">
         <t-button variant="text" @click="goBrowse">
@@ -148,15 +335,6 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
           {{ file.name }}
           <span v-if="dirty" class="dirty-tag">{{ t("app.unsaved") }}</span>
         </div>
-      </div>
-
-      <div class="menu">
-        <t-dropdown
-          :options="PRIMITIVE_MENU.map((p) => ({ content: p.label, value: p.kind }))"
-          @click="onPrimitiveMenu"
-        >
-          <t-button theme="default" variant="outline">{{ t("app.addPrimitive") }}</t-button>
-        </t-dropdown>
       </div>
 
       <div class="right">
@@ -173,32 +351,64 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
       </div>
     </header>
 
-    <div class="workspace">
+    <div
+      ref="workspaceEl"
+      class="workspace"
+      :class="{ resizing: !!resizing }"
+      :style="workspaceStyle"
+    >
       <NodeTreePanel
         ref="treePanel"
         class="tree"
         :result="result"
         :content="draftContent"
+        :loading="contentLoading"
         @select="onSelect"
         @add-group="onAddGroup"
+        @add-child="onAddChild"
+        @delete-node="onDeleteNode"
+      />
+      <div
+        class="resize-handle resize-handle--tree"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-valuenow="treeWidth"
+        :title="t('app.resizePanel')"
+        @pointerdown="(e) => startResize('tree', e)"
       />
 
       <main class="viewport">
-        <ViewerHost
+        <ViewportSkeleton v-if="contentLoading" />
+        <InteractHost
+          ref="interactHost"
           :key="file.id"
           :content="draftContent"
-          @result="(r) => (result = r)"
+          :model="activeModelId || undefined"
+          @result="onResult"
           @error="(m) => (status = m)"
+          @pick="onViewportPick"
         />
       </main>
 
+      <div
+        class="resize-handle resize-handle--inspector"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-valuenow="inspectorWidth"
+        :title="t('app.resizePanel')"
+        @pointerdown="(e) => startResize('inspector', e)"
+      />
       <aside class="inspector">
         <div class="panel-head">
           {{ selected?.kind === "style" ? t("app.styleParams") : t("app.nodeParams") }}
         </div>
+        <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
         <NodeInspectorPanel
+          v-else
           :selected="selected"
+          :content="draftContent"
           @style-params-change="onStyleParamsChange"
+          @node-attrs-change="onNodeAttrsChange"
         />
       </aside>
     </div>
@@ -217,7 +427,7 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
   height: 52px;
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr 1fr;
   align-items: center;
   gap: 12px;
   padding: 0 12px;
@@ -264,18 +474,51 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr 280px;
+  grid-template-columns: 260px 0px minmax(0, 1fr) 0px 280px;
   min-height: 0;
+}
+
+.workspace.resizing {
+  cursor: col-resize;
 }
 
 .tree,
 .inspector {
+  min-width: 0;
   min-height: 0;
+  overflow: auto;
 }
 
 .viewport {
+  position: relative;
+  min-width: 0;
   min-height: 0;
   background: #dfe7ee;
+}
+
+.resize-handle {
+  position: relative;
+  width: 0;
+  margin: 0 -3px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.resize-handle:hover::after,
+.workspace.resizing .resize-handle::after {
+  background: rgba(47, 111, 237, 0.35);
 }
 
 .inspector {
@@ -296,8 +539,9 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
 
 @media (max-width: 960px) {
   .workspace {
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 220px 0px minmax(0, 1fr) !important;
   }
+  .resize-handle--inspector,
   .inspector {
     display: none;
   }

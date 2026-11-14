@@ -17,6 +17,10 @@ const props = defineProps<{
   groupId?: string;
   /** Class rule properties (e.g. --D → 200). */
   modelValue: Record<string, string>;
+  /** Optional list header (grouped list). */
+  header?: string;
+  /** Hide the .className title row. */
+  hideTitle?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -68,8 +72,6 @@ function commit(): void {
 }
 
 function onAdd(): void {
-  // Local row only — wait until name/value blur before writing SVG,
-  // otherwise the viewer/tree refresh on every "添加参数".
   const used = new Set(rows.value.map((r) => normalizePropName(r.name)));
   let n = 1;
   let name = "--New";
@@ -89,7 +91,11 @@ function displayName(name: string): string {
 }
 
 function onNameInput(row: StyleParamRow, raw: string): void {
-  row.name = raw.startsWith("--") ? raw : raw.trim() ? `--${raw.replace(/^-+/, "")}` : raw;
+  row.name = raw.startsWith("--")
+    ? raw
+    : raw.trim()
+      ? `--${raw.replace(/^-+/, "")}`
+      : raw;
 }
 
 function onNameBlur(row: StyleParamRow): void {
@@ -99,8 +105,8 @@ function onNameBlur(row: StyleParamRow): void {
 </script>
 
 <template>
-  <div class="style-param-editor">
-    <div class="head">
+  <div class="style-param-editor" :class="{ 'has-header': !!header }">
+    <div v-if="!hideTitle" class="head">
       <div class="title-row">
         <span class="title">.{{ className }}</span>
         <span v-if="groupId" class="subtitle">{{ groupId }}</span>
@@ -111,7 +117,12 @@ function onNameBlur(row: StyleParamRow): void {
       </t-button>
     </div>
 
-    <t-list v-if="rows.length" :split="true" size="small" class="param-list">
+    <t-list
+      :header="header"
+      :split="true"
+      size="small"
+      class="param-list"
+    >
       <t-list-item v-for="row in rows" :key="row.key">
         <div class="param-row">
           <t-input
@@ -143,8 +154,16 @@ function onNameBlur(row: StyleParamRow): void {
           </t-button>
         </div>
       </t-list-item>
+      <t-list-item v-if="!rows.length">
+        <div class="empty">{{ t("app.noParams") }}</div>
+      </t-list-item>
+      <t-list-item v-if="hideTitle">
+        <t-button size="small" variant="outline" @click="onAdd">
+          <template #icon><AddIcon /></template>
+          {{ t("app.addParam") }}
+        </t-button>
+      </t-list-item>
     </t-list>
-    <div v-else class="empty">{{ t("app.noParams") }}</div>
   </div>
 </template>
 
@@ -154,6 +173,10 @@ function onNameBlur(row: StyleParamRow): void {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+}
+
+.has-header {
+  gap: 0;
 }
 
 .head {
@@ -207,7 +230,15 @@ function onNameBlur(row: StyleParamRow): void {
 .empty {
   color: var(--studio-muted);
   font-size: 13px;
-  padding: 8px 0;
+  padding: 2px 0;
+}
+
+:deep(.t-list__header) {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--studio-muted);
+  padding: 8px 10px;
+  background: #f7f8fa;
 }
 
 :deep(.t-list-item) {

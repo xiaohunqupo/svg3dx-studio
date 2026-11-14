@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Edit1Icon, FolderOpenIcon, RefreshIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
 import LocaleSwitch from "@/components/LocaleSwitch.vue";
+import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
+import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
 import { useFilesStore } from "@/stores/files";
 
@@ -13,13 +15,24 @@ const store = useFilesStore();
 const router = useRouter();
 const status = ref("");
 const dragOverMain = ref(false);
+const previewReady = ref(false);
 
 const showEmpty = computed(() => store.ready && store.isEmpty);
 const activeContent = computed(() => store.activeFile?.content ?? "");
+const showPreviewSkeleton = computed(
+  () => !!activeContent.value && !previewReady.value
+);
 
 onMounted(async () => {
   if (!store.ready) await store.hydrate();
 });
+
+watch(
+  () => store.activeId,
+  () => {
+    previewReady.value = false;
+  }
+);
 
 async function onFiles(list: FileList | File[]): Promise<void> {
   try {
@@ -70,7 +83,7 @@ function onMainDrop(e: DragEvent): void {
   <div class="browse-page">
     <header class="topbar">
       <div class="brand">
-        <span class="logo">s3dx</span>
+        <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
         <span class="product">svg3dx Studio</span>
       </div>
       <div class="actions">
@@ -92,9 +105,7 @@ function onMainDrop(e: DragEvent): void {
       <div class="status">{{ status || (store.activeFile?.name ?? "") }}</div>
     </header>
 
-    <div v-if="!store.ready" class="loading-wrap">
-      <t-loading text="读取本地缓存…" />
-    </div>
+    <BrowsePageSkeleton v-if="!store.ready" />
 
     <div v-else-if="showEmpty" class="empty-stage">
       <FileDropZone @files="onFiles" />
@@ -124,13 +135,17 @@ function onMainDrop(e: DragEvent): void {
       />
       <main class="viewport">
         <div v-if="dragOverMain" class="drop-mask">松开以添加到文件列表</div>
+        <ViewportSkeleton v-if="showPreviewSkeleton" />
         <ViewerHost
           v-if="activeContent"
+          :key="store.activeId ?? 'preview'"
           :content="activeContent"
           @error="(m) => (status = m)"
           @result="
-            (r) =>
-              (status = `${store.activeFile?.name ?? ''} · ${r.instructions.length} groups`)
+            (r) => {
+              previewReady = true;
+              status = `${store.activeFile?.name ?? ''} · ${r.instructions.length} groups`;
+            }
           "
         />
         <div v-else class="viewport-empty">选择左侧文件以预览</div>
@@ -160,15 +175,15 @@ function onMainDrop(e: DragEvent): void {
 
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
 .logo {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--studio-accent);
-  letter-spacing: 0.04em;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .product {
@@ -191,7 +206,6 @@ function onMainDrop(e: DragEvent): void {
   white-space: nowrap;
 }
 
-.loading-wrap,
 .empty-stage {
   flex: 1;
   display: flex;
@@ -224,6 +238,7 @@ function onMainDrop(e: DragEvent): void {
   position: relative;
   min-height: 0;
   background: #dfe7ee;
+  overflow: hidden;
 }
 
 .viewport-empty {
