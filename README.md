@@ -4,29 +4,31 @@
 
 # svg3dx-studio
 
-**svg3dx 编辑器**：Vite + Vue 3 + TDesign + three.js。打开 / 缓存本地文件，浏览预览，进入编辑页新增体元并保存。
+[中文](README.zh-CN.md) | English
 
-渲染与参数面板复用 [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer)。
+**svg3dx editor**: Vite + Vue 3 + TDesign + three.js. Open / cache local files, browse previews, enter the edit page to add solids, and save.
 
-视口分层（均在本仓，不单独开库）：
+Rendering and the params panel reuse [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer).
 
-| 层 | 用途 |
-|----|------|
-| `ViewerHost` + `svg3dx-viewer` | 浏览页：轻量显示（无点击选中） |
-| `InteractHost` + `src/interact` | 编辑页：点击拾取 / 高亮等视口交互（不含文档编辑本身） |
+Viewport layers (all in this repo — not separate packages):
 
-## 关联库
+| Layer | Role |
+|-------|------|
+| `ViewerHost` + `svg3dx-viewer` | Browse page: lightweight display (no click-to-select) |
+| `InteractHost` + `src/interact` | Edit page: pick / highlight and other viewport interaction (not document editing itself) |
 
-| 仓库 | 职责 |
-|------|------|
-| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | 格式规范与 samples |
-| [svg3dx-core](https://github.com/xiaohunqupo/svg3dx-core) | 解析求值引擎 |
-| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | 查看器组件 |
-| **svg3dx-studio**（本仓） | 编辑器应用 |
+## Related libraries
 
-## 开发
+| Repository | Role |
+|------------|------|
+| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | Format specification and samples |
+| [svg3dx-core](https://github.com/xiaohunqupo/svg3dx-core) | Parse / evaluate engine |
+| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | Viewer component |
+| **svg3dx-studio** (this repo) | Editor application |
 
-本机并列：`svg3dx`、`svg3dx-core`（已 `wasm-pack` 产出 `pkg/`）、`svg3dx-viewer`、本仓。
+## Develop
+
+Sibling checkouts: `svg3dx`, `svg3dx-core` (with `wasm-pack` output in `pkg/`), `svg3dx-viewer`, and this repo.
 
 ```powershell
 # 1) engine wasm
@@ -39,22 +41,22 @@ npm install
 npm run dev
 ```
 
-## 页面
+## Pages
 
-### 浏览（`/`）
+### Browse (`/`)
 
-- 无缓存文件：中央拖拽 / 点击选择区域
-- 有文件：左侧文件列表 + 中央 viewer 预览；可继续拖入追加
-- 文件名旁「编辑」进入编辑页；顶部可加载官方示例
+- No cached files: centered drag / click drop zone
+- With files: left file list + center viewer preview; drag to append more
+- 「编辑」next to a filename opens the edit page; top bar can load official samples
 
-### 编辑（`/edit/:id`）
+### Edit (`/edit/:id`)
 
-- 上侧：返回浏览、新增体元菜单、保存 / 导出
-- 左侧：求值后的 Models / Geometry 节点树
-- 中央：`InteractHost` 视口（基于 viewer 的交互层）
-- 右侧：外部参数 + 选中节点 JSON
-- 保存写入浏览器 IndexedDB 本地缓存
+- Top: back to browse, add-solid menu, save / export
+- Left: evaluated Models / Geometry tree
+- Center: `InteractHost` viewport (interaction layer on top of viewer)
+- Right: external params + selected-node JSON
+- Save writes to browser IndexedDB local cache
 
-## 许可证
+## License
 
-MIT OR MulanPSL-2.0。
+MIT OR MulanPSL-2.0.
