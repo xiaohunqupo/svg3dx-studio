@@ -25,7 +25,12 @@ function resolveSamplePath(): string | null {
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
+// GitHub Pages project site: https://<user>.github.io/svg3dx-studio/
+// Local / custom hosts: leave unset (defaults to "/").
+const base = process.env.VITE_BASE || "/";
+
 export default defineConfig({
+  base,
   plugins: [
     vue(),
     wasm(),

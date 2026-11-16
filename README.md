@@ -41,16 +41,18 @@ npm install
 npm run dev
 ```
 
-## CI
+## CI / GitHub Pages
 
 GitHub Actions (`.github/workflows/ci.yml`) on `main` / PR:
 
 1. Checkout sibling `svg3dx-core`, `svg3dx-viewer`, `svg3dx`
 2. `wasm-pack` → core `pkg/`
-3. `npm ci` in viewer + studio, then `npm run build` (vue-tsc + Vite)
-4. Upload `dist` artifact
+3. `npm ci` in viewer + studio, then `npm run build` (vue-tsc + Vite; `VITE_BASE=/svg3dx-studio/`)
+4. Upload `dist` artifact; on `main` also deploy to GitHub Pages
 
-## Pages
+Live: https://xiaohunqupo.github.io/svg3dx-studio/
+
+## App routes
 
 ### Browse (`/`)
 

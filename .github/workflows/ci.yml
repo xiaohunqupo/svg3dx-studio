@@ -1,4 +1,4 @@
-# Build pipeline: checkout core + viewer → wasm-pack → vite production build
+# Build pipeline: checkout core + viewer → wasm-pack → vite production build → GitHub Pages
 name: CI
 
 on:
@@ -12,10 +12,17 @@ concurrency:
   group: studio-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 env:
   CARGO_TERM_COLOR: always
   SVG3DX_CORE_ROOT: ${{ github.workspace }}/svg3dx-core
   SVG3DX_ROOT: ${{ github.workspace }}/svg3dx
+  # Project Pages URL path: https://<owner>.github.io/svg3dx-studio/
+  VITE_BASE: /svg3dx-studio/
 
 jobs:
   build:
@@ -104,9 +111,31 @@ jobs:
       - name: Build studio
         run: npm run build
 
-      - name: Upload dist
+      # SPA fallback for vue-router history mode on GitHub Pages
+      - name: Prepare Pages SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
           name: svg3dx-studio-dist
           path: svg3dx-studio/dist
           if-no-files-found: error
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: svg3dx-studio/dist
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
