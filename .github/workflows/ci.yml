@@ -92,7 +92,7 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/svg3dx-core/target
 
-      - name: npm ci (viewer — file: dependency + aliased src)
+      - name: "npm ci (viewer — file: dependency + aliased src)"
         run: npm ci
         working-directory: svg3dx-viewer
 
