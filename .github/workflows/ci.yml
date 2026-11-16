@@ -83,10 +83,12 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Build core WASM pkg/
+        # wasm-pack resolves relative --out-dir against the crate, not cwd.
+        # Studio/viewer aliases expect svg3dx-core/pkg (see build-wasm.mjs).
         run: |
           wasm-pack build crates/svg3dx-ffi-wasm \
             --target bundler \
-            --out-dir pkg \
+            --out-dir "${{ github.workspace }}/svg3dx-core/pkg" \
             --out-name svg3dx_ffi_wasm
         working-directory: svg3dx-core
         env:
