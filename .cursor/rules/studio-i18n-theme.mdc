@@ -29,13 +29,18 @@ Use `@/i18n` and `@/theme`. Keep `theme-mode` + `data-theme` on `<html>` in sync
 
 ## Colors
 
-- Interactive / list / component chrome → TDesign tokens (`--td-brand-color-light`, `--td-bg-color-container-hover`, `--td-text-color-primary`, …)
-- Page shell only (viewport wash, empty stage, panel frames) → `--studio-*` in `src/styles/global.css`, with light + dark definitions
-- Never hardcode light-only hex for hover/selected states (breaks dark mode contrast)
+Prefer **official TDesign tokens only** — do not maintain a parallel brand/shell palette.
+
+- Page / panels / text / borders / hover / brand → `--td-bg-color-page`, `--td-bg-color-container`, `--td-text-color-*`, `--td-component-border`, `--td-brand-color*`, …
+- Three.js clear color → read `--td-bg-color-page` (see `@/utils/viewportTheme`)
+- Viewer overlay chrome may use the thin `--svg3dx-chrome-*` aliases in `global.css` (they map to `--td-*`)
+- Never hardcode light-only hex (breaks dark mode)
 
 ```css
 /* ❌ */
 .item.active { background: #e4eefc; }
+.panel { background: var(--studio-panel); }
 /* ✅ */
 .item.active { background: var(--td-brand-color-light); }
+.panel { background: var(--td-bg-color-container); }
 ```

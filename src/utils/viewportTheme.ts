@@ -1,8 +1,8 @@
-/** Three.js scene background — follows `--studio-viewport`. */
+/** Three.js scene background — follows TDesign page background. */
 export function readViewportBackground(): string {
-  if (typeof document === "undefined") return "#dfe7ee";
+  if (typeof document === "undefined") return "#eeeeee";
   const value = getComputedStyle(document.documentElement)
-    .getPropertyValue("--studio-viewport")
+    .getPropertyValue("--td-bg-color-page")
     .trim();
-  return value || "#dfe7ee";
+  return value || "#eeeeee";
 }

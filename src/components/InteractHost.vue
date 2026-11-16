@@ -11,7 +11,7 @@ const props = withDefaults(
     /** Prefer this `s3dx:model` id when evaluating / displaying. */
     model?: string;
     paramsEl?: HTMLElement | null;
-    /** Override scene background; default follows theme `--studio-viewport`. */
+    /** Override scene background; default follows TDesign `--td-bg-color-page`. */
     background?: number | string;
   }>(),
   {

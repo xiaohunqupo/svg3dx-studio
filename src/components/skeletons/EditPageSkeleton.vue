@@ -71,8 +71,8 @@
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  background: var(--studio-panel);
-  border-bottom: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-bottom: 1px solid var(--td-component-border);
 }
 
 .brand,
@@ -99,22 +99,22 @@
 .inspector {
   min-height: 0;
   padding: 12px;
-  background: var(--studio-panel);
+  background: var(--td-bg-color-container);
   overflow: hidden;
 }
 
 .tree {
-  border-right: 1px solid var(--studio-line);
+  border-right: 1px solid var(--td-component-border);
 }
 
 .inspector {
-  border-left: 1px solid var(--studio-line);
+  border-left: 1px solid var(--td-component-border);
 }
 
 .viewport {
   min-height: 0;
   padding: 16px;
-  background: var(--studio-viewport);
+  background: var(--td-bg-color-page);
 }
 
 .viewport :deep(.t-skeleton__row),

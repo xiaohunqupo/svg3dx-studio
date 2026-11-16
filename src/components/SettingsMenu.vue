@@ -27,7 +27,7 @@ function onSchemeChange(value: string | number | boolean): void {
       <template #icon><SettingIcon /></template>
     </t-button>
     <template #content>
-      <div class="settings-panel" role="menu">
+      <t-space class="settings-panel" direction="vertical" size="large" role="menu">
         <div class="settings-row">
           <div class="settings-label">{{ t("app.language") }}</div>
           <t-radio-group
@@ -52,22 +52,19 @@ function onSchemeChange(value: string | number | boolean): void {
             <t-radio-button value="dark">{{ t("app.themeDark") }}</t-radio-button>
           </t-radio-group>
         </div>
-      </div>
+      </t-space>
     </template>
   </t-popup>
 </template>
 
 <style scoped>
 .settings-trigger {
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
 }
 
 .settings-panel {
   min-width: 220px;
   padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .settings-row {
@@ -79,7 +76,7 @@ function onSchemeChange(value: string | number | boolean): void {
 .settings-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   letter-spacing: 0.02em;
 }
 </style>

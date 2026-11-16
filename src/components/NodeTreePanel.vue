@@ -1036,8 +1036,8 @@ defineExpose({ syncAfterEdit, selectPath });
   min-height: 0;
   overflow: auto;
   padding: 10px 8px 16px;
-  background: var(--studio-panel);
-  border-right: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-border);
 }
 
 .panel-head {
@@ -1047,13 +1047,13 @@ defineExpose({ syncAfterEdit, selectPath });
 }
 
 .empty {
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   font-size: 13px;
   padding: 8px;
 }
 
 :deep(.tree-type-icon) {
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
 
@@ -1076,7 +1076,7 @@ defineExpose({ syncAfterEdit, selectPath });
 :deep(.tree-label-text.is-use-target) {
   font-size: 12px;
   font-weight: 400;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
 }
 
 :deep(.tree-label-hint) {
@@ -1086,19 +1086,19 @@ defineExpose({ syncAfterEdit, selectPath });
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   opacity: 0.85;
 }
 
 :deep(.t-tree__operations .tree-action.t-button),
 :deep(.t-tree__operations .tree-action.t-button .t-icon) {
-  color: var(--studio-accent);
+  color: var(--td-brand-color);
 }
 
 :deep(.t-tree__operations .tree-action.t-button:hover),
 :deep(.t-tree__operations .tree-action.t-button:focus) {
-  color: var(--studio-accent);
-  background: rgba(47, 111, 237, 0.08);
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
 }
 
 :deep(.t-tree__operations .t-dropdown),

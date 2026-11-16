@@ -48,8 +48,8 @@
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  background: var(--studio-panel);
-  border-bottom: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-bottom: 1px solid var(--td-component-border);
 }
 
 .actions {
@@ -67,15 +67,15 @@
 
 .sidebar {
   padding: 14px 12px;
-  background: var(--studio-panel);
-  border-right: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-border);
   overflow: hidden;
 }
 
 .viewport {
   min-height: 0;
   padding: 16px;
-  background: var(--studio-viewport);
+  background: var(--td-bg-color-page);
 }
 
 .viewport :deep(.t-skeleton__row),

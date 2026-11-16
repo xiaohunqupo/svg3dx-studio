@@ -13,7 +13,7 @@
   inset: 0;
   z-index: 2;
   padding: 16px;
-  background: var(--studio-viewport);
+  background: var(--td-bg-color-page);
   box-sizing: border-box;
 }
 

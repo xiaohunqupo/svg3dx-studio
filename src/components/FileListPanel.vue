@@ -5,7 +5,6 @@ import {
   ClearIcon,
   DeleteIcon,
   Edit1Icon,
-  FileIcon,
   FolderOpenIcon,
 } from "tdesign-icons-vue-next";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
@@ -47,16 +46,49 @@ function onEdit(id: string): void {
   router.push({ name: "edit", params: { id } });
 }
 
-async function onRemove(file: StudioFile): Promise<void> {
+/** Destructive confirm: red confirm, cancel as safer default (TDesign danger pattern). */
+function openDangerConfirm(options: {
+  header: string;
+  body: string;
+  confirmText: string;
+  onConfirm: () => void | Promise<void>;
+}): void {
   const dialog = DialogPlugin.confirm({
+    header: options.header,
+    body: options.body,
+    theme: "danger",
+    // Official default maps dialog danger → confirm primary; override to red.
+    confirmBtn: { content: options.confirmText, theme: "danger" },
+    cancelBtn: { content: t("app.cancel"), theme: "default" },
+    confirmOnEnter: false,
+    onOpened: () => {
+      // Prefer focusing Cancel so Enter/space is less likely to destroy data.
+      const root = document.querySelector(".t-dialog__ctx--active .t-dialog__footer");
+      const cancel = root?.querySelector<HTMLButtonElement>(
+        ".t-button:not(.t-button--theme-danger)"
+      );
+      cancel?.focus();
+    },
+    onConfirm: async () => {
+      // Hide first: clear-all unmounts this panel and can strand an open confirm.
+      dialog.hide();
+      try {
+        await options.onConfirm();
+      } finally {
+        dialog.destroy();
+      }
+    },
+  });
+}
+
+async function onRemove(file: StudioFile): Promise<void> {
+  openDangerConfirm({
     header: t("browse.removeFileHeader"),
     body: t("browse.removeFileBody", { name: file.name }),
-    confirmBtn: t("browse.removeFileConfirm"),
-    theme: "danger",
+    confirmText: t("browse.removeFileConfirm"),
     onConfirm: async () => {
       await store.remove(file.id);
       MessagePlugin.success(t("browse.removed"));
-      dialog.destroy();
     },
   });
 }
@@ -64,26 +96,13 @@ async function onRemove(file: StudioFile): Promise<void> {
 function onClearAll(): void {
   if (!props.files.length) return;
   const count = props.files.length;
-  const dialog = DialogPlugin.confirm({
+  openDangerConfirm({
     header: t("browse.clearCacheHeader"),
     body: t("browse.clearCacheBody", { n: count }),
-    confirmBtn: t("browse.clearCacheConfirm"),
-    theme: "danger",
-    // Close first: clearing empties the list and unmounts this panel,
-    // which can strand an async onConfirm (confirm appears to do nothing).
-    onConfirm: () => {
-      dialog.hide();
-      void store
-        .clearAll()
-        .then(() => {
-          MessagePlugin.success(t("browse.clearedCache"));
-        })
-        .catch((e) => {
-          MessagePlugin.error(e instanceof Error ? e.message : String(e));
-        })
-        .finally(() => {
-          dialog.destroy();
-        });
+    confirmText: t("browse.clearCacheConfirm"),
+    onConfirm: async () => {
+      await store.clearAll();
+      MessagePlugin.success(t("browse.clearedCache"));
     },
   });
 }
@@ -92,83 +111,90 @@ function onClearAll(): void {
 <template>
   <aside class="file-list-panel">
     <div class="panel-head">
-      <span class="panel-title">{{ t("browse.files") }}</span>
-      <div class="panel-head-right">
-        <span class="count">{{ files.length }}</span>
-        <t-tooltip :content="t('browse.clearCacheTooltip')">
-          <t-button
-            size="small"
-            variant="text"
-            theme="danger"
-            :disabled="!files.length"
-            @click="onClearAll"
-          >
-            <template #icon><ClearIcon /></template>
-            {{ t("browse.clearCache") }}
-          </t-button>
-        </t-tooltip>
+      <span class="panel-title">
+        {{ t("browse.files") }}
+        <t-tag size="small" variant="light">{{ files.length }}</t-tag>
+      </span>
+      <t-tooltip :content="t('browse.clearCacheTooltip')">
+        <t-button
+          size="small"
+          variant="text"
+          theme="danger"
+          :disabled="!files.length"
+          @click="onClearAll"
+        >
+          <template #icon><ClearIcon /></template>
+          {{ t("browse.clearCache") }}
+        </t-button>
+      </t-tooltip>
+    </div>
+
+    <div class="add-row">
+      <FileDropZone compact class="drop-inline" @files="emit('files', $event)" />
+      <div class="sample-extra">
+        <t-link
+          theme="primary"
+          hover="color"
+          :disabled="loadingSamples"
+          @click="emit('fetch-samples')"
+        >
+          <template #prefix-icon><FolderOpenIcon /></template>
+          {{
+            loadingSamples
+              ? t("browse.fetchingSamples")
+              : t("browse.fetchSamples")
+          }}
+        </t-link>
       </div>
     </div>
 
-    <FileDropZone compact class="drop-inline" @files="emit('files', $event)" />
-    <div class="sample-extra">
-      <t-link
-        theme="primary"
-        :disabled="loadingSamples"
-        @click="emit('fetch-samples')"
-      >
-        <template #prefix-icon><FolderOpenIcon /></template>
-        {{
-          loadingSamples
-            ? t("browse.fetchingSamples")
-            : t("browse.fetchSamples")
-        }}
-      </t-link>
-    </div>
-
-    <ul class="list">
-      <li
+    <t-list class="list" size="small" :split="false">
+      <t-list-item
         v-for="file in sorted"
         :key="file.id"
         class="item"
         :class="{ active: file.id === activeId }"
         @click="emit('select', file.id)"
       >
-        <FileIcon class="file-icon" />
         <div class="meta">
           <div class="name" :title="file.name">
-            {{ file.name }}
-            <span v-if="file.dirty" class="dirty">•</span>
+            <span class="name-text">{{ file.name }}</span>
+            <span
+              v-if="file.dirty"
+              class="dirty-dot"
+              :title="t('app.unsaved')"
+              :aria-label="t('app.unsaved')"
+            />
           </div>
-          <div class="time">
-            {{ formatTime(file.updatedAt) }}
+          <div class="time">{{ formatTime(file.updatedAt) }}</div>
+        </div>
+        <template #action>
+          <div class="actions" @click.stop>
+            <t-tooltip :content="t('browse.edit')">
+              <t-button
+                shape="square"
+                variant="text"
+                size="small"
+                @click="onEdit(file.id)"
+              >
+                <template #icon><Edit1Icon /></template>
+              </t-button>
+            </t-tooltip>
+            <t-tooltip :content="t('browse.removeFile')">
+              <t-button
+                shape="square"
+                variant="text"
+                size="small"
+                theme="danger"
+                @click="onRemove(file)"
+              >
+                <template #icon><DeleteIcon /></template>
+              </t-button>
+            </t-tooltip>
           </div>
-        </div>
-        <div class="actions" @click.stop>
-          <t-tooltip :content="t('browse.edit')">
-            <t-button
-              shape="square"
-              variant="text"
-              size="small"
-              @click="onEdit(file.id)"
-            >
-              <template #icon><Edit1Icon /></template>
-            </t-button>
-          </t-tooltip>
-          <t-tooltip :content="t('browse.removeFile')">
-            <t-button
-              shape="square"
-              variant="text"
-              size="small"
-              theme="danger"
-              @click="onRemove(file)"
-            >
-              <template #icon><DeleteIcon /></template>
-            </t-button>
-          </t-tooltip>
-        </div>
-      </li>
-    </ul>
+        </template>
+      </t-list-item>
+    </t-list>
   </aside>
 </template>
 
@@ -178,8 +204,8 @@ function onClearAll(): void {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--studio-panel);
-  border-right: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-border);
 }
 
 .panel-head {
@@ -187,60 +213,46 @@ function onClearAll(): void {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 14px 14px 8px;
-}
-
-.panel-head-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
+  padding: 12px 12px 6px;
 }
 
 .panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--studio-ink);
+  color: var(--td-text-color-primary);
 }
 
-.count {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 999px;
-  padding: 1px 8px;
+.add-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 8px;
 }
 
 .drop-inline {
-  margin: 0 12px 0;
-  width: auto !important;
+  width: 100% !important;
 }
 
 .sample-extra {
   display: flex;
   justify-content: center;
-  padding: 8px 12px 10px;
-  font-size: 13px;
 }
 
 .list {
-  list-style: none;
-  margin: 0;
-  padding: 0 8px 12px;
-  overflow: auto;
   flex: 1;
   min-height: 0;
+  overflow: auto;
+  padding: 0 6px 12px;
+  background: transparent;
 }
 
 .item {
-  display: grid;
-  grid-template-columns: 20px 1fr auto;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 8px;
-  border-radius: 8px;
-  color: var(--td-text-color-primary);
   cursor: pointer;
+  border-radius: var(--td-radius-default);
+  padding: 6px 8px !important;
   transition: background 0.12s ease;
 }
 
@@ -252,15 +264,20 @@ function onClearAll(): void {
   background: var(--td-brand-color-light);
 }
 
-.file-icon {
-  color: var(--td-brand-color);
-}
-
 .meta {
   min-width: 0;
+  flex: 1;
 }
 
 .name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.name-text {
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary);
@@ -269,20 +286,23 @@ function onClearAll(): void {
   text-overflow: ellipsis;
 }
 
-.dirty {
-  color: var(--td-warning-color);
-  margin-left: 2px;
+.dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--td-warning-color);
 }
 
 .time {
+  margin-top: 2px;
   font-size: 11px;
   color: var(--td-text-color-secondary);
-  margin-top: 2px;
 }
 
 .actions {
   display: flex;
-  opacity: 0.55;
+  opacity: 0.45;
 }
 
 .item:hover .actions,

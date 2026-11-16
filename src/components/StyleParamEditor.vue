@@ -128,7 +128,7 @@ function onNameBlur(row: StyleParamRow): void {
           <t-input
             :model-value="displayName(row.name)"
             size="small"
-            placeholder="名称"
+            :placeholder="t('app.paramName')"
             class="name-input"
             @update:model-value="(v) => onNameInput(row, String(v ?? ''))"
             @blur="onNameBlur(row)"
@@ -137,7 +137,7 @@ function onNameBlur(row: StyleParamRow): void {
           <t-input
             v-model="row.value"
             size="small"
-            placeholder="值"
+            :placeholder="t('app.paramValue')"
             class="value-input"
             @blur="commit"
             @enter="commit"
@@ -147,7 +147,7 @@ function onNameBlur(row: StyleParamRow): void {
             variant="text"
             theme="danger"
             shape="square"
-            :aria-label="`删除 ${row.name}`"
+            :aria-label="t('app.deleteParamNamed', { name: row.name })"
             @click="onRemove(row.key)"
           >
             <template #icon><DeleteIcon /></template>
@@ -203,15 +203,15 @@ function onNameBlur(row: StyleParamRow): void {
 
 .subtitle {
   font-size: 11px;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
 
 .param-list {
-  border: 1px solid var(--studio-line);
-  border-radius: 8px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-medium);
   overflow: hidden;
-  background: #fff;
+  background: var(--td-bg-color-container);
 }
 
 .param-row {
@@ -228,7 +228,7 @@ function onNameBlur(row: StyleParamRow): void {
 }
 
 .empty {
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   font-size: 13px;
   padding: 2px 0;
 }
@@ -236,9 +236,9 @@ function onNameBlur(row: StyleParamRow): void {
 :deep(.t-list__header) {
   font-size: 12px;
   font-weight: 600;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   padding: 8px 10px;
-  background: #f7f8fa;
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 :deep(.t-list-item) {

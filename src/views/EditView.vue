@@ -339,7 +339,15 @@ onBeforeUnmount(() => {
       </div>
       <div class="file-name">
         {{ file.name }}
-        <span v-if="dirty" class="dirty-tag">{{ t("app.unsaved") }}</span>
+        <t-tag
+          v-if="dirty"
+          class="dirty-tag"
+          size="small"
+          theme="warning"
+          variant="light"
+        >
+          {{ t("app.unsaved") }}
+        </t-tag>
       </div>
       <div class="right">
         <span class="status">{{ status }}</span>
@@ -433,8 +441,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  background: var(--studio-panel);
-  border-bottom: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-bottom: 1px solid var(--td-component-border);
 }
 
 .brand {
@@ -465,6 +473,9 @@ onBeforeUnmount(() => {
 }
 
 .file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   font-size: 14px;
   white-space: nowrap;
@@ -474,10 +485,7 @@ onBeforeUnmount(() => {
 }
 
 .dirty-tag {
-  margin-left: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--studio-dirty);
+  flex-shrink: 0;
 }
 
 .right {
@@ -486,7 +494,7 @@ onBeforeUnmount(() => {
 
 .status {
   font-size: 12px;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -515,7 +523,7 @@ onBeforeUnmount(() => {
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: var(--studio-viewport);
+  background: var(--td-bg-color-page);
 }
 
 .resize-handle {
@@ -540,12 +548,12 @@ onBeforeUnmount(() => {
 
 .resize-handle:hover::after,
 .workspace.resizing .resize-handle::after {
-  background: rgba(47, 111, 237, 0.35);
+  background: var(--td-brand-color-light);
 }
 
 .inspector {
-  background: var(--studio-panel);
-  border-left: 1px solid var(--studio-line);
+  background: var(--td-bg-color-container);
+  border-left: 1px solid var(--td-component-border);
   padding: 10px 12px;
   overflow: auto;
 }
@@ -555,7 +563,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   margin-bottom: 8px;
 }
 

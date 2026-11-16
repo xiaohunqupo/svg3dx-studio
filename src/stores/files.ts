@@ -89,14 +89,7 @@ export const useFilesStore = defineStore("files", () => {
   }
 
   async function addBrowserFiles(list: FileList | File[]): Promise<StudioFile[]> {
-    const arr = Array.from(list).filter(
-      (f) =>
-        /\.(svg|svg3dx)$/i.test(f.name) ||
-        f.type.includes("svg") ||
-        f.type === "" ||
-        f.type === "text/xml" ||
-        f.type === "application/xml"
-    );
+    const arr = Array.from(list).filter((f) => /\.(svg|svg3dx)$/i.test(f.name));
     if (!arr.length) return [];
 
     const created: StudioFile[] = [];

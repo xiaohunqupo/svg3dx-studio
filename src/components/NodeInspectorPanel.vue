@@ -436,10 +436,10 @@ function onStyleChange(map: Record<string, string>): void {
 }
 
 .param-list {
-  border: 1px solid var(--studio-line);
-  border-radius: 8px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-medium);
   overflow: hidden;
-  background: #fff;
+  background: var(--td-bg-color-container);
 }
 
 .param-row {
@@ -465,7 +465,7 @@ function onStyleChange(map: Record<string, string>): void {
 .field-desc {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
 }
 
 .name {
@@ -486,16 +486,16 @@ function onStyleChange(map: Record<string, string>): void {
 }
 
 .muted {
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   font-size: 13px;
 }
 
 :deep(.t-list__header) {
   font-size: 12px;
   font-weight: 600;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   padding: 8px 10px;
-  background: #f7f8fa;
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 :deep(.t-list-item) {
