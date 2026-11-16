@@ -352,6 +352,10 @@ function kindIcon(kind: string): Component {
     case "sector-cylinder":
     case "pipe":
       return CircleIcon;
+    case "line":
+    case "arc":
+    case "path":
+      return Chart3DIcon;
     case "extrude":
     case "revolve":
     case "loft":

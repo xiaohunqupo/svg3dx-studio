@@ -69,6 +69,55 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "topCenterPt" },
     { name: "angle", placeholder: "360" },
   ],
+  line: [
+    { name: "from", placeholder: "0 0 0" },
+    { name: "to", placeholder: "100 0 0" },
+  ],
+  arc: [
+    { name: "center", placeholder: "0 0 0" },
+    { name: "normal", placeholder: "0 0 1" },
+    { name: "radius" },
+    { name: "xDir", placeholder: "1 0 0" },
+    { name: "startAngle", placeholder: "0" },
+    { name: "angle", placeholder: "90" },
+    { name: "from" },
+    { name: "to" },
+  ],
+  path: [{ name: "points" }],
+  extrude: [
+    { name: "origin", placeholder: "0 0 0" },
+    { name: "normal", placeholder: "0 0 1" },
+    { name: "xDir", placeholder: "1 0 0" },
+    { name: "dir", placeholder: "0 0 1" },
+    { name: "length" },
+  ],
+  revolve: [
+    { name: "origin", placeholder: "0 0 0" },
+    { name: "normal", placeholder: "0 0 1" },
+    { name: "xDir", placeholder: "1 0 0" },
+    { name: "axisOrigin" },
+    { name: "axisDir", placeholder: "0 0 1" },
+    { name: "angle", placeholder: "360" },
+  ],
+  loft: [
+    { name: "solid", placeholder: "true" },
+    { name: "blend", placeholder: "linear" },
+  ],
+  sweep: [
+    { name: "orient", placeholder: "frenet" },
+    { name: "refDir" },
+    { name: "solid", placeholder: "true" },
+    { name: "corner", placeholder: "arc" },
+    { name: "cornerRadius", placeholder: "50" },
+    { name: "path" },
+  ],
+  pipe: [
+    { name: "radius" },
+    { name: "innerRadius" },
+    { name: "corner", placeholder: "arc" },
+    { name: "cornerRadius", placeholder: "80" },
+    { name: "path" },
+  ],
 };
 
 export const GROUP_BASIC_FIELDS: AttrField[] = [

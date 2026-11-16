@@ -12,6 +12,40 @@ const DEFAULT_SNIPPETS: Record<GeometryKind, string> = {
   pyramid: `<s3dx:pyramid length="80" width="80" height="60" lengthVec="1 0 0" widthVec="0 1 0"/>`,
   prism: `<s3dx:prism points="0 0 0  60 0 0  60 40 0  0 40 0" height="40"/>`,
   "sector-cylinder": `<s3dx:sector-cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
+  line: `<s3dx:line from="0 0 0" to="200 0 0"/>`,
+  arc: `<s3dx:arc center="0 0 0" normal="0 0 1" radius="50" xDir="1 0 0" startAngle="0" angle="90"/>`,
+  path: `<s3dx:path>
+        <s3dx:line from="0 0 0" to="200 0 0"/>
+        <s3dx:arc center="200 0 75" normal="0 -1 0" radius="75" from="200 0 0" to="275 0 75"/>
+        <s3dx:line from="275 0 75" to="275 0 200"/>
+      </s3dx:path>`,
+  extrude: `<s3dx:extrude origin="0 0 0" normal="0 0 1" length="60">
+        <s3dx:section>
+          <path d="M 0 0 L 100 0 L 100 50 L 0 50 Z"/>
+        </s3dx:section>
+      </s3dx:extrude>`,
+  revolve: `<s3dx:revolve axisOrigin="0 0 0" axisDir="0 1 0" angle="360">
+        <s3dx:section>
+          <path d="M 40 0 L 80 0 L 80 60 L 40 40 Z"/>
+        </s3dx:section>
+      </s3dx:revolve>`,
+  loft: `<s3dx:loft solid="true" blend="linear">
+        <s3dx:section origin="0 0 0" normal="0 0 1">
+          <path d="M -50 -40 L 50 -40 L 50 40 L -50 40 Z"/>
+        </s3dx:section>
+        <s3dx:section origin="0 0 80" normal="0 0 1">
+          <circle cx="0" cy="0" r="30"/>
+        </s3dx:section>
+      </s3dx:loft>`,
+  sweep: `<s3dx:sweep orient="frenet" solid="true" corner="arc" cornerRadius="50">
+        <s3dx:section>
+          <path d="M -10 -5 L 10 -5 L 10 5 L -10 5 Z"/>
+        </s3dx:section>
+        <s3dx:path points="0 0 0  200 0 0  200 0 200"/>
+      </s3dx:sweep>`,
+  pipe: `<s3dx:pipe radius="20" innerRadius="16" corner="arc" cornerRadius="80">
+        <s3dx:path points="0 0 0  300 0 0  300 0 300"/>
+      </s3dx:pipe>`,
 };
 
 function ensureSvgShell(content: string): string {
@@ -274,4 +308,12 @@ export const PRIMITIVE_MENU: { kind: GeometryKind; labelZh: string; labelEn: str
     { kind: "prism", labelZh: "棱柱", labelEn: "Prism" },
     { kind: "sector-cylinder", labelZh: "扇形柱", labelEn: "Sector Cylinder" },
     { kind: "pyramid", labelZh: "棱锥", labelEn: "Pyramid" },
+    { kind: "line", labelZh: "直线", labelEn: "Line" },
+    { kind: "arc", labelZh: "圆弧", labelEn: "Arc" },
+    { kind: "path", labelZh: "路径", labelEn: "Path" },
+    { kind: "extrude", labelZh: "拉伸", labelEn: "Extrude" },
+    { kind: "revolve", labelZh: "旋转", labelEn: "Revolve" },
+    { kind: "loft", labelZh: "放样", labelEn: "Loft" },
+    { kind: "sweep", labelZh: "扫掠", labelEn: "Sweep" },
+    { kind: "pipe", labelZh: "圆管", labelEn: "Pipe" },
   ];

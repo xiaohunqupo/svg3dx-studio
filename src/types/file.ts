@@ -6,7 +6,7 @@ export interface StudioFile {
   dirty?: boolean;
 }
 
-/** Basic solids from svg3dx draft 0.1 §3.2.2. */
+/** Insertable geometry kinds (svg3dx draft 0.1). */
 export type GeometryKind =
   | "box"
   | "cylinder"
@@ -16,6 +16,14 @@ export type GeometryKind =
   | "wedge"
   | "pyramid"
   | "prism"
-  | "sector-cylinder";
+  | "sector-cylinder"
+  | "line"
+  | "arc"
+  | "path"
+  | "extrude"
+  | "revolve"
+  | "loft"
+  | "sweep"
+  | "pipe";
 
 export type AddChildKind = "group" | GeometryKind;
