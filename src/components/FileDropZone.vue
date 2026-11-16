@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { FileAddIcon, UploadIcon } from "tdesign-icons-vue-next";
+import { useI18n } from "@/i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -9,7 +10,6 @@ const props = withDefaults(
   }>(),
   {
     compact: false,
-    hint: "支持 .svg / .svg3dx，可多选",
   }
 );
 
@@ -17,12 +17,14 @@ const emit = defineEmits<{
   files: [FileList | File[]];
 }>();
 
+const { t } = useI18n();
 const dragging = ref(false);
 const inputRef = ref<HTMLInputElement | null>(null);
 
 const title = computed(() =>
-  props.compact ? "拖拽文件到此处，或点击添加" : "打开 svg3dx 文件"
+  props.compact ? t("browse.dropCompact") : t("browse.openTitle")
 );
+const resolvedHint = computed(() => props.hint ?? t("browse.dropHint"));
 
 function openPicker(): void {
   inputRef.value?.click();
@@ -70,9 +72,9 @@ defineExpose({ openPicker });
       <FileAddIcon v-else size="22px" />
     </div>
     <div class="title">{{ title }}</div>
-    <div class="hint">{{ hint }}</div>
+    <div class="hint">{{ resolvedHint }}</div>
     <t-button v-if="!compact" theme="primary" variant="base" @click.stop="openPicker">
-      选择文件
+      {{ t("browse.chooseFiles") }}
     </t-button>
   </div>
 </template>
@@ -89,7 +91,7 @@ defineExpose({ openPicker });
   padding: 36px 28px;
   border: 1.5px dashed var(--studio-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--studio-surface-soft);
   color: var(--studio-ink);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
@@ -99,7 +101,7 @@ defineExpose({ openPicker });
 .dropzone:hover,
 .dropzone.dragging {
   border-color: var(--studio-accent);
-  background: #f3f7ff;
+  background: var(--studio-surface-hover);
   box-shadow: 0 8px 28px rgba(47, 111, 237, 0.08);
 }
 
@@ -111,7 +113,7 @@ defineExpose({ openPicker });
   justify-content: flex-start;
   gap: 10px;
   border-radius: 8px;
-  background: #f7f9fc;
+  background: var(--studio-surface-compact);
 }
 
 .dropzone.compact .title {

@@ -1,0 +1,41 @@
+---
+description: Locale/theme defaults, i18n strings, TDesign color tokens
+globs: src/**/*.{vue,ts,css}
+alwaysApply: false
+---
+
+# i18n & theme
+
+## Precedence
+
+1. Explicit user choice in `localStorage` (`svg3dx-studio-locale` / `svg3dx-studio-color-scheme`)
+2. Else browser: language via `navigator.languages`, color via `prefers-color-scheme`
+3. Persist **only** inside `setLocale` / `setColorScheme` — never write defaults on first load
+
+Use `@/i18n` and `@/theme`. Keep `theme-mode` + `data-theme` on `<html>` in sync. Wrap app with `t-config-provider` so TDesign locale follows `locale`.
+
+## Strings
+
+- No hardcoded UI Chinese/English in views/components
+- Add keys to `src/i18n/messages.ts` (`app.*` / `browse.*`) for both `zh` and `en`
+- Call `t("dotted.key")` or `t("key", { n })` for `{n}` / `{name}` placeholders
+
+```vue
+<!-- ❌ -->
+<span>获取官方示例</span>
+<!-- ✅ -->
+<span>{{ t("browse.fetchSamples") }}</span>
+```
+
+## Colors
+
+- Interactive / list / component chrome → TDesign tokens (`--td-brand-color-light`, `--td-bg-color-container-hover`, `--td-text-color-primary`, …)
+- Page shell only (viewport wash, empty stage, panel frames) → `--studio-*` in `src/styles/global.css`, with light + dark definitions
+- Never hardcode light-only hex for hover/selected states (breaks dark mode contrast)
+
+```css
+/* ❌ */
+.item.active { background: #e4eefc; }
+/* ✅ */
+.item.active { background: var(--td-brand-color-light); }
+```

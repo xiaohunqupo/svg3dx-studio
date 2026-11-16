@@ -75,7 +75,7 @@
 .viewport {
   min-height: 0;
   padding: 16px;
-  background: #dfe7ee;
+  background: var(--studio-viewport);
 }
 
 .viewport :deep(.t-skeleton__row),

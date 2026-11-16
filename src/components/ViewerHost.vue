@@ -5,6 +5,8 @@ import {
   type EmbedViewer,
   type EvaluationResult,
 } from "svg3dx-viewer";
+import { useTheme } from "@/theme";
+import { readViewportBackground } from "@/utils/viewportTheme";
 
 const props = withDefaults(
   defineProps<{
@@ -12,14 +14,17 @@ const props = withDefaults(
     /** Prefer this `s3dx:model` id when evaluating / displaying. */
     model?: string;
     paramsEl?: HTMLElement | null;
+    /** Override scene background; default follows theme `--studio-viewport`. */
     background?: number | string;
   }>(),
   {
     model: undefined,
     paramsEl: null,
-    background: 0xe8eef2,
+    background: undefined,
   }
 );
+
+const { colorScheme } = useTheme();
 
 const emit = defineEmits<{
   result: [EvaluationResult];
@@ -61,12 +66,20 @@ function isEvalNoopChange(prev: string, next: string): boolean {
   return evalAffectingKey(prev) === evalAffectingKey(next);
 }
 
+function resolveBackground(): number | string {
+  return props.background ?? readViewportBackground();
+}
+
+function syncBackground(): void {
+  embed?.setBackground(resolveBackground());
+}
+
 async function ensureViewer(): Promise<EmbedViewer | null> {
   if (embed) return embed;
   if (!host.value) return null;
   embed = await createViewer(host.value, {
     paramsEl: props.paramsEl ?? undefined,
-    background: props.background,
+    background: resolveBackground(),
     model: props.model,
     onResult: (r) => emit("result", r),
     onWarnings: (w) => w.forEach((m) => console.warn("[svg3dx]", m)),
@@ -123,6 +136,13 @@ watch(
   (model) => {
     if (!embed) return;
     void embed.setModel(model || undefined, { fitCamera: true });
+  }
+);
+
+watch(
+  [colorScheme, () => props.background],
+  () => {
+    syncBackground();
   }
 );
 

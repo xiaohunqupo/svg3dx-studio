@@ -133,6 +133,10 @@ export class InteractViewport {
     return this.viewer.getResult();
   }
 
+  setBackground(color: number | string): void {
+    this.viewer.setBackground(color);
+  }
+
   /** Highlight geometry matching a Studio tree path (or clear with null). */
   setHighlight(path: string | null | undefined): void {
     this.highlightPath = path || null;

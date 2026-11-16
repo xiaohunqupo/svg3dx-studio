@@ -5,10 +5,11 @@ import { Edit1Icon, FolderOpenIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
-import LocaleSwitch from "@/components/LocaleSwitch.vue";
+import SettingsMenu from "@/components/SettingsMenu.vue";
 import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
+import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import {
   fetchOfficialSamples,
@@ -17,6 +18,7 @@ import {
 
 const store = useFilesStore();
 const router = useRouter();
+const { t } = useI18n();
 const status = ref("");
 const dragOverMain = ref(false);
 const previewReady = ref(false);
@@ -43,11 +45,12 @@ async function onFiles(list: FileList | File[]): Promise<void> {
   try {
     const created = await store.addBrowserFiles(list);
     if (!created.length) {
-      MessagePlugin.warning("未识别到 .svg / .svg3dx 文件");
+      MessagePlugin.warning(t("browse.noSvgFiles"));
       return;
     }
-    status.value = `已添加 ${created.length} 个文件`;
-    MessagePlugin.success(`已添加 ${created.length} 个文件`);
+    const msg = t("browse.filesAdded", { n: created.length });
+    status.value = msg;
+    MessagePlugin.success(msg);
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
   }
@@ -57,7 +60,7 @@ async function loadSample(): Promise<void> {
   if (loadingSamples.value) return;
   loadingSamples.value = true;
   try {
-    status.value = "正在获取官方示例…";
+    status.value = t("browse.fetchingSamplesStatus");
     const samples = await fetchOfficialSamples();
     for (const sample of samples) {
       await store.upsertFromText(sample.name, sample.content, { select: false });
@@ -65,8 +68,9 @@ async function loadSample(): Promise<void> {
     const preferred = preferredSampleName(samples);
     const active = store.files.find((f) => f.name === preferred);
     if (active) store.select(active.id);
-    status.value = `已获取 ${samples.length} 个官方示例`;
-    MessagePlugin.success(`已获取 ${samples.length} 个官方示例`);
+    const msg = t("browse.samplesLoaded", { n: samples.length });
+    status.value = msg;
+    MessagePlugin.success(msg);
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
     status.value = String(e);
@@ -78,7 +82,7 @@ async function loadSample(): Promise<void> {
 async function goEdit(): Promise<void> {
   const id = store.activeId;
   if (!id) {
-    MessagePlugin.warning("请先选择文件");
+    MessagePlugin.warning(t("browse.selectFileFirst"));
     return;
   }
   await router.push(`/edit/${id}`);
@@ -99,7 +103,7 @@ function onMainDrop(e: DragEvent): void {
         <span class="product">svg3dx Studio</span>
       </div>
       <div class="actions">
-        <LocaleSwitch />
+        <SettingsMenu />
         <t-button
           v-if="!showEmpty"
           theme="primary"
@@ -107,7 +111,7 @@ function onMainDrop(e: DragEvent): void {
           @click="goEdit"
         >
           <template #icon><Edit1Icon /></template>
-          编辑当前文件
+          {{ t("browse.editCurrent") }}
         </t-button>
       </div>
       <div class="status">{{ status || (store.activeFile?.name ?? "") }}</div>
@@ -124,7 +128,11 @@ function onMainDrop(e: DragEvent): void {
           @click="loadSample"
         >
           <template #prefix-icon><FolderOpenIcon /></template>
-          {{ loadingSamples ? "正在获取…" : "获取官方示例" }}
+          {{
+            loadingSamples
+              ? t("browse.fetchingSamples")
+              : t("browse.fetchSamples")
+          }}
         </t-link>
       </div>
     </div>
@@ -148,7 +156,7 @@ function onMainDrop(e: DragEvent): void {
         @fetch-samples="loadSample"
       />
       <main class="viewport">
-        <div v-if="dragOverMain" class="drop-mask">松开以添加到文件列表</div>
+        <div v-if="dragOverMain" class="drop-mask">{{ t("browse.dropToAdd") }}</div>
         <ViewportSkeleton v-if="showPreviewSkeleton" />
         <ViewerHost
           v-if="activeContent"
@@ -162,7 +170,7 @@ function onMainDrop(e: DragEvent): void {
             }
           "
         />
-        <div v-else class="viewport-empty">选择左侧文件以预览</div>
+        <div v-else class="viewport-empty">{{ t("browse.selectToPreview") }}</div>
       </main>
     </div>
   </div>
@@ -228,8 +236,8 @@ function onMainDrop(e: DragEvent): void {
   justify-content: center;
   gap: 16px;
   background:
-    radial-gradient(1200px 500px at 50% 0%, #dce8fb 0%, transparent 60%),
-    linear-gradient(180deg, #eef3f8 0%, #e4ebf2 100%);
+    radial-gradient(1200px 500px at 50% 0%, var(--studio-empty-top) 0%, transparent 60%),
+    linear-gradient(180deg, var(--studio-empty-mid) 0%, var(--studio-empty-bot) 100%);
 }
 
 .empty-extra {
@@ -251,7 +259,7 @@ function onMainDrop(e: DragEvent): void {
 .viewport {
   position: relative;
   min-height: 0;
-  background: #dfe7ee;
+  background: var(--studio-viewport);
   overflow: hidden;
 }
 
@@ -270,7 +278,7 @@ function onMainDrop(e: DragEvent): void {
   place-items: center;
   border: 2px dashed var(--studio-accent);
   border-radius: 12px;
-  background: rgba(243, 247, 255, 0.86);
+  background: var(--studio-drop-mask);
   color: var(--studio-accent);
   font-weight: 600;
   pointer-events: none;

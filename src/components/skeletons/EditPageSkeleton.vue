@@ -1,13 +1,16 @@
 <template>
   <div class="edit-skeleton" aria-busy="true" aria-live="polite">
     <header class="topbar">
-      <div class="left">
-        <t-skeleton animation="gradient" :row-col="[{ width: '88px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '160px', height: '16px' }]" />
+      <div class="brand">
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '110px', height: '18px' }]" />
       </div>
-      <t-skeleton animation="gradient" :row-col="[{ width: '96px', height: '28px' }]" />
+      <div class="actions">
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '88px', height: '28px' }]" />
+      </div>
+      <t-skeleton animation="gradient" :row-col="[{ width: '140px', height: '16px' }]" />
       <div class="right">
-        <t-skeleton animation="gradient" :row-col="[{ width: '56px', height: '22px' }]" />
         <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
         <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
       </div>
@@ -64,25 +67,25 @@
 .topbar {
   height: 52px;
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
+  gap: 16px;
+  padding: 0 16px;
   background: var(--studio-panel);
   border-bottom: 1px solid var(--studio-line);
 }
 
-.left,
+.brand,
+.actions,
 .right {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .right {
-  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .workspace {
@@ -111,7 +114,7 @@
 .viewport {
   min-height: 0;
   padding: 16px;
-  background: #dfe7ee;
+  background: var(--studio-viewport);
 }
 
 .viewport :deep(.t-skeleton__row),

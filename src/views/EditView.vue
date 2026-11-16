@@ -8,7 +8,7 @@ import {
 } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import type { EvaluationResult } from "svg3dx-viewer";
-import LocaleSwitch from "@/components/LocaleSwitch.vue";
+import SettingsMenu from "@/components/SettingsMenu.vue";
 import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
 import NodeTreePanel, {
   type TreeSelectPayload,
@@ -326,19 +326,22 @@ onBeforeUnmount(() => {
 
   <div v-else-if="file" class="edit-page">
     <header class="topbar">
-      <div class="left">
+      <div class="brand">
+        <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
+        <span class="product">svg3dx Studio</span>
+      </div>
+      <div class="actions">
+        <SettingsMenu />
         <t-button variant="text" @click="goBrowse">
           <template #icon><ChevronLeftIcon /></template>
           {{ t("app.backBrowse") }}
         </t-button>
-        <div class="file-name">
-          {{ file.name }}
-          <span v-if="dirty" class="dirty-tag">{{ t("app.unsaved") }}</span>
-        </div>
       </div>
-
+      <div class="file-name">
+        {{ file.name }}
+        <span v-if="dirty" class="dirty-tag">{{ t("app.unsaved") }}</span>
+      </div>
       <div class="right">
-        <LocaleSwitch />
         <span class="status">{{ status }}</span>
         <t-button variant="outline" @click="onDownload">
           <template #icon><DownloadIcon /></template>
@@ -426,25 +429,39 @@ onBeforeUnmount(() => {
 .topbar {
   height: 52px;
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
+  gap: 16px;
+  padding: 0 16px;
   background: var(--studio-panel);
   border-bottom: 1px solid var(--studio-line);
 }
 
-.left,
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.product {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.actions,
 .right {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.right {
-  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .file-name {
@@ -453,13 +470,18 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .dirty-tag {
   margin-left: 8px;
   font-size: 12px;
   font-weight: 500;
-  color: #e37318;
+  color: var(--studio-dirty);
+}
+
+.right {
+  margin-left: auto;
 }
 
 .status {
@@ -493,7 +515,7 @@ onBeforeUnmount(() => {
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: #dfe7ee;
+  background: var(--studio-viewport);
 }
 
 .resize-handle {

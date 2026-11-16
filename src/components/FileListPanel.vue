@@ -9,6 +9,7 @@ import {
   FolderOpenIcon,
 } from "tdesign-icons-vue-next";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
+import { useI18n } from "@/i18n";
 import type { StudioFile } from "@/types/file";
 import { useFilesStore } from "@/stores/files";
 import FileDropZone from "./FileDropZone.vue";
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 
 const store = useFilesStore();
 const router = useRouter();
+const { t, locale } = useI18n();
 
 const sorted = computed(() =>
   [...props.files].sort((a, b) =>
@@ -37,19 +39,23 @@ const sorted = computed(() =>
   )
 );
 
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleString(locale.value === "zh" ? "zh-CN" : "en-US");
+}
+
 function onEdit(id: string): void {
   router.push({ name: "edit", params: { id } });
 }
 
 async function onRemove(file: StudioFile): Promise<void> {
   const dialog = DialogPlugin.confirm({
-    header: "移除文件",
-    body: `从本地缓存中移除「${file.name}」？`,
-    confirmBtn: "移除",
+    header: t("browse.removeFileHeader"),
+    body: t("browse.removeFileBody", { name: file.name }),
+    confirmBtn: t("browse.removeFileConfirm"),
     theme: "danger",
     onConfirm: async () => {
       await store.remove(file.id);
-      MessagePlugin.success("已移除");
+      MessagePlugin.success(t("browse.removed"));
       dialog.destroy();
     },
   });
@@ -59,9 +65,9 @@ function onClearAll(): void {
   if (!props.files.length) return;
   const count = props.files.length;
   const dialog = DialogPlugin.confirm({
-    header: "清空缓存",
-    body: `将从本地缓存移除全部 ${count} 个文件，此操作不可恢复。`,
-    confirmBtn: "清空",
+    header: t("browse.clearCacheHeader"),
+    body: t("browse.clearCacheBody", { n: count }),
+    confirmBtn: t("browse.clearCacheConfirm"),
     theme: "danger",
     // Close first: clearing empties the list and unmounts this panel,
     // which can strand an async onConfirm (confirm appears to do nothing).
@@ -70,7 +76,7 @@ function onClearAll(): void {
       void store
         .clearAll()
         .then(() => {
-          MessagePlugin.success("已清空缓存列表");
+          MessagePlugin.success(t("browse.clearedCache"));
         })
         .catch((e) => {
           MessagePlugin.error(e instanceof Error ? e.message : String(e));
@@ -86,10 +92,10 @@ function onClearAll(): void {
 <template>
   <aside class="file-list-panel">
     <div class="panel-head">
-      <span class="panel-title">文件</span>
+      <span class="panel-title">{{ t("browse.files") }}</span>
       <div class="panel-head-right">
         <span class="count">{{ files.length }}</span>
-        <t-tooltip content="清空缓存列表">
+        <t-tooltip :content="t('browse.clearCacheTooltip')">
           <t-button
             size="small"
             variant="text"
@@ -98,7 +104,7 @@ function onClearAll(): void {
             @click="onClearAll"
           >
             <template #icon><ClearIcon /></template>
-            清空
+            {{ t("browse.clearCache") }}
           </t-button>
         </t-tooltip>
       </div>
@@ -112,7 +118,11 @@ function onClearAll(): void {
         @click="emit('fetch-samples')"
       >
         <template #prefix-icon><FolderOpenIcon /></template>
-        {{ loadingSamples ? "正在获取…" : "获取官方示例" }}
+        {{
+          loadingSamples
+            ? t("browse.fetchingSamples")
+            : t("browse.fetchSamples")
+        }}
       </t-link>
     </div>
 
@@ -131,11 +141,11 @@ function onClearAll(): void {
             <span v-if="file.dirty" class="dirty">•</span>
           </div>
           <div class="time">
-            {{ new Date(file.updatedAt).toLocaleString() }}
+            {{ formatTime(file.updatedAt) }}
           </div>
         </div>
         <div class="actions" @click.stop>
-          <t-tooltip content="编辑">
+          <t-tooltip :content="t('browse.edit')">
             <t-button
               shape="square"
               variant="text"
@@ -145,7 +155,7 @@ function onClearAll(): void {
               <template #icon><Edit1Icon /></template>
             </t-button>
           </t-tooltip>
-          <t-tooltip content="移除">
+          <t-tooltip :content="t('browse.removeFile')">
             <t-button
               shape="square"
               variant="text"
@@ -195,8 +205,8 @@ function onClearAll(): void {
 
 .count {
   font-size: 12px;
-  color: var(--studio-muted);
-  background: #eef2f7;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -229,20 +239,21 @@ function onClearAll(): void {
   align-items: center;
   padding: 8px 8px;
   border-radius: 8px;
+  color: var(--td-text-color-primary);
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
 .item:hover {
-  background: #f2f6fb;
+  background: var(--td-bg-color-container-hover);
 }
 
 .item.active {
-  background: #e4eefc;
+  background: var(--td-brand-color-light);
 }
 
 .file-icon {
-  color: var(--studio-accent);
+  color: var(--td-brand-color);
 }
 
 .meta {
@@ -252,19 +263,20 @@ function onClearAll(): void {
 .name {
   font-size: 13px;
   font-weight: 500;
+  color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .dirty {
-  color: #e37318;
+  color: var(--td-warning-color);
   margin-left: 2px;
 }
 
 .time {
   font-size: 11px;
-  color: var(--studio-muted);
+  color: var(--td-text-color-secondary);
   margin-top: 2px;
 }
 

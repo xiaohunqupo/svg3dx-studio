@@ -9,21 +9,41 @@ import {
 
 const STORAGE_KEY = "svg3dx-studio-locale";
 
-function detectLocale(): Locale {
+function isZhTag(tag: string): boolean {
+  return /^zh\b/i.test(tag.trim());
+}
+
+/** Browser UI language → zh / en. Prefers `navigator.languages` order. */
+export function detectBrowserLocale(): Locale {
+  if (typeof navigator === "undefined") return "en";
+  const tags = [
+    ...(navigator.languages ?? []),
+    navigator.language,
+  ].filter(Boolean);
+  for (const tag of tags) {
+    if (isZhTag(tag)) return "zh";
+  }
+  return "en";
+}
+
+/**
+ * Resolve locale:
+ * 1. User setting in localStorage (if present)
+ * 2. Otherwise browser language
+ */
+function resolveLocale(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === "zh" || saved === "en") return saved;
   } catch {
     /* ignore */
   }
-  if (typeof navigator !== "undefined" && /^zh\b/i.test(navigator.language)) {
-    return "zh";
-  }
-  return "en";
+  return detectBrowserLocale();
 }
 
-export const locale = ref<Locale>(detectLocale());
+export const locale = ref<Locale>(resolveLocale());
 
+/** Persist only after an explicit user choice. */
 export function setLocale(next: Locale): void {
   locale.value = next;
   try {
@@ -43,12 +63,33 @@ function lookup(tree: MessageTree, path: string): string | undefined {
   return typeof cur === "string" ? cur : undefined;
 }
 
-/** Translate a dotted key, e.g. `app.nodes` or `tag.model`. */
-export function t(key: string, fallback?: string): string {
+function applyParams(
+  text: string,
+  params?: Record<string, string | number>
+): string {
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, (all, k: string) =>
+    Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : all
+  );
+}
+
+/**
+ * Translate a dotted key, e.g. `app.nodes` or `tag.model`.
+ * Second arg may be a fallback string or `{n}`-style params.
+ */
+export function t(
+  key: string,
+  fallbackOrParams?: string | Record<string, string | number>
+): string {
+  let fallback: string | undefined;
+  let params: Record<string, string | number> | undefined;
+  if (typeof fallbackOrParams === "string") fallback = fallbackOrParams;
+  else if (fallbackOrParams) params = fallbackOrParams;
+
   const hit = lookup(messages[locale.value], key);
-  if (hit !== undefined) return hit;
+  if (hit !== undefined) return applyParams(hit, params);
   const other = locale.value === "zh" ? "en" : "zh";
-  return lookup(messages[other], key) ?? fallback ?? key;
+  return applyParams(lookup(messages[other], key) ?? fallback ?? key, params);
 }
 
 /** Reactive translator for use in computed / templates. */
@@ -57,9 +98,12 @@ export function useI18n() {
   return {
     locale: loc,
     setLocale,
-    t: (key: string, fallback?: string) => {
+    t: (
+      key: string,
+      fallbackOrParams?: string | Record<string, string | number>
+    ) => {
       void loc.value;
-      return t(key, fallback);
+      return t(key, fallbackOrParams);
     },
     tagLabel: (tag: TagKey) => {
       void loc.value;

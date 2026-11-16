@@ -13,7 +13,7 @@
   inset: 0;
   z-index: 2;
   padding: 16px;
-  background: #dfe7ee;
+  background: var(--studio-viewport);
   box-sizing: border-box;
 }
 
