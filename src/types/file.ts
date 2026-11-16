@@ -26,4 +26,14 @@ export type GeometryKind =
   | "sweep"
   | "pipe";
 
-export type AddChildKind = "group" | GeometryKind;
+/** Bool / logic / loop containers (draft §5–7). */
+export type ContainerKind =
+  | "bool-union"
+  | "bool-subtract"
+  | "bool-intersect"
+  | "if"
+  | "if-not"
+  | "loop-points"
+  | "loop-range";
+
+export type AddChildKind = "group" | GeometryKind | ContainerKind;

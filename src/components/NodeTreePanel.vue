@@ -37,7 +37,18 @@ import {
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import { locale, useI18n } from "@/i18n";
 import type { AddChildKind, GeometryKind } from "@/types/file";
-import { PRIMITIVE_MENU } from "@/utils/svgEdit";
+import { extractDocumentMaterials } from "@/utils/documentMaterials";
+import {
+  ADD_CHILD_MENU,
+  BOOL_MENU,
+  CURVE_MENU,
+  LOGIC_MENU,
+  LOOP_MENU,
+  MODELING_MENU,
+  PRIMITIVE_MENU,
+  SOLID_MENU,
+  type AddChildMenuItem,
+} from "@/utils/svgEdit";
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
@@ -50,6 +61,14 @@ export type TreeSelectPayload =
       className?: string;
     }
   | { kind: "model"; path: string; modelId: string }
+  | {
+      kind: "material";
+      path: string;
+      materialId: string;
+      color?: string;
+      metalness?: string;
+      roughness?: string;
+    }
   | {
       kind: "style";
       path: string;
@@ -79,7 +98,7 @@ const emit = defineEmits<{
 
 const { t, tagLabel } = useI18n();
 
-type TreeKind = "section" | "model" | "geometry" | "style";
+type TreeKind = "section" | "model" | "geometry" | "style" | "material";
 
 type TreeItem = {
   value: string;
@@ -97,6 +116,10 @@ type TreeItem = {
     styleProps?: Record<string, string>;
     styleResolved?: Record<string, Value>;
     styleScope?: "root" | "class";
+    materialId?: string;
+    materialColor?: string;
+    materialMetalness?: string;
+    materialRoughness?: string;
     /** defs section → empty group; group node → child menu */
     action?: "add-group" | "add-child";
     /** Own `id` on `<s3dx:use>` when present. */
@@ -108,7 +131,7 @@ type TreeItem = {
 
 const treeData = ref<TreeItem[]>([]);
 const actived = ref<string[]>([]);
-const expanded = ref<string[]>(["models", "defs", "style"]);
+const expanded = ref<string[]>(["models", "defs", "materials", "style"]);
 
 const PRIMITIVE_KIND_SET = new Set<string>(PRIMITIVE_MENU.map((p) => p.kind));
 
@@ -257,6 +280,7 @@ function ancestorPaths(path: string): string[] {
     return parts;
   }
   if (path.startsWith("style:")) return ["style"];
+  if (path.startsWith("material:")) return ["materials"];
   const parts: string[] = ["defs"];
   const m = /^(defs:[^.]+|i\d+)(.*)$/.exec(path);
   if (!m) return path.includes(":") ? [path.split(".")[0]!] : parts;
@@ -300,6 +324,7 @@ function focusAfterEdit(
   ensureExpanded([
     "models",
     "defs",
+    "materials",
     "style",
     ...ancestorPaths(parentPath),
     parentPath,
@@ -366,6 +391,17 @@ function kindIcon(kind: string): Component {
       return LayersIcon;
     case "group":
       return FolderIcon;
+    case "bool-union":
+    case "bool-intersect":
+      return GitBranchIcon;
+    case "bool-subtract":
+      return AddAndSubtractIcon;
+    case "if":
+    case "if-not":
+      return GitBranchIcon;
+    case "loop-points":
+    case "loop-range":
+      return ViewListIcon;
     default:
       return WidgetIcon;
   }
@@ -384,27 +420,41 @@ function menuLabel(zh: string, en: string): string {
   return locale.value === "zh" ? zh : en;
 }
 
-const solidMenuOptions = computed<DropdownOption[]>(() =>
-  PRIMITIVE_MENU.map((p) => ({
+function menuOptions(items: AddChildMenuItem[]): DropdownOption[] {
+  return items.map((p) => ({
     content: menuLabel(p.labelZh, p.labelEn),
     value: p.kind,
     prefixIcon: () => h(kindIcon(p.kind)),
-  }))
-);
+  }));
+}
 
-/** Group row “more” menu: add group / add child submenu / delete. */
+function categoryOption(
+  labelKey: string,
+  value: string,
+  icon: Component,
+  children: AddChildMenuItem[]
+): DropdownOption {
+  return {
+    content: t(labelKey),
+    value,
+    prefixIcon: () => h(icon),
+    children: menuOptions(children),
+  };
+}
+
+/** Group row “more” menu: nested group / categorized children / delete. */
 const groupMoreOptions = computed<DropdownOption[]>(() => [
   {
     content: t("app.addGroup"),
     value: "group",
     prefixIcon: () => h(FolderIcon),
   },
-  {
-    content: t("app.addChild"),
-    value: "__add-child",
-    prefixIcon: () => h(AddIcon),
-    children: solidMenuOptions.value,
-  },
+  categoryOption("app.addCurve", "__add-curve", Chart3DIcon, CURVE_MENU),
+  categoryOption("app.addSolid", "__add-solid", AddRectangleIcon, SOLID_MENU),
+  categoryOption("app.addModeling", "__add-modeling", Chart3DFilledIcon, MODELING_MENU),
+  categoryOption("app.addBool", "__add-bool", AddAndSubtractIcon, BOOL_MENU),
+  categoryOption("app.addLogic", "__add-logic", GitBranchIcon, LOGIC_MENU),
+  categoryOption("app.addLoop", "__add-loop", ViewListIcon, LOOP_MENU),
   {
     content: "",
     value: "__divider",
@@ -628,10 +678,27 @@ function buildTree(
   );
   const classRules = extractClassRules(content);
 
+  const docMaterials = (() => {
+    const fromXml = extractDocumentMaterials(content);
+    if (fromXml.length) return fromXml;
+    return (result.materials ?? []).map((m) => ({
+      id: m.id,
+      color: Array.isArray(m.color) ? m.color.join(" ") : undefined,
+      metalness:
+        m.metalness !== undefined && m.metalness !== null
+          ? String(m.metalness)
+          : undefined,
+      roughness:
+        m.roughness !== undefined && m.roughness !== null
+          ? String(m.roughness)
+          : undefined,
+    }));
+  })();
+
   return [
     {
       value: "models",
-      label: tagLabel("model"),
+      label: tagLabel("models"),
       meta: { kind: "section", icon: ViewListIcon },
       children: result.models.map((m) => ({
         value: `model:${m.id}`,
@@ -659,8 +726,25 @@ function buildTree(
       children: buildDefsChildren(result, content, classById),
     },
     {
+      value: "materials",
+      label: tagLabel("materials"),
+      meta: { kind: "section", icon: ChartBubbleIcon },
+      children: docMaterials.map((m) => ({
+        value: `material:${m.id}`,
+        label: m.id,
+        meta: {
+          kind: "material" as const,
+          icon: ChartBubbleIcon,
+          materialId: m.id,
+          materialColor: m.color,
+          materialMetalness: m.metalness,
+          materialRoughness: m.roughness,
+        },
+      })),
+    },
+    {
       value: "style",
-      label: tagLabel("style"),
+      label: tagLabel("styles"),
       meta: { kind: "section", icon: PaletteIcon },
       children: [
         {
@@ -768,6 +852,7 @@ watch(
       expanded.value = [
         "models",
         "defs",
+        "materials",
         "style",
         ...r.models.map((m) => `model:${m.id}`),
       ];
@@ -808,7 +893,13 @@ function findItem(items: TreeItem[], value: string): TreeItem | null {
 function onActive(values: Array<string | number>): void {
   const path = String(values[0] ?? "");
   actived.value = path ? [path] : [];
-  if (!path || path === "models" || path === "defs" || path === "style") {
+  if (
+    !path ||
+    path === "models" ||
+    path === "defs" ||
+    path === "materials" ||
+    path === "style"
+  ) {
     return;
   }
   const item = findItem(treeData.value, path);
@@ -823,6 +914,15 @@ function onActive(values: Array<string | number>): void {
     });
   } else if (meta.kind === "model" && meta.modelId) {
     emit("select", { kind: "model", path, modelId: meta.modelId });
+  } else if (meta.kind === "material" && meta.materialId) {
+    emit("select", {
+      kind: "material",
+      path,
+      materialId: meta.materialId,
+      color: meta.materialColor,
+      metalness: meta.materialMetalness,
+      roughness: meta.materialRoughness,
+    });
   } else if (meta.kind === "style" && meta.styleName !== undefined) {
     const scope = meta.styleScope ?? "class";
     const liveProps =
@@ -875,7 +975,7 @@ function onAddGroup(ev: Event): void {
 
 function isAddChildKind(v: unknown): v is AddChildKind {
   if (v === "group") return true;
-  return PRIMITIVE_MENU.some((p) => p.kind === v);
+  return ADD_CHILD_MENU.some((p) => p.kind === v);
 }
 
 function groupIdOf(item: TreeItem): string | undefined {
@@ -885,12 +985,22 @@ function groupIdOf(item: TreeItem): string | undefined {
   return undefined;
 }
 
+const MENU_CATEGORY_VALUES = new Set([
+  "__add-curve",
+  "__add-solid",
+  "__add-modeling",
+  "__add-bool",
+  "__add-logic",
+  "__add-loop",
+  "__divider",
+]);
+
 function onGroupMoreClick(
   parent: TreeItem,
   item: { value?: string | number | object }
 ): void {
   const value = item?.value;
-  if (value === "__add-child" || value === "__divider") return;
+  if (typeof value === "string" && MENU_CATEGORY_VALUES.has(value)) return;
 
   const groupId = groupIdOf(parent);
   if (!groupId) return;
@@ -957,6 +1067,7 @@ defineExpose({ syncAfterEdit, selectPath });
       :data="treeData"
       hover
       activable
+      line
       :transition="false"
       :label="true"
       :actived="actived"

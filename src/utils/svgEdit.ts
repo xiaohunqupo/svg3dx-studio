@@ -1,51 +1,83 @@
-import type { AddChildKind, GeometryKind } from "@/types/file";
+import type {
+  AddChildKind,
+  ContainerKind,
+  GeometryKind,
+} from "@/types/file";
 
 const NS = "urn:s3dx:draft:0.1";
 
-const DEFAULT_SNIPPETS: Record<GeometryKind, string> = {
-  box: `<s3dx:box length="100" width="60" height="40" lengthVec="1 0 0" widthVec="0 1 0"/>`,
-  cylinder: `<s3dx:cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>`,
-  sphere: `<s3dx:sphere radius="40" center="0 0 0"/>`,
-  cone: `<s3dx:cone bottomDiameter="60" topDiameter="20" bottomCenterPt="0 0 0" topCenterPt="0 0 80"/>`,
-  torus: `<s3dx:torus diameter1="80" diameter2="20" angle="360" torusCenterPt="0 0 0" normal="0 0 1"/>`,
-  wedge: `<s3dx:wedge length="80" width="60" height="40" lengthVec="1 0 0" widthVec="0 1 0"/>`,
-  pyramid: `<s3dx:pyramid length="80" width="80" height="60" lengthVec="1 0 0" widthVec="0 1 0"/>`,
-  prism: `<s3dx:prism points="0 0 0  60 0 0  60 40 0  0 40 0" height="40"/>`,
-  "sector-cylinder": `<s3dx:sector-cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
-  line: `<s3dx:line from="0 0 0" to="200 0 0"/>`,
-  arc: `<s3dx:arc center="0 0 0" normal="0 0 1" radius="50" xDir="1 0 0" startAngle="0" angle="90"/>`,
+export type AddChildMenuItem = {
+  kind: Exclude<AddChildKind, "group">;
+  labelZh: string;
+  labelEn: string;
+};
+
+const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
+  box: `<s3dx:box length="100" width="100" height="100" lengthVec="1 0 0" widthVec="0 1 0"/>`,
+  cylinder: `<s3dx:cylinder diameter="100" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>`,
+  sphere: `<s3dx:sphere radius="50" center="0 0 0"/>`,
+  cone: `<s3dx:cone bottomDiameter="100" topDiameter="40" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>`,
+  torus: `<s3dx:torus diameter1="100" diameter2="25" angle="360" torusCenterPt="0 0 0" normal="0 0 1"/>`,
+  wedge: `<s3dx:wedge length="100" width="100" height="100" lengthVec="1 0 0" widthVec="0 1 0"/>`,
+  pyramid: `<s3dx:pyramid length="100" width="100" height="100" lengthVec="1 0 0" widthVec="0 1 0"/>`,
+  prism: `<s3dx:prism points="0 0 0  100 0 0  100 100 0  0 100 0" height="100"/>`,
+  "sector-cylinder": `<s3dx:sector-cylinder diameter="100" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
+  line: `<s3dx:line from="0 0 0" to="100 0 0"/>`,
+  arc: `<s3dx:arc center="0 0 0" normal="0 0 1" radius="100" xDir="1 0 0" startAngle="0" angle="90"/>`,
   path: `<s3dx:path>
-        <s3dx:line from="0 0 0" to="200 0 0"/>
-        <s3dx:arc center="200 0 75" normal="0 -1 0" radius="75" from="200 0 0" to="275 0 75"/>
-        <s3dx:line from="275 0 75" to="275 0 200"/>
+        <s3dx:line from="0 0 0" to="100 0 0"/>
+        <s3dx:arc center="100 0 50" normal="0 -1 0" radius="50" from="100 0 0" to="150 0 50"/>
+        <s3dx:line from="150 0 50" to="150 0 100"/>
       </s3dx:path>`,
-  extrude: `<s3dx:extrude origin="0 0 0" normal="0 0 1" length="60">
+  extrude: `<s3dx:extrude origin="0 0 0" normal="0 0 1" length="100">
         <s3dx:section>
-          <path d="M 0 0 L 100 0 L 100 50 L 0 50 Z"/>
+          <path d="M 0 0 L 100 0 L 100 100 L 0 100 Z"/>
         </s3dx:section>
       </s3dx:extrude>`,
   revolve: `<s3dx:revolve axisOrigin="0 0 0" axisDir="0 1 0" angle="360">
         <s3dx:section>
-          <path d="M 40 0 L 80 0 L 80 60 L 40 40 Z"/>
+          <path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>
         </s3dx:section>
       </s3dx:revolve>`,
   loft: `<s3dx:loft solid="true" blend="linear">
         <s3dx:section origin="0 0 0" normal="0 0 1">
-          <path d="M -50 -40 L 50 -40 L 50 40 L -50 40 Z"/>
+          <path d="M -50 -50 L 50 -50 L 50 50 L -50 50 Z"/>
         </s3dx:section>
-        <s3dx:section origin="0 0 80" normal="0 0 1">
-          <circle cx="0" cy="0" r="30"/>
+        <s3dx:section origin="0 0 100" normal="0 0 1">
+          <circle cx="0" cy="0" r="40"/>
         </s3dx:section>
       </s3dx:loft>`,
   sweep: `<s3dx:sweep orient="frenet" solid="true" corner="arc" cornerRadius="50">
         <s3dx:section>
-          <path d="M -10 -5 L 10 -5 L 10 5 L -10 5 Z"/>
+          <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
         </s3dx:section>
-        <s3dx:path points="0 0 0  200 0 0  200 0 200"/>
+        <s3dx:path points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:sweep>`,
-  pipe: `<s3dx:pipe radius="20" innerRadius="16" corner="arc" cornerRadius="80">
-        <s3dx:path points="0 0 0  300 0 0  300 0 300"/>
+  pipe: `<s3dx:pipe radius="20" innerRadius="16" corner="arc" cornerRadius="50">
+        <s3dx:path points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:pipe>`,
+};
+
+const CONTAINER_SNIPPETS: Record<ContainerKind, string> = {
+  "bool-union": `<s3dx:bool-union>
+      </s3dx:bool-union>`,
+  "bool-subtract": `<s3dx:bool-subtract>
+      </s3dx:bool-subtract>`,
+  "bool-intersect": `<s3dx:bool-intersect>
+      </s3dx:bool-intersect>`,
+  if: `<s3dx:if test="true">
+      </s3dx:if>`,
+  "if-not": `<s3dx:if-not test="false">
+      </s3dx:if-not>`,
+  "loop-points": `<s3dx:loop-points points="0 0 0  100 0 0  100 100 0  0 100 0">
+      </s3dx:loop-points>`,
+  "loop-range": `<s3dx:loop-range start="0" end="3" step="1">
+      </s3dx:loop-range>`,
+};
+
+const DEFAULT_SNIPPETS: Record<Exclude<AddChildKind, "group">, string> = {
+  ...GEOMETRY_SNIPPETS,
+  ...CONTAINER_SNIPPETS,
 };
 
 function ensureSvgShell(content: string): string {
@@ -215,6 +247,9 @@ export function insertChildIntoGroup(
   }
 
   const body = DEFAULT_SNIPPETS[kind];
+  if (!body) {
+    return { content: svg, kind };
+  }
   const child = `      ${body}${nl}`;
   return {
     content: insertXmlIntoGroup(svg, parentGroupId, child),
@@ -284,36 +319,68 @@ export function removeGroupById(content: string, groupId: string): string {
   return svg;
 }
 
-/** Basic solids listed in draft §3.2.2 (for menus). */
-export const BASIC_SOLID_KINDS: GeometryKind[] = [
-  "box",
-  "cylinder",
-  "sphere",
-  "cone",
-  "torus",
-  "wedge",
-  "prism",
-  "sector-cylinder",
-  "pyramid",
+/** Curves / wire — draft §3.2.3 (menu: 二维图元). */
+export const CURVE_MENU: AddChildMenuItem[] = [
+  { kind: "line", labelZh: "直线", labelEn: "Line" },
+  { kind: "arc", labelZh: "圆弧", labelEn: "Arc" },
+  { kind: "path", labelZh: "路径", labelEn: "Path" },
 ];
 
-export const PRIMITIVE_MENU: { kind: GeometryKind; labelZh: string; labelEn: string }[] =
-  [
-    { kind: "box", labelZh: "长方体", labelEn: "Box" },
-    { kind: "cylinder", labelZh: "圆柱", labelEn: "Cylinder" },
-    { kind: "sphere", labelZh: "球体", labelEn: "Sphere" },
-    { kind: "cone", labelZh: "圆锥", labelEn: "Cone" },
-    { kind: "torus", labelZh: "圆环", labelEn: "Torus" },
-    { kind: "wedge", labelZh: "楔体", labelEn: "Wedge" },
-    { kind: "prism", labelZh: "棱柱", labelEn: "Prism" },
-    { kind: "sector-cylinder", labelZh: "扇形柱", labelEn: "Sector Cylinder" },
-    { kind: "pyramid", labelZh: "棱锥", labelEn: "Pyramid" },
-    { kind: "line", labelZh: "直线", labelEn: "Line" },
-    { kind: "arc", labelZh: "圆弧", labelEn: "Arc" },
-    { kind: "path", labelZh: "路径", labelEn: "Path" },
-    { kind: "extrude", labelZh: "拉伸", labelEn: "Extrude" },
-    { kind: "revolve", labelZh: "旋转", labelEn: "Revolve" },
-    { kind: "loft", labelZh: "放样", labelEn: "Loft" },
-    { kind: "sweep", labelZh: "扫掠", labelEn: "Sweep" },
-    { kind: "pipe", labelZh: "圆管", labelEn: "Pipe" },
-  ];
+/** Basic solids — draft §3.2.2 (menu: 三维图元). */
+export const SOLID_MENU: AddChildMenuItem[] = [
+  { kind: "box", labelZh: "长方体", labelEn: "Box" },
+  { kind: "cylinder", labelZh: "圆柱", labelEn: "Cylinder" },
+  { kind: "sphere", labelZh: "球体", labelEn: "Sphere" },
+  { kind: "cone", labelZh: "圆锥", labelEn: "Cone" },
+  { kind: "torus", labelZh: "圆环", labelEn: "Torus" },
+  { kind: "wedge", labelZh: "楔体", labelEn: "Wedge" },
+  { kind: "prism", labelZh: "棱柱", labelEn: "Prism" },
+  { kind: "sector-cylinder", labelZh: "扇形柱", labelEn: "Sector Cylinder" },
+  { kind: "pyramid", labelZh: "棱锥", labelEn: "Pyramid" },
+];
+
+/** Construction solids — draft §3.2.4 (menu: 造型图元). */
+export const MODELING_MENU: AddChildMenuItem[] = [
+  { kind: "extrude", labelZh: "拉伸", labelEn: "Extrude" },
+  { kind: "revolve", labelZh: "旋转", labelEn: "Revolve" },
+  { kind: "loft", labelZh: "放样", labelEn: "Loft" },
+  { kind: "sweep", labelZh: "扫掠", labelEn: "Sweep" },
+  { kind: "pipe", labelZh: "圆管", labelEn: "Pipe" },
+];
+
+/** Boolean ops — 并集 / 差集 / 交集. */
+export const BOOL_MENU: AddChildMenuItem[] = [
+  { kind: "bool-union", labelZh: "并集", labelEn: "Union" },
+  { kind: "bool-subtract", labelZh: "差集", labelEn: "Subtract" },
+  { kind: "bool-intersect", labelZh: "交集", labelEn: "Intersect" },
+];
+
+export const LOGIC_MENU: AddChildMenuItem[] = [
+  { kind: "if", labelZh: "如果", labelEn: "If" },
+  { kind: "if-not", labelZh: "如果非", labelEn: "If not" },
+];
+
+export const LOOP_MENU: AddChildMenuItem[] = [
+  { kind: "loop-points", labelZh: "点列循环", labelEn: "Loop points" },
+  { kind: "loop-range", labelZh: "范围循环", labelEn: "Loop range" },
+];
+
+/** All insertable geometry kinds (curves + solids + modeling). */
+export const PRIMITIVE_MENU: AddChildMenuItem[] = [
+  ...CURVE_MENU,
+  ...SOLID_MENU,
+  ...MODELING_MENU,
+];
+
+/** Every non-group add-child kind (for type guards / menus). */
+export const ADD_CHILD_MENU: AddChildMenuItem[] = [
+  ...PRIMITIVE_MENU,
+  ...BOOL_MENU,
+  ...LOGIC_MENU,
+  ...LOOP_MENU,
+];
+
+/** @deprecated Prefer SOLID_MENU; kept for callers expecting solid list. */
+export const BASIC_SOLID_KINDS: GeometryKind[] = SOLID_MENU.map(
+  (p) => p.kind as GeometryKind
+);
