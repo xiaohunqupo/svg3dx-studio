@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { Edit1Icon, FolderOpenIcon, RefreshIcon } from "tdesign-icons-vue-next";
+import { Edit1Icon, FolderOpenIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
@@ -10,12 +10,17 @@ import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
 import { useFilesStore } from "@/stores/files";
+import {
+  fetchOfficialSamples,
+  preferredSampleName,
+} from "@/utils/officialSamples";
 
 const store = useFilesStore();
 const router = useRouter();
 const status = ref("");
 const dragOverMain = ref(false);
 const previewReady = ref(false);
+const loadingSamples = ref(false);
 
 const showEmpty = computed(() => store.ready && store.isEmpty);
 const activeContent = computed(() => store.activeFile?.content ?? "");
@@ -49,17 +54,24 @@ async function onFiles(list: FileList | File[]): Promise<void> {
 }
 
 async function loadSample(): Promise<void> {
+  if (loadingSamples.value) return;
+  loadingSamples.value = true;
   try {
-    status.value = "加载示例…";
-    const res = await fetch("/api/sample");
-    if (!res.ok) throw new Error(await res.text());
-    const text = await res.text();
-    await store.upsertFromText("draft-0.1-example.svg3dx", text);
-    status.value = "已加载官方示例";
-    MessagePlugin.success("已加载官方示例");
+    status.value = "正在获取官方示例…";
+    const samples = await fetchOfficialSamples();
+    for (const sample of samples) {
+      await store.upsertFromText(sample.name, sample.content, { select: false });
+    }
+    const preferred = preferredSampleName(samples);
+    const active = store.files.find((f) => f.name === preferred);
+    if (active) store.select(active.id);
+    status.value = `已获取 ${samples.length} 个官方示例`;
+    MessagePlugin.success(`已获取 ${samples.length} 个官方示例`);
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
     status.value = String(e);
+  } finally {
+    loadingSamples.value = false;
   }
 }
 
@@ -88,10 +100,6 @@ function onMainDrop(e: DragEvent): void {
       </div>
       <div class="actions">
         <LocaleSwitch />
-        <t-button variant="outline" @click="loadSample">
-          <template #icon><RefreshIcon /></template>
-          加载示例
-        </t-button>
         <t-button
           v-if="!showEmpty"
           theme="primary"
@@ -110,9 +118,13 @@ function onMainDrop(e: DragEvent): void {
     <div v-else-if="showEmpty" class="empty-stage">
       <FileDropZone @files="onFiles" />
       <div class="empty-extra">
-        <t-link theme="primary" @click="loadSample">
+        <t-link
+          theme="primary"
+          :disabled="loadingSamples"
+          @click="loadSample"
+        >
           <template #prefix-icon><FolderOpenIcon /></template>
-          或打开官方示例
+          {{ loadingSamples ? "正在获取…" : "获取官方示例" }}
         </t-link>
       </div>
     </div>
@@ -130,8 +142,10 @@ function onMainDrop(e: DragEvent): void {
         class="sidebar"
         :files="store.files"
         :active-id="store.activeId"
+        :loading-samples="loadingSamples"
         @select="store.select"
         @files="onFiles"
+        @fetch-samples="loadSample"
       />
       <main class="viewport">
         <div v-if="dragOverMain" class="drop-mask">松开以添加到文件列表</div>

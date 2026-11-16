@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type { StudioFile } from "@/types/file";
 import {
+  clearAllFiles as idbClearAll,
   createFileId,
   deleteFile as idbDelete,
   getActiveId,
@@ -153,6 +154,13 @@ export const useFilesStore = defineStore("files", () => {
     }
   }
 
+  async function clearAll(): Promise<void> {
+    await idbClearAll();
+    files.value = [];
+    activeId.value = null;
+    setActiveId(null);
+  }
+
   function getById(id: string): StudioFile | undefined {
     return files.value.find((f) => f.id === id);
   }
@@ -172,6 +180,7 @@ export const useFilesStore = defineStore("files", () => {
     persist,
     rename,
     remove,
+    clearAll,
     getById,
   };
 });

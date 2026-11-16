@@ -401,19 +401,25 @@ function onStyleChange(map: Record<string, string>): void {
       >
         <t-list-item v-for="field in sec.fields" :key="field.key">
           <div class="param-row" :class="{ 'readonly-row': field.readonly }">
-            <span class="name" :title="field.name">{{ field.name }}</span>
+            <span class="name" :title="field.description || field.name">{{
+              field.name
+            }}</span>
             <span v-if="field.readonly" class="value">{{
               draft[field.name] ?? field.value
             }}</span>
-            <t-input
-              v-else
-              v-model="draft[field.name]"
-              size="small"
-              :placeholder="field.placeholder || t('app.unsetHint')"
-              class="value-input"
-              @blur="commitField(field.name)"
-              @enter="commitField(field.name)"
-            />
+            <div v-else class="value-cell">
+              <t-input
+                v-model="draft[field.name]"
+                size="small"
+                :placeholder="field.placeholder || t('app.unsetHint')"
+                class="value-input"
+                @blur="commitField(field.name)"
+                @enter="commitField(field.name)"
+              />
+              <div v-if="field.description" class="field-desc">
+                {{ field.description }}
+              </div>
+            </div>
           </div>
         </t-list-item>
       </t-list>
@@ -440,9 +446,26 @@ function onStyleChange(map: Record<string, string>): void {
   display: grid;
   grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
   gap: 8px;
-  align-items: center;
+  align-items: start;
   width: 100%;
   font-size: 13px;
+}
+
+.param-row.readonly-row {
+  align-items: center;
+}
+
+.value-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--studio-muted);
 }
 
 .name {

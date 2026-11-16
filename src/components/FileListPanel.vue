@@ -2,30 +2,39 @@
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import {
+  ClearIcon,
   DeleteIcon,
   Edit1Icon,
   FileIcon,
+  FolderOpenIcon,
 } from "tdesign-icons-vue-next";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import type { StudioFile } from "@/types/file";
 import { useFilesStore } from "@/stores/files";
 import FileDropZone from "./FileDropZone.vue";
 
-const props = defineProps<{
-  files: StudioFile[];
-  activeId: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    files: StudioFile[];
+    activeId: string | null;
+    loadingSamples?: boolean;
+  }>(),
+  { loadingSamples: false }
+);
 
 const emit = defineEmits<{
   select: [id: string];
   files: [FileList | File[]];
+  "fetch-samples": [];
 }>();
 
 const store = useFilesStore();
 const router = useRouter();
 
 const sorted = computed(() =>
-  [...props.files].sort((a, b) => b.updatedAt - a.updatedAt)
+  [...props.files].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  )
 );
 
 function onEdit(id: string): void {
@@ -45,16 +54,67 @@ async function onRemove(file: StudioFile): Promise<void> {
     },
   });
 }
+
+function onClearAll(): void {
+  if (!props.files.length) return;
+  const count = props.files.length;
+  const dialog = DialogPlugin.confirm({
+    header: "清空缓存",
+    body: `将从本地缓存移除全部 ${count} 个文件，此操作不可恢复。`,
+    confirmBtn: "清空",
+    theme: "danger",
+    // Close first: clearing empties the list and unmounts this panel,
+    // which can strand an async onConfirm (confirm appears to do nothing).
+    onConfirm: () => {
+      dialog.hide();
+      void store
+        .clearAll()
+        .then(() => {
+          MessagePlugin.success("已清空缓存列表");
+        })
+        .catch((e) => {
+          MessagePlugin.error(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => {
+          dialog.destroy();
+        });
+    },
+  });
+}
 </script>
 
 <template>
   <aside class="file-list-panel">
     <div class="panel-head">
       <span class="panel-title">文件</span>
-      <span class="count">{{ files.length }}</span>
+      <div class="panel-head-right">
+        <span class="count">{{ files.length }}</span>
+        <t-tooltip content="清空缓存列表">
+          <t-button
+            size="small"
+            variant="text"
+            theme="danger"
+            :disabled="!files.length"
+            @click="onClearAll"
+          >
+            <template #icon><ClearIcon /></template>
+            清空
+          </t-button>
+        </t-tooltip>
+      </div>
     </div>
 
     <FileDropZone compact class="drop-inline" @files="emit('files', $event)" />
+    <div class="sample-extra">
+      <t-link
+        theme="primary"
+        :disabled="loadingSamples"
+        @click="emit('fetch-samples')"
+      >
+        <template #prefix-icon><FolderOpenIcon /></template>
+        {{ loadingSamples ? "正在获取…" : "获取官方示例" }}
+      </t-link>
+    </div>
 
     <ul class="list">
       <li
@@ -116,7 +176,15 @@ async function onRemove(file: StudioFile): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 14px 14px 8px;
+}
+
+.panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -134,8 +202,15 @@ async function onRemove(file: StudioFile): Promise<void> {
 }
 
 .drop-inline {
-  margin: 0 12px 10px;
+  margin: 0 12px 0;
   width: auto !important;
+}
+
+.sample-extra {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px 10px;
+  font-size: 13px;
 }
 
 .list {

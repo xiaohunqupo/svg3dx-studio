@@ -62,6 +62,13 @@ export async function deleteFile(id: string): Promise<void> {
   await txDone(tx);
 }
 
+export async function clearAllFiles(): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(STORE, "readwrite");
+  tx.objectStore(STORE).clear();
+  await txDone(tx);
+}
+
 export function getActiveId(): string | null {
   try {
     return localStorage.getItem(ACTIVE_KEY);

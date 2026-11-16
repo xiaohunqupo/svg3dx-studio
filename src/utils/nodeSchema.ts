@@ -7,6 +7,8 @@ export type AttrField = {
   name: string;
   /** Placeholder / default hint when unset. */
   placeholder?: string;
+  /** Short help under the input (enum meaning, units, etc.). */
+  description?: string;
 };
 
 /** Common 3D transform on every geometry element. */
@@ -101,7 +103,12 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
   ],
   loft: [
     { name: "solid", placeholder: "true" },
-    { name: "blend", placeholder: "linear" },
+    {
+      name: "blend",
+      placeholder: "linear",
+      description:
+        "截面形状趋近律：linear（匀速）/ sine（前慢后快）/ cosine（两端慢中间快）/ tan（前更慢）/ cotan（前更快）",
+    },
   ],
   sweep: [
     { name: "orient", placeholder: "frenet" },

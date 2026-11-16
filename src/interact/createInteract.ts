@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  applyWorldUp,
   createViewer,
   pickPathFromObject,
   SelectionHighlight,
@@ -8,6 +9,9 @@ import {
   type EvaluationResult,
   type ParamMap,
 } from "svg3dx-viewer";
+
+// Match viewer: Z-up before any studio Object3D / raycast helpers.
+applyWorldUp();
 
 const PICK_DRAG_PX = 5;
 
