@@ -236,6 +236,102 @@ export function insertEmptyModel(content: string): { content: string; id: string
   return { content: svg, id };
 }
 
+function nextMaterialId(content: string): string {
+  const used = new Set<string>();
+  const re = /<s3dx:material\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    const id = attr(m[1] ?? "", "id");
+    if (id) used.add(id);
+  }
+  let n = 1;
+  while (used.has(`material-${n}`)) n += 1;
+  return `material-${n}`;
+}
+
+/** Insert an empty `<s3dx:material>` into `<s3dx:materials>` (creates the block if needed). */
+export function insertEmptyMaterial(
+  content: string
+): { content: string; id: string } {
+  let svg = ensureSvgShell(content);
+  const id = nextMaterialId(svg);
+  const nl = lineEnding(svg);
+  const mat = `    <s3dx:material id="${id}" color="0.7 0.7 0.7 1" metalness="0" roughness="0.5"/>${nl}`;
+
+  if (/<\/s3dx:materials>/i.test(svg)) {
+    svg = svg.replace(/<\/s3dx:materials>/i, `${mat}  </s3dx:materials>`);
+    return { content: svg, id };
+  }
+
+  const selfClose = /<s3dx:materials\b([^>]*)\/>/i.exec(svg);
+  if (selfClose) {
+    const open = selfClose[0].replace(/\/\s*>$/, ">");
+    const replacement = `${open}${nl}${mat}  </s3dx:materials>`;
+    svg =
+      svg.slice(0, selfClose.index) +
+      replacement +
+      svg.slice(selfClose.index + selfClose[0].length);
+    return { content: svg, id };
+  }
+
+  const block = `  <s3dx:materials>${nl}${mat}  </s3dx:materials>${nl}`;
+  if (/<defs\b/i.test(svg)) {
+    svg = svg.replace(/<defs\b/i, `${block}<defs`);
+  } else if (/<\/svg>/i.test(svg)) {
+    svg = svg.replace(/<\/svg>/i, `${block}</svg>`);
+  } else {
+    svg = `${svg}${nl}${block}`;
+  }
+  return { content: svg, id };
+}
+
+/** Span of `<s3dx:model id="…">…</s3dx:model>` (or self-closing), or null. */
+function findModelSpan(
+  svg: string,
+  modelId: string
+): { start: number; end: number } | null {
+  const openRe = /<s3dx:model\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(svg))) {
+    if (attr(m[1] ?? "", "id") !== modelId) continue;
+    const full = m[0];
+    const start = m.index;
+    if (/\/\s*>$/.test(full)) {
+      return { start, end: start + full.length };
+    }
+    let depth = 1;
+    const tokenRe = /<\/?s3dx:model\b[^>]*>/gi;
+    tokenRe.lastIndex = start + full.length;
+    let tm: RegExpExecArray | null;
+    while ((tm = tokenRe.exec(svg))) {
+      const tok = tm[0];
+      if (/^<\//.test(tok)) {
+        depth -= 1;
+        if (depth === 0) {
+          return { start, end: tm.index + tok.length };
+        }
+      } else if (!/\/\s*>$/.test(tok)) {
+        depth += 1;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Remove an `<s3dx:model id>` block. */
+export function removeModelById(content: string, modelId: string): string {
+  if (!modelId) return content;
+  const span = findModelSpan(content, modelId);
+  if (!span) return content;
+  let start = span.start;
+  let end = span.end;
+  // Trim a surrounding blank line when present.
+  if (content[end] === "\n") end += 1;
+  else if (content.slice(end, end + 2) === "\r\n") end += 2;
+  return content.slice(0, start) + content.slice(end);
+}
+
 /**
  * Insert `<s3dx:use>` into a model. `href` may be bare id or `#id`; empty allowed.
  */

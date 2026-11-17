@@ -1,7 +1,8 @@
 /**
  * Locate and update SVG/XML elements referenced by tree paths
- * (`defs:groupId` / `defs:groupId.0.1`). Attribute writes patch the original
- * open-tag text so the rest of the document formatting is preserved.
+ * (`defs:groupId` / `defs:groupId.0.1` / `material:id`). Attribute writes
+ * patch the original open-tag text so the rest of the document formatting
+ * is preserved.
  */
 
 type OpenTag = {
@@ -27,9 +28,13 @@ export type PathLocator =
       modelId: string;
       /** Index of `<s3dx:use>` under the model; omit / empty = the model element. */
       useIndex?: number;
+    }
+  | {
+      kind: "material";
+      materialId: string;
     };
 
-/** Parse `defs:groupId`, `defs:groupId.0.1`, or `model:solid-view` / `model:solid-view.0`. */
+/** Parse `defs:groupId`, `defs:groupId.0.1`, `model:solid-view` / `model:solid-view.0`, or `material:id`. */
 export function parseTreePath(path: string): PathLocator | null {
   if (path.startsWith("model:")) {
     const rest = path.slice(6);
@@ -41,6 +46,12 @@ export function parseTreePath(path: string): PathLocator | null {
     const useIndex = Number(parts[1]);
     if (!Number.isInteger(useIndex) || useIndex < 0) return null;
     return { kind: "model", modelId, useIndex };
+  }
+
+  if (path.startsWith("material:")) {
+    const materialId = path.slice("material:".length).trim();
+    if (!materialId) return null;
+    return { kind: "material", materialId };
   }
 
   const raw = path.startsWith("defs:") ? path.slice(5) : path;
@@ -104,6 +115,25 @@ function findModelOpen(svg: string, modelId: string): OpenTag | null {
       attrs,
       selfClosing: /\/\s*>$/.test(full),
       local: "model",
+    };
+  }
+  return null;
+}
+
+/** Find `<s3dx:material id="materialId">` open tag. */
+function findMaterialOpen(svg: string, materialId: string): OpenTag | null {
+  const openRe = /<s3dx:material\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(svg))) {
+    const attrs = m[1] ?? "";
+    if (attrOf(attrs, "id") !== materialId) continue;
+    const full = m[0];
+    return {
+      start: m.index,
+      end: m.index + full.length,
+      attrs,
+      selfClosing: /\/\s*>$/.test(full),
+      local: "material",
     };
   }
   return null;
@@ -198,6 +228,9 @@ export function findOpenTagAtPath(
     const kids = childOpens(content, model);
     return kids[locator.useIndex] ?? null;
   }
+  if (locator.kind === "material") {
+    return findMaterialOpen(content, locator.materialId);
+  }
   let cur = findGroupOpen(content, locator.groupId);
   if (!cur) return null;
   for (const idx of locator.indices) {
@@ -290,6 +323,25 @@ export function applyAttrsAtPath(
     : `<${tagName}${attrsText}>`;
 
   return content.slice(0, open.start) + newOpen + content.slice(open.end);
+}
+
+/**
+ * Remove the element at a tree path (open tag through close / self-closing),
+ * including a trailing newline when present and leading indent on that line.
+ */
+export function removeElementAtPath(
+  content: string,
+  path: string
+): string | null {
+  const open = findOpenTagAtPath(content, path);
+  if (!open) return null;
+  let start = open.start;
+  let end = elementEnd(content, open);
+  if (content[end] === "\n") end += 1;
+  else if (content.slice(end, end + 2) === "\r\n") end += 2;
+  const lineStart = content.lastIndexOf("\n", start - 1) + 1;
+  if (content.slice(lineStart, start).trim() === "") start = lineStart;
+  return content.slice(0, start) + content.slice(end);
 }
 
 /** Local tag without namespace prefix, lowercased. */

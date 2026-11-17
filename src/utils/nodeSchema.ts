@@ -3,12 +3,25 @@
  * Used by the inspector to show empty fields for unset attrs.
  */
 
+import { DEFAULT_FILL_HEX8 } from "@/utils/fillColor";
+
 export type AttrField = {
   name: string;
   /** Placeholder / default hint when unset. */
   placeholder?: string;
   /** Short help under the input (enum meaning, units, etc.). */
   description?: string;
+  /** Fixed enum choices — inspector shows a select; values are XML identifiers. */
+  enumValues?: readonly string[];
+  /**
+   * Only show this field when another attr’s current value is in `values`.
+   * Empty / unset `name` is treated as `whenEmpty` (if provided).
+   */
+  visibleWhen?: {
+    name: string;
+    values: readonly string[];
+    whenEmpty?: string;
+  };
 };
 
 /** Common 3D transform on every geometry element. */
@@ -35,17 +48,19 @@ export function transformToAttr(display: string): string {
 
 /** Column-vector axes + translation (matches core `Mat4x3`). */
 export type TransformParts = {
-  position: string;
   xdir: string;
   ydir: string;
   zdir: string;
+  /** Last column — SVG/CSS “translate” / spec `tx ty tz`. */
+  translation: string;
 };
 
+/** Display order matches matrix layout: X, Y, Z, then translation. */
 export const TRANSFORM_PART_KEYS = [
-  "position",
   "xdir",
   "ydir",
   "zdir",
+  "translation",
 ] as const;
 
 export type TransformPartKey = (typeof TRANSFORM_PART_KEYS)[number];
@@ -112,7 +127,7 @@ export function identityTransformParts(): TransformParts {
 
 /** Empty part editors — defaults appear only as placeholders. */
 export function emptyTransformParts(): TransformParts {
-  return { position: "", xdir: "", ydir: "", zdir: "" };
+  return { xdir: "", ydir: "", zdir: "", translation: "" };
 }
 
 export function transformPartsFrom12(m: number[]): TransformParts {
@@ -120,7 +135,7 @@ export function transformPartsFrom12(m: number[]): TransformParts {
     xdir: formatVec3(m[0]!, m[1]!, m[2]!),
     ydir: formatVec3(m[3]!, m[4]!, m[5]!),
     zdir: formatVec3(m[6]!, m[7]!, m[8]!),
-    position: formatVec3(m[9]!, m[10]!, m[11]!),
+    translation: formatVec3(m[9]!, m[10]!, m[11]!),
   };
 }
 
@@ -149,10 +164,10 @@ function vec3Equals(
 export function transformPartsWithDefaults(parts: TransformParts): TransformParts {
   const id = identityTransformParts();
   return {
-    position: (parts.position ?? "").trim() || id.position,
     xdir: (parts.xdir ?? "").trim() || id.xdir,
     ydir: (parts.ydir ?? "").trim() || id.ydir,
     zdir: (parts.zdir ?? "").trim() || id.zdir,
+    translation: (parts.translation ?? "").trim() || id.translation,
   };
 }
 
@@ -167,9 +182,9 @@ function transformDisplayFromPartsResolved(
   const x = parseVec3(parts.xdir);
   const y = parseVec3(parts.ydir);
   const z = parseVec3(parts.zdir);
-  const p = parseVec3(parts.position);
-  if (!x || !y || !z || !p) return null;
-  return [...x, ...y, ...z, ...p].map(formatTransformNum).join(" ");
+  const t = parseVec3(parts.translation);
+  if (!x || !y || !z || !t) return null;
+  return [...x, ...y, ...z, ...t].map(formatTransformNum).join(" ");
 }
 
 /**
@@ -188,10 +203,10 @@ export function syncTransformPartsFromDisplay(raw: string): TransformParts {
     return value;
   };
   return {
-    position: blankIfIdentity(parts.position, id.position),
     xdir: blankIfIdentity(parts.xdir, id.xdir),
     ydir: blankIfIdentity(parts.ydir, id.ydir),
     zdir: blankIfIdentity(parts.zdir, id.zdir),
+    translation: blankIfIdentity(parts.translation, id.translation),
   };
 }
 
@@ -200,7 +215,8 @@ export function syncTransformPartsFromDisplay(raw: string): TransformParts {
  * Shown for primitives / groups / bool containers — not geometric params.
  */
 export const APPEARANCE_FIELDS: AttrField[] = [
-  { name: "fill", placeholder: "#87ABCCFF" },
+  // HEX8 placeholder / swatch hint; XML store form is DEFAULT_FILL_RGBA.
+  { name: "fill", placeholder: DEFAULT_FILL_HEX8 },
   /** Placeholder is localized via `materialLabel('default')` in the inspector. */
   { name: "material" },
   { name: "opacity", placeholder: "1" },
@@ -308,18 +324,54 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     },
   ],
   sweep: [
-    { name: "orient", placeholder: "frenet" },
-    { name: "refDir" },
+    {
+      name: "orient",
+      placeholder: "frenet",
+      enumValues: ["frenet", "fixed", "parallel"],
+    },
+    {
+      name: "refDir",
+      placeholder: "0 0 1",
+      visibleWhen: {
+        name: "orient",
+        values: ["fixed", "parallel"],
+        whenEmpty: "frenet",
+      },
+    },
     { name: "solid", placeholder: "true" },
-    { name: "corner", placeholder: "arc" },
-    { name: "cornerRadius", placeholder: "50" },
+    {
+      name: "corner",
+      placeholder: "arc",
+      enumValues: ["arc", "chamfer", "sharp", "miter"],
+    },
+    {
+      name: "cornerRadius",
+      placeholder: "50",
+      visibleWhen: {
+        name: "corner",
+        values: ["arc", "chamfer"],
+        whenEmpty: "arc",
+      },
+    },
     { name: "path" },
   ],
   pipe: [
     { name: "radius", placeholder: "20" },
     { name: "innerRadius", placeholder: "16" },
-    { name: "corner", placeholder: "arc" },
-    { name: "cornerRadius", placeholder: "50" },
+    {
+      name: "corner",
+      placeholder: "arc",
+      enumValues: ["arc", "chamfer", "sharp", "miter"],
+    },
+    {
+      name: "cornerRadius",
+      placeholder: "50",
+      visibleWhen: {
+        name: "corner",
+        values: ["arc", "chamfer"],
+        whenEmpty: "arc",
+      },
+    },
     { name: "path" },
   ],
 };

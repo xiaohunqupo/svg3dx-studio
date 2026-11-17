@@ -15,6 +15,7 @@ import {
   FrameIcon,
   GitBranchIcon,
   LayersIcon,
+  JumpIcon,
   Link1Icon,
   MoreIcon,
   PaletteIcon,
@@ -22,7 +23,7 @@ import {
   ViewListIcon,
   WidgetIcon,
 } from "tdesign-icons-vue-next";
-import { DialogPlugin, type DropdownOption } from "tdesign-vue-next";
+import { DialogPlugin, MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import {
   type EvaluationResult,
   type GeometryInstruction,
@@ -94,9 +95,12 @@ const emit = defineEmits<{
   select: [payload: TreeSelectPayload];
   addGroup: [];
   addModel: [];
-  addUse: [payload: { modelId: string; path: string }];
+  addMaterial: [];
+  addUse: [payload: { modelId?: string; path: string; href?: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
   deleteNode: [payload: { path: string; groupId: string }];
+  deleteModel: [payload: { path: string; modelId: string }];
+  deleteUse: [payload: { path: string }];
   optimize: [];
 }>();
 
@@ -125,9 +129,17 @@ type TreeItem = {
     materialMetalness?: string;
     materialRoughness?: string;
     /** Tree trailing action button(s). */
-    action?: "add-group" | "add-child" | "add-model" | "add-use";
+    action?:
+      | "add-group"
+      | "add-child"
+      | "add-model"
+      | "add-material"
+      | "model-more"
+      | "use-more";
     /** Own `id` on `<s3dx:use>` when present. */
     useId?: string;
+    /** Bare href target group id (no `#`); empty when unset. */
+    hrefGroupId?: string;
     /** Label is only the href target (no own id) — render muted. */
     useTargetLabel?: boolean;
   };
@@ -515,12 +527,50 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
     divider: true,
   },
   {
+    content: t("app.addUseToCurrentModel"),
+    value: "use-in-model",
+    prefixIcon: () => h(Link1Icon),
+  },
+  {
     content: t("app.deleteNode"),
     value: "delete",
     theme: "error",
     prefixIcon: () => h(DeleteIcon),
   },
 ]);
+
+/** Model row “more” menu: add use / delete. */
+const modelMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.addUse"),
+    value: "add-use",
+    prefixIcon: () => h(AddIcon),
+  },
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+/** Use / reference row “more” menu: jump (when href set) / delete. */
+function useMoreOptions(item: TreeItem): DropdownOption[] {
+  return [
+    {
+      content: t("app.jumpToHref"),
+      value: "jump",
+      disabled: !item.meta.hrefGroupId,
+      prefixIcon: () => h(JumpIcon),
+    },
+    {
+      content: t("app.deleteNode"),
+      value: "delete",
+      theme: "error",
+      prefixIcon: () => h(DeleteIcon),
+    },
+  ];
+}
 
 function shortId(id: string | undefined | null): string {
   if (!id) return "";
@@ -585,19 +635,22 @@ function makeUseTreeItem(
   transformM?: number[]
 ): TreeItem {
   const id = useId?.trim() || undefined;
+  const hrefGroupId = groupId.trim() || undefined;
   // Own id → primary label; otherwise show target group id (full text, muted).
   // Unset href → localized placeholder (still a visible tree node).
   const label =
-    id || (groupId ? `#${groupId}` : t("app.unsetHref"));
+    id || (hrefGroupId ? `#${hrefGroupId}` : t("app.unsetHref"));
   return {
     value: path,
     label,
     meta: {
       kind: "geometry",
       icon: Link1Icon,
-      node: syntheticInstance(groupId, path, transformM),
+      node: syntheticInstance(hrefGroupId ?? "", path, transformM),
       useId: id,
+      hrefGroupId,
       useTargetLabel: !id,
+      action: "use-more",
     },
   };
 }
@@ -623,6 +676,10 @@ function mapGeometry(
 ): TreeItem {
   const className =
     inst.type === "group" && inst.id ? classById.get(inst.id) : undefined;
+  const hrefGroupId =
+    inst.type === "instance" && inst.group_id?.trim()
+      ? inst.group_id.trim()
+      : undefined;
   return {
     value: path,
     label: labelOf(inst),
@@ -631,8 +688,13 @@ function mapGeometry(
       icon: geometryIcon(inst),
       node: inst,
       className,
+      hrefGroupId,
       action:
-        inst.type === "group" && inst.id ? ("add-child" as const) : undefined,
+        inst.type === "instance"
+          ? ("use-more" as const)
+          : inst.type === "group" && inst.id
+            ? ("add-child" as const)
+            : undefined,
     },
     children: childrenOf(inst).map((c, i) =>
       mapGeometry(c, `${path}.${i}`, classById)
@@ -764,7 +826,7 @@ function buildTree(
           icon: modelModeIcon(m.mode),
           modelId: m.id,
           modelMode: m.mode,
-          action: "add-use" as const,
+          action: "model-more" as const,
         },
         children: (() => {
           // Prefer XML order so empty/invalid href uses remain visible in the tree.
@@ -795,7 +857,7 @@ function buildTree(
     {
       value: "materials",
       label: tagLabel("materials"),
-      meta: { kind: "section", icon: ChartBubbleIcon },
+      meta: { kind: "section", icon: ChartBubbleIcon, action: "add-material" },
       children: docMaterials.map((m) => ({
         value: `material:${m.id}`,
         label: m.id,
@@ -1046,12 +1108,47 @@ function onAddModel(ev: Event): void {
   emit("addModel");
 }
 
-function onAddUse(ev: Event, item: TreeItem): void {
+function onAddMaterial(ev: Event): void {
   ev.preventDefault();
   ev.stopPropagation();
-  const modelId = item.meta.modelId;
+  emit("addMaterial");
+}
+
+function onModelMoreClick(
+  model: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  const modelId = model.meta.modelId;
   if (!modelId) return;
-  emit("addUse", { modelId, path: item.value });
+  if (value === "add-use") {
+    emit("addUse", { modelId, path: model.value });
+    return;
+  }
+  if (value === "delete") {
+    emit("deleteModel", { path: model.value, modelId });
+  }
+}
+
+function onUseMoreClick(
+  useItem: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  if (value === "jump") {
+    const groupId = useItem.meta.hrefGroupId;
+    if (!groupId) return;
+    const target = `defs:${groupId}`;
+    if (!findItem(treeData.value, target)) {
+      MessagePlugin.warning(t("app.jumpTargetMissing"));
+      return;
+    }
+    selectPath(target);
+    return;
+  }
+  if (value === "delete") {
+    emit("deleteUse", { path: useItem.value });
+  }
 }
 
 function isAddChildKind(v: unknown): v is AddChildKind {
@@ -1088,6 +1185,10 @@ function onGroupMoreClick(
 
   if (value === "delete") {
     emit("deleteNode", { path: parent.value, groupId });
+    return;
+  }
+  if (value === "use-in-model") {
+    emit("addUse", { path: parent.value, href: groupId });
     return;
   }
   if (!isAddChildKind(value)) return;
@@ -1203,7 +1304,7 @@ defineExpose({ syncAfterEdit, selectPath });
         <t-button
           v-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-group'"
           class="tree-action"
-          theme="primary"
+          theme="default"
           shape="square"
           variant="text"
           size="small"
@@ -1219,7 +1320,7 @@ defineExpose({ syncAfterEdit, selectPath });
             (node.data as TreeItem | undefined)?.meta?.action === 'add-model'
           "
           class="tree-action"
-          theme="primary"
+          theme="default"
           shape="square"
           variant="text"
           size="small"
@@ -1232,24 +1333,70 @@ defineExpose({ syncAfterEdit, selectPath });
         </t-button>
         <t-button
           v-else-if="
-            (node.data as TreeItem | undefined)?.meta?.action === 'add-use'
+            (node.data as TreeItem | undefined)?.meta?.action === 'add-material'
           "
           class="tree-action"
-          theme="primary"
+          theme="default"
           shape="square"
           variant="text"
           size="small"
-          :title="t('app.addUse')"
-          :aria-label="t('app.addUse')"
-          @click="(e: Event) => onAddUse(e, node.data as TreeItem)"
+          :title="t('app.addMaterial')"
+          :aria-label="t('app.addMaterial')"
+          @click="onAddMaterial"
           @mousedown.stop
         >
           <template #icon><AddIcon /></template>
         </t-button>
         <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'model-more'"
+          :options="modelMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onModelMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'use-more'"
+          :options="useMoreOptions(node.data as TreeItem)"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onUseMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
           v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-child'"
           :options="groupMoreOptions"
-          :max-column-width="160"
+          :max-column-width="200"
           :min-column-width="120"
           :max-height="420"
           trigger="click"
@@ -1293,7 +1440,7 @@ defineExpose({ syncAfterEdit, selectPath });
   gap: 4px;
   font-size: 13px;
   font-weight: 600;
-  padding: 4px 4px 10px 8px;
+  padding: 4px 0 10px 8px;
 }
 
 .panel-head-title {
@@ -1351,15 +1498,9 @@ defineExpose({ syncAfterEdit, selectPath });
   opacity: 0.85;
 }
 
-:deep(.t-tree__operations .tree-action.t-button),
+/* Keep row actions from inheriting `.t-tree__item--open .t-icon` brand color. */
 :deep(.t-tree__operations .tree-action.t-button .t-icon) {
-  color: var(--td-brand-color);
-}
-
-:deep(.t-tree__operations .tree-action.t-button:hover),
-:deep(.t-tree__operations .tree-action.t-button:focus) {
-  color: var(--td-brand-color);
-  background: var(--td-brand-color-light);
+  color: inherit;
 }
 
 :deep(.t-tree__operations .t-dropdown),

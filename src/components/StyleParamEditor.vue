@@ -21,6 +21,8 @@ const props = defineProps<{
   header?: string;
   /** Hide the .className title row. */
   hideTitle?: boolean;
+  /** Embed inside a parent collapse panel (no own list chrome). */
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -105,8 +107,11 @@ function onNameBlur(row: StyleParamRow): void {
 </script>
 
 <template>
-  <div class="style-param-editor" :class="{ 'has-header': !!header }">
-    <div v-if="!hideTitle" class="head">
+  <div
+    class="style-param-editor"
+    :class="{ 'has-header': !!header && !embedded, embedded }"
+  >
+    <div v-if="!hideTitle && !embedded" class="head">
       <div class="title-row">
         <span class="title">.{{ className }}</span>
         <span v-if="groupId" class="subtitle">{{ groupId }}</span>
@@ -117,7 +122,49 @@ function onNameBlur(row: StyleParamRow): void {
       </t-button>
     </div>
 
+    <div v-if="embedded" class="param-fields">
+      <div v-for="row in rows" :key="row.key" class="param-row">
+        <t-input
+          :model-value="displayName(row.name)"
+          size="small"
+          :placeholder="t('app.paramName')"
+          class="name-input"
+          @update:model-value="(v) => onNameInput(row, String(v ?? ''))"
+          @blur="onNameBlur(row)"
+          @enter="onNameBlur(row)"
+        />
+        <t-input
+          v-model="row.value"
+          size="small"
+          :placeholder="t('app.paramValue')"
+          class="value-input"
+          @blur="commit"
+          @enter="commit"
+        />
+        <t-button
+          size="small"
+          variant="text"
+          theme="danger"
+          shape="square"
+          :aria-label="t('app.deleteParamNamed', { name: row.name })"
+          @click="onRemove(row.key)"
+        >
+          <template #icon><DeleteIcon /></template>
+        </t-button>
+      </div>
+      <div v-if="!rows.length" class="param-row empty-row">
+        <div class="empty">{{ t("app.noParams") }}</div>
+      </div>
+      <div class="param-row add-row">
+        <t-button size="small" variant="outline" @click="onAdd">
+          <template #icon><AddIcon /></template>
+          {{ t("app.addParam") }}
+        </t-button>
+      </div>
+    </div>
+
     <t-list
+      v-else
       :header="header"
       :split="true"
       size="small"
@@ -179,6 +226,10 @@ function onNameBlur(row: StyleParamRow): void {
   gap: 0;
 }
 
+.embedded {
+  gap: 0;
+}
+
 .head {
   display: flex;
   align-items: center;
@@ -214,12 +265,32 @@ function onNameBlur(row: StyleParamRow): void {
   background: var(--td-bg-color-container);
 }
 
+.param-fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.param-fields .param-row {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.param-fields .param-row:last-child {
+  border-bottom: none;
+}
+
 .param-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
   gap: 6px;
   align-items: center;
   width: 100%;
+  box-sizing: border-box;
+}
+
+.param-row.empty-row,
+.param-row.add-row {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .name-input :deep(.t-input),

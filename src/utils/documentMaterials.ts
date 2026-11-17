@@ -56,3 +56,22 @@ export function normalizeMaterialAttr(
   if (ids.has(s)) return `url(#${s})`;
   return s;
 }
+
+/** Rewrite `material="url(#old)"` / `material="old"` after a document material id rename. */
+export function rewriteMaterialIdRefs(
+  content: string,
+  oldId: string,
+  newId: string
+): string {
+  if (!oldId || !newId || oldId === newId) return content;
+  const esc = oldId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = content.replace(
+    new RegExp(`url\\(\\s*#${esc}\\s*\\)`, "gi"),
+    `url(#${newId})`
+  );
+  out = out.replace(
+    new RegExp(`(\\bmaterial\\s*=\\s*)(["'])${esc}\\2`, "gi"),
+    `$1$2${newId}$2`
+  );
+  return out;
+}

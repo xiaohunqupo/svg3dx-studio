@@ -33,7 +33,12 @@ import {
   extractDocumentMaterials,
   normalizeMaterialAttr,
 } from "@/utils/documentMaterials";
-import { fillToHex8, hex8ToFill } from "@/utils/fillColor";
+import {
+  DEFAULT_FILL_HEX8,
+  DEFAULT_MATERIAL_COLOR_HEX8,
+  fillToHex8,
+  hex8ToFill,
+} from "@/utils/fillColor";
 import { readAttrsAtPath } from "@/utils/nodeXmlEdit";
 import {
   collectParamSourceGroups,
@@ -53,7 +58,8 @@ const emit = defineEmits<{
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
 }>();
 
-const { t, tagLabel, attrLabel, elementLabel, materialLabel } = useI18n();
+const { t, tagLabel, attrLabel, attrValueLabel, elementLabel, materialLabel } =
+  useI18n();
 
 type FieldRow = AttrField & {
   key: string;
@@ -73,6 +79,22 @@ let draftPath = "";
 
 /** Open inspector sections (collapse panel values). */
 const openSections = ref<Array<string | number>>([]);
+/** Style inspector sections — keep basic + params expanded together. */
+const styleOpenSections = ref<Array<string | number>>(["basic", "params"]);
+/** Material inspector section. */
+const materialOpenSections = ref<Array<string | number>>(["basic"]);
+
+/** Color swatch / picker fallback: fill default vs material color default. */
+const colorSwatchDefaultHex = computed(() =>
+  props.selected?.kind === "material"
+    ? DEFAULT_MATERIAL_COLOR_HEX8
+    : DEFAULT_FILL_HEX8
+);
+
+/** Draft key for the shared color control (`fill` on geometry, `color` on material). */
+function colorDraftAttr(): "fill" | "color" {
+  return props.selected?.kind === "material" ? "color" : "fill";
+}
 
 function nodeTypeLabel(node: GeometryInstruction): string {
   switch (node.type) {
@@ -115,7 +137,7 @@ function attrLookup(
 /** HEX8 string shown in the fill text input / swatch (not the XML form). */
 const fillHexUi = ref("");
 
-/** Expanded position / xdir / ydir / zdir editors for s3dx:transform. */
+/** Expanded xdir / ydir / zdir / translation editors for s3dx:transform. */
 const transformExpanded = ref(false);
 const transformParts = reactive<TransformParts>(emptyTransformParts());
 
@@ -139,7 +161,7 @@ function seedDraft(fields: FieldRow[], path: string): void {
     } else if (f.name === "s3dx:transform") {
       draft[f.name] = transformToDisplay(f.value);
       Object.assign(transformParts, syncTransformPartsFromDisplay(draft[f.name]));
-    } else if (f.name === "fill") {
+    } else if (f.name === "fill" || f.name === "color") {
       draft[f.name] = f.value;
       fillHexUi.value = fillToHex8(f.value);
     } else {
@@ -209,6 +231,7 @@ const materialBasicFields = computed((): FieldRow[] => {
   // Touch locale via attrLabel/tagLabel so labels refresh on language switch.
   void attrLabel("type");
   const sel = props.selected;
+  const xml = props.content ? readAttrsAtPath(props.content, sel.path) : null;
   return [
     {
       key: "material:type",
@@ -219,26 +242,25 @@ const materialBasicFields = computed((): FieldRow[] => {
     {
       key: "material:id",
       name: "id",
-      value: sel.materialId,
-      readonly: true,
+      value: xml?.id ?? sel.materialId,
     },
     {
       key: "material:color",
       name: "color",
-      value: sel.color ?? "",
-      readonly: true,
+      value: xml?.color ?? sel.color ?? "",
+      placeholder: DEFAULT_MATERIAL_COLOR_HEX8,
     },
     {
       key: "material:metalness",
       name: "metalness",
-      value: String(sel.metalness ?? ""),
-      readonly: true,
+      value: xml?.metalness ?? String(sel.metalness ?? ""),
+      placeholder: "0",
     },
     {
       key: "material:roughness",
       name: "roughness",
-      value: String(sel.roughness ?? ""),
-      readonly: true,
+      value: xml?.roughness ?? String(sel.roughness ?? ""),
+      placeholder: "0.5",
     },
   ];
 });
@@ -462,6 +484,28 @@ watch(
       props.content,
     ] as const,
   () => {
+    if (props.selected?.kind === "style") {
+      draftPath = "";
+      openSections.value = [];
+      styleOpenSections.value = ["basic", "params"];
+      materialOpenSections.value = ["basic"];
+      fillHexUi.value = "";
+      transformExpanded.value = false;
+      Object.assign(transformParts, emptyTransformParts());
+      for (const k of Object.keys(draft)) delete draft[k];
+      return;
+    }
+    if (props.selected?.kind === "material") {
+      const path = props.selected.path;
+      const samePath = draftPath === path;
+      openSections.value = [];
+      materialOpenSections.value = ["basic"];
+      transformExpanded.value = false;
+      Object.assign(transformParts, emptyTransformParts());
+      seedDraft(materialBasicFields.value, path);
+      if (!samePath) materialOpenSections.value = ["basic"];
+      return;
+    }
     const view = geometryView.value;
     if (!view) {
       draftPath = "";
@@ -503,31 +547,60 @@ function commitField(name: string): void {
   emit("nodeAttrsChange", { path: view.path, updates });
 }
 
+/** Commit editable material node attributes (id / color / metalness / roughness). */
+function commitMaterialAttrs(_name?: string): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "material" || draftPath !== sel.path) return;
+  const fields = materialBasicFields.value;
+  const updates: Record<string, string> = {};
+  let changed = false;
+  for (const f of fields) {
+    if (f.readonly || f.name === "type") continue;
+    const next = (draft[f.name] ?? "").trim();
+    const prev = (f.value ?? "").trim();
+    updates[f.name] = next;
+    if (next !== prev) changed = true;
+  }
+  if (!changed) return;
+  // id is required — restore previous when cleared
+  if (!updates.id) {
+    draft.id = sel.materialId;
+    return;
+  }
+  emit("nodeAttrsChange", { path: sel.path, updates });
+}
+
 let fillCommitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function commitColorAttr(): void {
+  if (props.selected?.kind === "material") commitMaterialAttrs("color");
+  else commitField("fill");
+}
 
 function scheduleFillCommit(): void {
   if (fillCommitTimer) clearTimeout(fillCommitTimer);
   fillCommitTimer = setTimeout(() => {
     fillCommitTimer = null;
-    commitField("fill");
+    commitColorAttr();
   }, 180);
 }
 
-/** Panel / complete pick: write RGBA fill and normalize HEX8 UI. */
+/** Panel / complete pick: write RGBA fill/color and normalize HEX8 UI. */
 function applyFillHex(hex: string, immediate = false): void {
+  const attr = colorDraftAttr();
   const raw = hex.trim();
   if (!raw) {
-    draft.fill = "";
+    draft[attr] = "";
     fillHexUi.value = "";
-    if (immediate) commitField("fill");
+    if (immediate) commitColorAttr();
     else scheduleFillCommit();
     return;
   }
   const fill = hex8ToFill(raw);
   if (!fill) return;
-  draft.fill = fill;
+  draft[attr] = fill;
   fillHexUi.value = fillToHex8(fill);
-  if (immediate) commitField("fill");
+  if (immediate) commitColorAttr();
   else scheduleFillCommit();
 }
 
@@ -537,6 +610,7 @@ function onFillPanelChange(hex: string): void {
 
 /** Text input: commit only on blur/enter so partial typing is not expanded. */
 function commitFillFromUi(): void {
+  const attr = colorDraftAttr();
   const raw = fillHexUi.value.trim();
   if (!raw) {
     applyFillHex("", true);
@@ -544,7 +618,7 @@ function commitFillFromUi(): void {
   }
   if (!hex8ToFill(raw)) {
     // Invalid partial/garbage — restore last committed color.
-    fillHexUi.value = fillToHex8(draft.fill ?? "");
+    fillHexUi.value = fillToHex8(draft[attr] ?? "");
     return;
   }
   applyFillHex(raw, true);
@@ -555,9 +629,9 @@ function onFillClear(): void {
     clearTimeout(fillCommitTimer);
     fillCommitTimer = null;
   }
-  draft.fill = "";
+  draft[colorDraftAttr()] = "";
   fillHexUi.value = "";
-  commitField("fill");
+  commitColorAttr();
 }
 
 function syncPartsFromCompact(): void {
@@ -634,6 +708,37 @@ type InspectorRow =
   | { kind: "field"; field: FieldRow }
   | { kind: "transform-part"; key: TransformPartKey };
 
+/** Whether a schema field should show, given current draft values. */
+function isFieldVisible(field: AttrField): boolean {
+  const rule = field.visibleWhen;
+  if (!rule) return true;
+  const raw = (draft[rule.name] ?? "").trim();
+  const cur = raw || rule.whenEmpty || "";
+  return rule.values.includes(cur);
+}
+
+function enumOptionsFor(field: AttrField): SelectOption[] {
+  return (field.enumValues ?? []).map((value) => ({
+    label: attrValueLabel(field.name, value),
+    value,
+  }));
+}
+
+function onEnumAttrChange(name: string, value: unknown): void {
+  if (value == null || value === "") {
+    draft[name] = "";
+  } else if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    draft[name] = String(value);
+  } else {
+    return;
+  }
+  commitField(name);
+}
+
 function rowsForSection(fields: FieldRow[]): InspectorRow[] {
   const rows: InspectorRow[] = [];
   for (const field of fields) {
@@ -669,7 +774,6 @@ const EXPR_ATTR_SKIP = new Set([
   "corner",
   "solid",
   "path",
-  "refDir",
 ]);
 
 function isExprScalarField(field: AttrField): boolean {
@@ -746,6 +850,27 @@ type MaterialOption = {
   value: string;
   content: () => ReturnType<typeof h>;
 };
+
+/** TDesign default dropdown is 300px — too short once groups + swatches stack. */
+const materialSelectPopupProps = {
+  overlayInnerStyle: { maxHeight: "480px" },
+};
+
+/** RGBA color for the closed select preview (unset → builtin default). */
+const selectedMaterialColor = computed((): string | undefined => {
+  const cur = (draft.material ?? "").trim();
+  const ref = cur || "default";
+  const url = /^url\(\s*#([^)\s]+)\s*\)$/i.exec(ref);
+  const docs = extractDocumentMaterials(props.content ?? "");
+  if (url) {
+    const doc = docs.find((m) => m.id === url[1]);
+    return doc?.color;
+  }
+  const builtin = BUILTIN_MATERIALS[ref];
+  if (builtin?.color) return builtin.color.join(" ");
+  const bare = docs.find((m) => m.id === ref);
+  return bare?.color;
+});
 
 const materialSelectOptions = computed((): SelectOption[] => {
   const builtin: MaterialOption[] = Object.entries(BUILTIN_MATERIALS).map(
@@ -828,30 +953,35 @@ function onStyleChange(map: Record<string, string>): void {
   <div class="node-inspector">
     <!-- Style -->
     <template v-if="selected?.kind === 'style' && styleClassName">
-      <t-list
-        :header="t('app.basicInfo')"
-        :split="true"
-        size="small"
-        class="param-list"
+      <t-collapse
+        v-model="styleOpenSections"
+        expand-icon-placement="left"
+        class="param-collapse"
       >
-        <t-list-item v-for="field in styleBasicFields" :key="field.key">
-          <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{
-              fieldDisplayName(field.name)
-            }}</span>
-            <span class="value">{{ field.value }}</span>
+        <t-collapse-panel value="basic" :header="t('app.basicInfo')">
+          <div class="param-fields">
+            <div
+              v-for="field in styleBasicFields"
+              :key="field.key"
+              class="param-row readonly-row"
+            >
+              <span class="name" :title="field.name">{{
+                fieldDisplayName(field.name)
+              }}</span>
+              <span class="value">{{ field.value }}</span>
+            </div>
           </div>
-        </t-list-item>
-      </t-list>
-
-      <StyleParamEditor
-        :class-name="styleClassName"
-        :group-id="styleIsRoot ? undefined : selected.groupId"
-        :model-value="selected.props"
-        :header="t('app.paramDefs')"
-        :hide-title="true"
-        @change="onStyleChange"
-      />
+        </t-collapse-panel>
+        <t-collapse-panel value="params" :header="t('app.paramDefs')">
+          <StyleParamEditor
+            :class-name="styleClassName"
+            :group-id="styleIsRoot ? undefined : selected.groupId"
+            :model-value="selected.props"
+            embedded
+            @change="onStyleChange"
+          />
+        </t-collapse-panel>
+      </t-collapse>
     </template>
 
     <!-- Model -->
@@ -875,21 +1005,88 @@ function onStyleChange(map: Record<string, string>): void {
 
     <!-- Material -->
     <template v-else-if="selected?.kind === 'material'">
-      <t-list
-        :header="t('app.basicInfo')"
-        :split="true"
-        size="small"
-        class="param-list"
+      <t-collapse
+        v-model="materialOpenSections"
+        expand-icon-placement="left"
+        class="param-collapse"
       >
-        <t-list-item v-for="field in materialBasicFields" :key="field.key">
-          <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{
-              fieldDisplayName(field.name)
-            }}</span>
-            <span class="value">{{ field.value || "—" }}</span>
+        <t-collapse-panel value="basic" :header="t('app.basicInfo')">
+          <div class="param-fields">
+            <div
+              v-for="field in materialBasicFields"
+              :key="field.key"
+              class="param-row"
+              :class="{ 'readonly-row': field.readonly }"
+            >
+              <span class="name" :title="field.name">{{
+                fieldDisplayName(field.name)
+              }}</span>
+              <span v-if="field.readonly" class="value">{{
+                draft[field.name] ?? field.value
+              }}</span>
+              <div v-else class="value-cell">
+                <div
+                  v-if="field.name === 'color'"
+                  class="fill-color-field"
+                >
+                  <t-popup
+                    trigger="click"
+                    placement="bottom-left"
+                    :overlay-inner-style="{ padding: '0' }"
+                  >
+                    <button
+                      type="button"
+                      class="fill-swatch"
+                      :class="{ 'is-default': !fillHexUi }"
+                      :style="{
+                        background: fillHexUi || colorSwatchDefaultHex,
+                      }"
+                      :aria-label="field.name"
+                    />
+                    <template #content>
+                      <t-color-picker-panel
+                        :model-value="fillHexUi || colorSwatchDefaultHex"
+                        format="HEX8"
+                        enable-alpha
+                        :color-modes="['monochrome']"
+                        @change="(v: string) => onFillPanelChange(v)"
+                      />
+                    </template>
+                  </t-popup>
+                  <t-input
+                    v-model="fillHexUi"
+                    size="small"
+                    clearable
+                    :placeholder="
+                      field.placeholder || colorSwatchDefaultHex
+                    "
+                    class="fill-hex-input"
+                    @blur="commitFillFromUi"
+                    @enter="commitFillFromUi"
+                    @clear="onFillClear"
+                  />
+                </div>
+                <t-input
+                  v-else
+                  v-model="draft[field.name]"
+                  size="small"
+                  clearable
+                  :placeholder="field.placeholder || undefined"
+                  class="value-input"
+                  @blur="commitMaterialAttrs(field.name)"
+                  @enter="commitMaterialAttrs(field.name)"
+                  @clear="
+                    () => {
+                      draft[field.name] = '';
+                      commitMaterialAttrs(field.name);
+                    }
+                  "
+                />
+              </div>
+            </div>
           </div>
-        </t-list-item>
-      </t-list>
+        </t-collapse-panel>
+      </t-collapse>
     </template>
 
     <div v-else-if="!geometryView" class="muted">{{ t("app.clickNode") }}</div>
@@ -936,12 +1133,15 @@ function onStyleChange(map: Record<string, string>): void {
               </div>
 
               <div
-                v-else
+                v-else-if="isFieldVisible(row.field)"
                 class="param-row"
                 :class="{ 'readonly-row': row.field.readonly }"
               >
                 <span
                   class="name"
+                  :class="{
+                    'name--with-action': row.field.name === 's3dx:transform',
+                  }"
                   :title="
                     row.field.description ||
                     (fieldDisplayName(row.field.name) !== row.field.name
@@ -952,6 +1152,24 @@ function onStyleChange(map: Record<string, string>): void {
                   <span class="name-label">{{
                     fieldDisplayName(row.field.name)
                   }}</span>
+                  <t-button
+                    v-if="row.field.name === 's3dx:transform'"
+                    size="small"
+                    variant="text"
+                    shape="square"
+                    class="name-action"
+                    :title="
+                      transformExpanded
+                        ? t('app.collapseTransform')
+                        : t('app.expandTransform')
+                    "
+                    @click="toggleTransformExpand"
+                  >
+                    <template #icon>
+                      <ChevronUpIcon v-if="transformExpanded" />
+                      <ChevronDownIcon v-else />
+                    </template>
+                  </t-button>
                   <span
                     v-if="exprResultBesideName(row.field)"
                     class="name-result"
@@ -974,12 +1192,15 @@ function onStyleChange(map: Record<string, string>): void {
                       <button
                         type="button"
                         class="fill-swatch"
-                        :style="{ background: fillHexUi || 'transparent' }"
+                        :class="{ 'is-default': !fillHexUi }"
+                        :style="{
+                          background: fillHexUi || colorSwatchDefaultHex,
+                        }"
                         :aria-label="row.field.name"
                       />
                       <template #content>
                         <t-color-picker-panel
-                          :model-value="fillHexUi || '#87ABCCFF'"
+                          :model-value="fillHexUi || colorSwatchDefaultHex"
                           format="HEX8"
                           enable-alpha
                           :color-modes="['monochrome']"
@@ -991,7 +1212,9 @@ function onStyleChange(map: Record<string, string>): void {
                       v-model="fillHexUi"
                       size="small"
                       clearable
-                      :placeholder="row.field.placeholder || '#RRGGBBAA'"
+                      :placeholder="
+                        row.field.placeholder || colorSwatchDefaultHex
+                      "
                       class="fill-hex-input"
                       @blur="commitFillFromUi"
                       @enter="commitFillFromUi"
@@ -999,54 +1222,66 @@ function onStyleChange(map: Record<string, string>): void {
                     />
                   </div>
                   <t-select
-                    v-else-if="row.field.name === 'material'"
+                    v-else-if="row.field.enumValues?.length"
                     :value="draft[row.field.name] || undefined"
-                    :options="materialSelectOptions"
+                    :options="enumOptionsFor(row.field)"
                     clearable
-                    filterable
                     size="small"
-                    :placeholder="materialLabel('default')"
-                    class="material-select"
-                    @change="onMaterialChange"
-                    @clear="onMaterialClear"
+                    :placeholder="
+                      row.field.placeholder
+                        ? attrValueLabel(row.field.name, row.field.placeholder)
+                        : t('app.unsetHint')
+                    "
+                    class="enum-select"
+                    @change="(v: unknown) => onEnumAttrChange(row.field.name, v)"
+                    @clear="() => onEnumAttrChange(row.field.name, '')"
                   />
                   <div
-                    v-else-if="row.field.name === 's3dx:transform'"
-                    class="transform-compact"
+                    v-else-if="row.field.name === 'material'"
+                    class="material-select-field"
                   >
-                    <VecRgbInput
-                      :model-value="transformCompactShown"
-                      :readonly="transformExpanded"
-                      :clearable="!transformExpanded"
-                      :placeholder="IDENTITY_TRANSFORM_DISPLAY"
-                      class="value-input"
-                      @update:model-value="
-                        (v: string) => {
-                          if (!transformExpanded)
-                            draft['s3dx:transform'] = String(v ?? '');
-                        }
-                      "
-                      @blur="commitTransformCompact"
-                      @enter="commitTransformCompact"
-                      @clear="clearTransform"
+                    <span
+                      class="fill-swatch material-preview-swatch"
+                      :class="{
+                        'is-default': !(draft.material ?? '').trim(),
+                      }"
+                      :style="{
+                        background:
+                          fillToHex8(selectedMaterialColor ?? '') ||
+                          'transparent',
+                      }"
+                      aria-hidden="true"
                     />
-                    <t-button
+                    <t-select
+                      :value="draft[row.field.name] || undefined"
+                      :options="materialSelectOptions"
+                      clearable
+                      filterable
                       size="small"
-                      variant="text"
-                      shape="square"
-                      :title="
-                        transformExpanded
-                          ? t('app.collapseTransform')
-                          : t('app.expandTransform')
-                      "
-                      @click="toggleTransformExpand"
-                    >
-                      <template #icon>
-                        <ChevronUpIcon v-if="transformExpanded" />
-                        <ChevronDownIcon v-else />
-                      </template>
-                    </t-button>
+                      :placeholder="materialLabel('default')"
+                      class="material-select"
+                      :popup-props="materialSelectPopupProps"
+                      @change="onMaterialChange"
+                      @clear="onMaterialClear"
+                    />
                   </div>
+                  <VecRgbInput
+                    v-else-if="row.field.name === 's3dx:transform'"
+                    :model-value="transformCompactShown"
+                    :readonly="transformExpanded"
+                    :clearable="!transformExpanded"
+                    :placeholder="IDENTITY_TRANSFORM_DISPLAY"
+                    class="value-input"
+                    @update:model-value="
+                      (v: string) => {
+                        if (!transformExpanded)
+                          draft['s3dx:transform'] = String(v ?? '');
+                      }
+                    "
+                    @blur="commitTransformCompact"
+                    @enter="commitTransformCompact"
+                    @clear="clearTransform"
+                  />
                   <VecRgbInput
                     v-else-if="isVecRgbField(row.field)"
                     v-model="draft[row.field.name]"
@@ -1150,8 +1385,10 @@ function onStyleChange(map: Record<string, string>): void {
 }
 
 .param-collapse {
+  border: 1px solid var(--td-component-border);
   border-radius: var(--td-radius-medium);
   overflow: hidden;
+  background: var(--td-bg-color-container);
 }
 
 .param-collapse :deep(.t-collapse-panel__header) {
@@ -1229,11 +1466,20 @@ function onStyleChange(map: Record<string, string>): void {
   overflow: hidden;
 }
 
+.name--with-action {
+  align-items: center;
+  gap: 2px;
+}
+
 .name-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.name-action {
+  flex-shrink: 0;
 }
 
 .name-result {
@@ -1280,6 +1526,11 @@ function onStyleChange(map: Record<string, string>): void {
   background-clip: padding-box;
 }
 
+.fill-swatch.is-default {
+  /* Unset fill still previews the §8.2 default; dashed border marks “not written”. */
+  border-style: dashed;
+}
+
 .fill-swatch:hover {
   border-color: var(--td-brand-color);
 }
@@ -1295,26 +1546,22 @@ function onStyleChange(map: Record<string, string>): void {
   font-size: 12px;
 }
 
-.material-select {
-  width: 100%;
-  min-width: 0;
-}
-
-.transform-compact {
+.material-select-field {
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-width: 0;
-  max-width: 100%;
+  gap: 6px;
   width: 100%;
-  overflow: hidden;
+  min-width: 0;
 }
 
-.transform-compact .value-input {
-  flex: 1 1 0;
+.material-select {
+  flex: 1;
   min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
+}
+
+.material-preview-swatch {
+  cursor: default;
+  pointer-events: none;
 }
 
 .transform-part-row .name {

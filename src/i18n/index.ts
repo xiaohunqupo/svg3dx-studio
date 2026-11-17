@@ -8,11 +8,15 @@ import {
 } from "./messages";
 import {
   ATTR_LABELS,
+  CORNER_VALUE_LABELS,
   ELEMENT_LABELS,
   MATERIAL_LABELS,
+  ORIENT_VALUE_LABELS,
   type AttrKey,
+  type CornerValueKey,
   type ElementKey,
   type MaterialKey,
+  type OrientValueKey,
 } from "./vocab";
 
 const STORAGE_KEY = "svg3dx-studio-locale";
@@ -125,6 +129,21 @@ export function materialLabel(id: string): string {
   return hit ? hit[locale.value] : id;
 }
 
+/** Enum attr value display name (`orient` / `corner`, …). */
+export function attrValueLabel(attr: string, value: string): string {
+  const v = value.trim();
+  if (!v) return v;
+  if (attr === "orient") {
+    const hit = ORIENT_VALUE_LABELS[v as OrientValueKey];
+    return hit ? hit[locale.value] : v;
+  }
+  if (attr === "corner") {
+    const hit = CORNER_VALUE_LABELS[v as CornerValueKey];
+    return hit ? hit[locale.value] : v;
+  }
+  return v;
+}
+
 /** Reactive translator for use in computed / templates. */
 export function useI18n() {
   const loc = locale;
@@ -154,6 +173,10 @@ export function useI18n() {
       void loc.value;
       return materialLabel(id);
     },
+    attrValueLabel: (attr: string, value: string) => {
+      void loc.value;
+      return attrValueLabel(attr, value);
+    },
     modeLabel: (mode: string) => {
       void loc.value;
       return t(`mode.${mode}`, mode);
@@ -167,5 +190,21 @@ export function tagLabel(tag: TagKey): string {
 
 export const isZh = computed(() => locale.value === "zh");
 
-export type { Locale, TagKey, AttrKey, ElementKey, MaterialKey };
-export { TAG_LABELS, messages, ATTR_LABELS, ELEMENT_LABELS, MATERIAL_LABELS };
+export type {
+  Locale,
+  TagKey,
+  AttrKey,
+  ElementKey,
+  MaterialKey,
+  OrientValueKey,
+  CornerValueKey,
+};
+export {
+  TAG_LABELS,
+  messages,
+  ATTR_LABELS,
+  ELEMENT_LABELS,
+  MATERIAL_LABELS,
+  ORIENT_VALUE_LABELS,
+  CORNER_VALUE_LABELS,
+};

@@ -24,13 +24,16 @@ import { downloadText } from "@/utils/storage";
 import {
   insertChildIntoGroup,
   insertEmptyGroup,
+  insertEmptyMaterial,
   insertEmptyModel,
   insertUseIntoModel,
   removeGroupById,
+  removeModelById,
 } from "@/utils/svgEdit";
 import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
 import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
-import { applyAttrsAtPath } from "@/utils/nodeXmlEdit";
+import { rewriteMaterialIdRefs } from "@/utils/documentMaterials";
+import { applyAttrsAtPath, removeElementAtPath } from "@/utils/nodeXmlEdit";
 
 const props = defineProps<{ id: string }>();
 
@@ -175,20 +178,38 @@ async function onAddModel(): Promise<void> {
   MessagePlugin.success(`${t("app.addedModel")} ${id}`);
 }
 
+async function onAddMaterial(): Promise<void> {
+  if (!file.value) return;
+  const { content, id } = insertEmptyMaterial(draftContent.value);
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("materials");
+  status.value = `${t("app.addedMaterial")} ${id}`;
+  MessagePlugin.success(`${t("app.addedMaterial")} ${id}`);
+}
+
 async function onAddUse(payload: {
-  modelId: string;
+  modelId?: string;
   path: string;
+  href?: string;
 }): Promise<void> {
   if (!file.value) return;
+  const modelId = payload.modelId || activeModelId.value;
+  if (!modelId) {
+    MessagePlugin.warning(t("app.noActiveModel"));
+    return;
+  }
+  const modelPath = `model:${modelId}`;
   const { content } = insertUseIntoModel(
     draftContent.value,
-    payload.modelId,
-    ""
+    modelId,
+    payload.href ?? ""
   );
   draftContent.value = content;
   await store.updateContent(file.value.id, content, true);
   await nextTick();
-  treePanel.value?.syncAfterEdit(payload.path);
+  treePanel.value?.syncAfterEdit(modelPath);
   status.value = t("app.addedUse");
   MessagePlugin.success(t("app.addedUse"));
 }
@@ -237,6 +258,50 @@ async function onDeleteNode(payload: {
   treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
   status.value = `${t("app.deletedNode")} ${payload.groupId}`;
   MessagePlugin.success(`${t("app.deletedNode")} ${payload.groupId}`);
+}
+
+async function onDeleteModel(payload: {
+  path: string;
+  modelId: string;
+}): Promise<void> {
+  if (!file.value) return;
+  const content = removeModelById(draftContent.value, payload.modelId);
+  if (content === draftContent.value) return;
+  draftContent.value = content;
+  const sel = selected.value;
+  if (
+    sel &&
+    ((sel.kind === "model" && sel.modelId === payload.modelId) ||
+      (sel.kind === "geometry" && sel.path.startsWith(`${payload.path}.`)))
+  ) {
+    selected.value = null;
+    interactHost.value?.setHighlight(null);
+  }
+  if (activeModelId.value === payload.modelId) {
+    activeModelId.value = "";
+  }
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("models", { select: "self" });
+  status.value = `${t("app.deletedNode")} ${payload.modelId}`;
+  MessagePlugin.success(`${t("app.deletedNode")} ${payload.modelId}`);
+}
+
+async function onDeleteUse(payload: { path: string }): Promise<void> {
+  if (!file.value) return;
+  const content = removeElementAtPath(draftContent.value, payload.path);
+  if (!content || content === draftContent.value) return;
+  const selectPath = treeParentPath(payload.path);
+  draftContent.value = content;
+  if (selected.value?.kind === "geometry" && selected.value.path === payload.path) {
+    selected.value = null;
+    interactHost.value?.setHighlight(null);
+  }
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
+  status.value = t("app.deletedNode");
+  MessagePlugin.success(t("app.deletedNode"));
 }
 
 async function onOptimize(): Promise<void> {
@@ -321,8 +386,45 @@ async function onNodeAttrsChange(payload: {
   updates: Record<string, string>;
 }): Promise<void> {
   if (!file.value) return;
-  const next = applyAttrsAtPath(draftContent.value, payload.path, payload.updates);
+  let next = applyAttrsAtPath(draftContent.value, payload.path, payload.updates);
   if (!next || next === draftContent.value) return;
+
+  const sel = selected.value;
+  if (sel?.kind === "material" && payload.path.startsWith("material:")) {
+    const oldId = payload.path.slice("material:".length);
+    const newId = (payload.updates.id ?? oldId).trim() || oldId;
+    if (newId !== oldId) {
+      next = rewriteMaterialIdRefs(next, oldId, newId);
+    }
+    const newPath = `material:${newId}`;
+    selected.value = {
+      kind: "material",
+      path: newPath,
+      materialId: newId,
+      color:
+        payload.updates.color !== undefined
+          ? payload.updates.color || undefined
+          : sel.color,
+      metalness:
+        payload.updates.metalness !== undefined
+          ? payload.updates.metalness || undefined
+          : sel.metalness,
+      roughness:
+        payload.updates.roughness !== undefined
+          ? payload.updates.roughness || undefined
+          : sel.roughness,
+    };
+    draftContent.value = next;
+    await store.updateContent(file.value.id, next, true);
+    status.value = t("app.updatedNode");
+    if (newPath !== payload.path) {
+      treePanel.value?.syncAfterEdit("materials");
+      await nextTick();
+      treePanel.value?.selectPath(newPath);
+    }
+    return;
+  }
+
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);
   status.value = t("app.updatedNode");
@@ -434,9 +536,12 @@ onBeforeUnmount(() => {
         @select="onSelect"
         @add-group="onAddGroup"
         @add-model="onAddModel"
+        @add-material="onAddMaterial"
         @add-use="onAddUse"
         @add-child="onAddChild"
         @delete-node="onDeleteNode"
+        @delete-model="onDeleteModel"
+        @delete-use="onDeleteUse"
         @optimize="onOptimize"
       />
       <div

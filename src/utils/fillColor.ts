@@ -5,6 +5,18 @@
 
 export type FillRgba = { r: number; g: number; b: number; a: number };
 
+/** Spec §8.2 default when `fill` is unset: `0.53 0.67 0.80 1`. */
+export const DEFAULT_FILL_RGBA = "0.53 0.67 0.80 1";
+
+/** HEX8 form of {@link DEFAULT_FILL_RGBA} for swatches / placeholders. */
+export const DEFAULT_FILL_HEX8 = "#87ABCCFF";
+
+/** Insert / unset preview for `<s3dx:material color>`. */
+export const DEFAULT_MATERIAL_COLOR_RGBA = "0.7 0.7 0.7 1";
+
+/** HEX8 form of {@link DEFAULT_MATERIAL_COLOR_RGBA}. */
+export const DEFAULT_MATERIAL_COLOR_HEX8 = "#B3B3B3FF";
+
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));

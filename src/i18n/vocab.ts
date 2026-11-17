@@ -88,10 +88,11 @@ export const ATTR_LABELS = {
   // transform
   "s3dx:transform": { zh: "变换", en: "transform" },
   transform: { zh: "变换", en: "transform" },
-  position: { zh: "位置", en: "position" },
   xdir: { zh: "X 轴方向", en: "xdir" },
   ydir: { zh: "Y 轴方向", en: "ydir" },
   zdir: { zh: "Z 轴方向", en: "zdir" },
+  /** Inspector expand part — SVG/CSS translate / spec tx ty tz. */
+  translation: { zh: "平移", en: "translation" },
 
   // geometry
   length: { zh: "长度", en: "length" },
@@ -126,8 +127,8 @@ export const ATTR_LABELS = {
   blend: { zh: "混合", en: "blend" },
   orient: { zh: "姿态", en: "orient" },
   refDir: { zh: "参考方向", en: "refDir" },
-  corner: { zh: "拐角", en: "corner" },
-  cornerRadius: { zh: "拐角半径", en: "cornerRadius" },
+  corner: { zh: "转角", en: "corner" },
+  cornerRadius: { zh: "转角半径", en: "cornerRadius" },
   path: { zh: "路径", en: "path" },
   innerRadius: { zh: "内半径", en: "innerRadius" },
   start: { zh: "起点值", en: "start" },
@@ -136,3 +137,22 @@ export const ATTR_LABELS = {
 } as const satisfies Record<string, LocalePair>;
 
 export type AttrKey = keyof typeof ATTR_LABELS;
+
+/** `orient` enum values (§3.2 sweep). */
+export const ORIENT_VALUE_LABELS = {
+  frenet: { zh: "平行搬运", en: "Frenet" },
+  fixed: { zh: "固定参考", en: "Fixed" },
+  parallel: { zh: "平行朝上", en: "Parallel" },
+} as const satisfies Record<string, LocalePair>;
+
+export type OrientValueKey = keyof typeof ORIENT_VALUE_LABELS;
+
+/** `corner` enum values (§3.2 sweep / pipe). */
+export const CORNER_VALUE_LABELS = {
+  arc: { zh: "圆弧弯", en: "Arc" },
+  chamfer: { zh: "倒角弯", en: "Chamfer" },
+  sharp: { zh: "尖角", en: "Sharp" },
+  miter: { zh: "斜接", en: "Miter" },
+} as const satisfies Record<string, LocalePair>;
+
+export type CornerValueKey = keyof typeof CORNER_VALUE_LABELS;
