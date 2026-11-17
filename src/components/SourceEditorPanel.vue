@@ -14,14 +14,17 @@ import {
   keymap,
 } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
-import { indentUnit } from "@codemirror/language";
+import { indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { xml } from "@codemirror/lang-xml";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { MoreIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import { useTheme } from "@/theme";
 import { useI18n } from "@/i18n";
-import { formatXml, type FormatXmlMode } from "@/utils/formatXml";
+import {
+  formatXml,
+  type FormatXmlMode,
+} from "@/utils/formatXml";
 import {
   findRangeForTreePath,
   findTreePathAtOffset,
@@ -33,23 +36,38 @@ const props = defineProps<{
   modelValue: string;
   /** Panel header label (already translated). */
   heading?: string;
+  /** Active format style (mutually exclusive). */
+  formatMode?: FormatXmlMode;
 }>();
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
+  "update:formatMode": [mode: FormatXmlMode];
   /** Deepest tree path under the caret (null when outside known nodes). */
   cursorPath: [path: string | null];
 }>();
 
 const { t } = useI18n();
 
+const activeFormatMode = computed<FormatXmlMode>(
+  () => props.formatMode ?? "pretty"
+);
+
 const moreOptions = computed<DropdownOption[]>(() => [
   {
     content: t("app.formatCode"),
     value: "format",
     children: [
-      { content: t("app.formatCodeAuto"), value: "format-auto" },
-      { content: t("app.formatCodeCompact"), value: "format-compact" },
+      {
+        content: t("app.formatCodePretty"),
+        value: "format-pretty",
+        active: activeFormatMode.value === "pretty",
+      },
+      {
+        content: t("app.formatCodeCompact"),
+        value: "format-compact",
+        active: activeFormatMode.value === "compact",
+      },
     ],
   },
 ]);
@@ -92,84 +110,87 @@ const revealField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-const baseTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    fontSize: "13px",
-  },
-  ".cm-scroller": {
-    fontFamily:
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-    lineHeight: "1.45",
-  },
-  ".cm-content": {
-    padding: "8px 0",
-  },
-  ".cm-gutters": {
-    border: "none",
-  },
-  ".cm-svg3dx-reveal": {
-    backgroundColor: "color-mix(in srgb, var(--td-brand-color) 28%, transparent)",
-    outline: "1px solid var(--td-brand-color)",
-    borderRadius: "2px",
-  },
-  ".cm-panels": {
-    backgroundColor: "var(--td-bg-color-secondarycontainer)",
-    color: "var(--td-text-color-primary)",
-    borderColor: "var(--td-component-border)",
-  },
-  ".cm-panels .cm-button": {
-    backgroundImage: "none",
-    backgroundColor: "var(--td-bg-color-component)",
-    color: "var(--td-text-color-primary)",
-    border: "1px solid var(--td-component-border)",
-    borderRadius: "3px",
-  },
-  ".cm-panels .cm-textfield": {
-    backgroundColor: "var(--td-bg-color-container)",
-    color: "var(--td-text-color-primary)",
-    border: "1px solid var(--td-component-border)",
-    borderRadius: "3px",
-  },
-  ".cm-panel.cm-search label": {
-    color: "var(--td-text-color-secondary)",
-  },
-  ".cm-foldPlaceholder": {
-    backgroundColor: "var(--td-bg-color-component)",
-    border: "none",
-    color: "var(--td-text-color-placeholder)",
-  },
-});
-
-const lightTheme = EditorView.theme(
-  {
-    "&": {
-      backgroundColor: "var(--td-bg-color-container)",
-      color: "var(--td-text-color-primary)",
+/** Chrome colors follow TDesign tokens so light/dark match the rest of Studio. */
+function chromeTheme(dark: boolean) {
+  return EditorView.theme(
+    {
+      "&": {
+        height: "100%",
+        fontSize: "13px",
+        backgroundColor: "var(--td-bg-color-container)",
+        color: "var(--td-text-color-primary)",
+      },
+      ".cm-scroller": {
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        lineHeight: "1.45",
+        backgroundColor: "var(--td-bg-color-container)",
+      },
+      ".cm-content": {
+        padding: "8px 0",
+        caretColor: "var(--td-text-color-primary)",
+      },
+      ".cm-gutters": {
+        border: "none",
+        backgroundColor: "var(--td-bg-color-secondarycontainer)",
+        color: "var(--td-text-color-placeholder)",
+      },
+      ".cm-activeLineGutter": {
+        backgroundColor: "var(--td-bg-color-container-hover)",
+      },
+      ".cm-activeLine": {
+        backgroundColor: "var(--td-bg-color-container-hover)",
+      },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection":
+        {
+          backgroundColor: dark
+            ? "color-mix(in srgb, var(--td-brand-color) 38%, transparent)"
+            : "var(--td-brand-color-light)",
+        },
+      ".cm-cursor, .cm-dropCursor": {
+        borderLeftColor: "var(--td-text-color-primary)",
+      },
+      ".cm-matchingBracket": {
+        backgroundColor:
+          "color-mix(in srgb, var(--td-brand-color) 22%, transparent)",
+        outline: "1px solid var(--td-brand-color)",
+      },
+      ".cm-svg3dx-reveal": {
+        backgroundColor:
+          "color-mix(in srgb, var(--td-brand-color) 28%, transparent)",
+        outline: "1px solid var(--td-brand-color)",
+        borderRadius: "2px",
+      },
+      ".cm-panels": {
+        backgroundColor: "var(--td-bg-color-secondarycontainer)",
+        color: "var(--td-text-color-primary)",
+        borderColor: "var(--td-component-border)",
+      },
+      ".cm-panels .cm-button": {
+        backgroundImage: "none",
+        backgroundColor: "var(--td-bg-color-component)",
+        color: "var(--td-text-color-primary)",
+        border: "1px solid var(--td-component-border)",
+        borderRadius: "3px",
+      },
+      ".cm-panels .cm-textfield": {
+        backgroundColor: "var(--td-bg-color-container)",
+        color: "var(--td-text-color-primary)",
+        border: "1px solid var(--td-component-border)",
+        borderRadius: "3px",
+      },
+      ".cm-panel.cm-search label": {
+        color: "var(--td-text-color-secondary)",
+      },
+      ".cm-foldPlaceholder": {
+        backgroundColor: "var(--td-bg-color-component)",
+        border: "none",
+        color: "var(--td-text-color-placeholder)",
+      },
     },
-    ".cm-gutters": {
-      backgroundColor: "var(--td-bg-color-secondarycontainer)",
-      color: "var(--td-text-color-placeholder)",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "var(--td-bg-color-container-hover)",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "var(--td-bg-color-container-hover)",
-    },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-      backgroundColor: "var(--td-brand-color-light)",
-    },
-    ".cm-cursor": {
-      borderLeftColor: "var(--td-text-color-primary)",
-    },
-    ".cm-matchingBracket": {
-      backgroundColor: "color-mix(in srgb, var(--td-brand-color) 22%, transparent)",
-      outline: "1px solid var(--td-brand-color)",
-    },
-  },
-  { dark: false }
-);
+    { dark }
+  );
+}
 
 function clearEmitTimer(): void {
   if (emitTimer != null) {
@@ -219,8 +240,11 @@ function buildExtensions(scheme: "light" | "dark") {
     indentUnit.of("  "),
     xml(),
     revealField,
-    baseTheme,
-    scheme === "dark" ? oneDark : lightTheme,
+    chromeTheme(scheme === "dark"),
+    // Keep One Dark token colors for syntax only — chrome uses TDesign tokens.
+    ...(scheme === "dark"
+      ? [syntaxHighlighting(oneDarkHighlightStyle)]
+      : []),
     EditorView.updateListener.of((update) => {
       if (update.docChanged && !applyingExternal) {
         scheduleEmit(update.state.doc.toString());
@@ -283,12 +307,21 @@ function measureEditorPrintWidth(): number {
   return Math.max(40, Math.floor(contentW / charW));
 }
 
-async function onFormatCode(mode: FormatXmlMode): Promise<void> {
+async function applyFormat(text: string, mode = activeFormatMode.value): Promise<string> {
+  const result = await formatXml(text, {
+    mode,
+    printWidth: mode === "pretty" ? measureEditorPrintWidth() : undefined,
+  });
+  return result.ok ? result.content : text;
+}
+
+async function onFormatModePick(mode: FormatXmlMode): Promise<void> {
+  emit("update:formatMode", mode);
   if (!view) return;
   const current = view.state.doc.toString();
   const result = await formatXml(current, {
     mode,
-    printWidth: mode === "auto" ? measureEditorPrintWidth() : undefined,
+    printWidth: mode === "pretty" ? measureEditorPrintWidth() : undefined,
   });
   if (!result.ok) {
     MessagePlugin.warning(t("app.formatCodeFailed"));
@@ -306,8 +339,8 @@ async function onFormatCode(mode: FormatXmlMode): Promise<void> {
 }
 
 function onMoreClick(item: DropdownOption): void {
-  if (item.value === "format-auto") void onFormatCode("auto");
-  else if (item.value === "format-compact") void onFormatCode("compact");
+  if (item.value === "format-pretty") void onFormatModePick("pretty");
+  else if (item.value === "format-compact") void onFormatModePick("compact");
 }
 
 function applyRevealRanges(
@@ -392,7 +425,7 @@ onBeforeUnmount(() => {
   view = null;
 });
 
-defineExpose({ revealPath });
+defineExpose({ revealPath, applyFormat, measureEditorPrintWidth });
 </script>
 
 <template>

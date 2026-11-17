@@ -8,12 +8,13 @@ import * as prettier from "prettier/standalone";
 import prettierPluginXml from "@prettier/plugin-xml";
 import { normalizeXmlNewlines } from "@/utils/nodeXmlEdit";
 
-export type FormatXmlMode = "auto" | "compact";
+/** `pretty` = wrap by width; `compact` = one tag per line (no attr wrap). */
+export type FormatXmlMode = "pretty" | "compact";
 
 export type FormatXmlOptions = {
   mode?: FormatXmlMode;
   /**
-   * Effective column width for `auto` mode (from the source editor).
+   * Effective column width for `pretty` mode (from the source editor).
    * Ignored in `compact` mode.
    */
   printWidth?: number;
@@ -24,11 +25,32 @@ export type FormatXmlResult =
   | { ok: false; error: string };
 
 const COMPACT_PRINT_WIDTH = 1_000_000;
+export const SOURCE_FORMAT_MODE_KEY = "svg3dx.studio.sourceFormatMode";
+
+export function readSourceFormatMode(): FormatXmlMode {
+  try {
+    const raw = localStorage.getItem(SOURCE_FORMAT_MODE_KEY);
+    if (raw === "compact" || raw === "pretty") return raw;
+    // migrate old key value
+    if (raw === "auto") return "pretty";
+  } catch {
+    /* ignore */
+  }
+  return "pretty";
+}
+
+export function persistSourceFormatMode(mode: FormatXmlMode): void {
+  try {
+    localStorage.setItem(SOURCE_FORMAT_MODE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Pretty-print XML/SVG with Prettier.
  *
- * - `auto`: wrap attributes when a line would exceed `printWidth`
+ * - `pretty`: wrap attributes when a line would exceed `printWidth`
  * - `compact`: keep each open/self-closing tag on one line (no attr wrapping)
  */
 export async function formatXml(
@@ -40,7 +62,7 @@ export async function formatXml(
     return { ok: true, content: normalized, changed: false };
   }
 
-  const mode = options.mode ?? "auto";
+  const mode = options.mode ?? "pretty";
   const printWidth =
     mode === "compact"
       ? COMPACT_PRINT_WIDTH
@@ -56,9 +78,7 @@ export async function formatXml(
       printWidth,
       endOfLine: "lf",
       singleAttributePerLine: false,
-      // Ignore insignificant whitespace so tags/attrs reflow cleanly.
       xmlWhitespaceSensitivity: "ignore",
-      // Keep author attribute order (ids, transforms, etc.).
       xmlSortAttributesByKey: false,
     });
     const before = normalized.endsWith("\n") ? normalized : `${normalized}\n`;

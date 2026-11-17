@@ -449,7 +449,8 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 0;
   border-radius: inherit;
-  padding: 1.5px;
+  /* 1px only — fractional widths look uneven on top/left vs bottom/right. */
+  padding: 1px;
   background: linear-gradient(120deg, var(--expr-purple), var(--expr-blue));
   pointer-events: none;
   -webkit-mask:

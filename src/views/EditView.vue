@@ -36,6 +36,12 @@ import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
 import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
 import { rewriteMaterialIdRefs } from "@/utils/documentMaterials";
 import {
+  formatXml,
+  persistSourceFormatMode,
+  readSourceFormatMode,
+  type FormatXmlMode,
+} from "@/utils/formatXml";
+import {
   applyAttrsAtPath,
   normalizeXmlNewlines,
   removeElementAtPath,
@@ -112,9 +118,34 @@ const interactHost = ref<{
 } | null>(null);
 const sourcePanel = ref<{
   revealPath: (path: string | null | undefined) => void;
+  applyFormat: (text: string, mode?: FormatXmlMode) => Promise<string>;
+  measureEditorPrintWidth: () => number;
 } | null>(null);
+/** Active source format style (pretty | compact). */
+const sourceFormatMode = ref<FormatXmlMode>(readSourceFormatMode());
 /** True while applying a caret→tree selection (skip source re-reveal scroll). */
 let syncingFromSource = false;
+
+function onSourceFormatModeChange(mode: FormatXmlMode): void {
+  sourceFormatMode.value = mode;
+  persistSourceFormatMode(mode);
+}
+
+/** Reformat XML using the active source format mode (for inspector edits). */
+async function formatDraftContent(content: string): Promise<string> {
+  if (sourcePanel.value) {
+    return sourcePanel.value.applyFormat(content, sourceFormatMode.value);
+  }
+  const printWidth =
+    sourceFormatMode.value === "pretty"
+      ? Math.max(40, Math.floor((sourceWidth.value - 48) / 8))
+      : undefined;
+  const result = await formatXml(content, {
+    mode: sourceFormatMode.value,
+    printWidth,
+  });
+  return result.ok ? result.content : content;
+}
 
 const workspaceEl = ref<HTMLElement | null>(null);
 const workspaceStyle = computed(() => {
@@ -485,13 +516,14 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
     : sel.name.split(/\s+/).filter(Boolean)[0];
   if (!className) return;
 
-  const next = isRoot
+  let next = isRoot
     ? setRootRuleProps(draftContent.value, propsMap)
     : setClassRuleProps(draftContent.value, className, propsMap);
   if (next === draftContent.value) {
     selected.value = { ...sel, props: propsMap };
     return;
   }
+  next = await formatDraftContent(next);
   draftContent.value = next;
   selected.value = { ...sel, props: propsMap };
   await store.updateContent(file.value.id, next, true);
@@ -515,6 +547,7 @@ async function onNodeAttrsChange(payload: {
     if (newId !== oldId) {
       next = rewriteMaterialIdRefs(next, oldId, newId);
     }
+    next = await formatDraftContent(next);
     const newPath = `material:${newId}`;
     selected.value = {
       kind: "material",
@@ -547,6 +580,7 @@ async function onNodeAttrsChange(payload: {
     return;
   }
 
+  next = await formatDraftContent(next);
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);
   status.value = t("app.updatedNode");
@@ -723,7 +757,9 @@ onBeforeUnmount(() => {
         class="source"
         :heading="t('app.sourceCode')"
         :model-value="draftContent"
+        :format-mode="sourceFormatMode"
         @update:model-value="onSourceContent"
+        @update:format-mode="onSourceFormatModeChange"
         @cursor-path="onSourceCursorPath"
       />
       <div

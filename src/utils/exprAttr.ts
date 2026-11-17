@@ -22,11 +22,24 @@ export function bareNameFromPureVarExpr(stored: string): string | null {
 
 /**
  * Stored → editor display.
- * `calc(var(--length))` / `var(--length)` → `length`; otherwise unchanged.
+ * `calc(var(--length))` / `var(--length)` → `length`;
+ * `calc(60 + var(--radius))` / `60+radius` → `60 + radius`.
  */
 export function simplifyExprDisplay(stored: string): string {
   const bare = bareNameFromPureVarExpr(stored);
-  return bare ?? stored.trim();
+  if (bare) return bare;
+  let s = stored.trim();
+  if (!s) return "";
+  const calcBody = /^calc\s*\(([\s\S]*)\)\s*$/i.exec(s);
+  if (calcBody) s = calcBody[1]!.trim();
+  s = s.replace(/var\(\s*--([A-Za-z_][\w-]*)\s*\)/gi, "$1");
+  // Mixed arithmetic → spaced operators (`60+angle` → `60 + angle`).
+  if (needsCalcWrapper(s)) {
+    return beautifyCalcBody(s);
+  }
+  // Unwrapped calc of a single token, or unchanged literal.
+  if (calcBody) return s;
+  return stored.trim();
 }
 
 export type ExprDisplayKind = "empty" | "literal" | "param-ok" | "param-bad" | "raw";
@@ -53,10 +66,61 @@ export function classifyExprDisplay(
   return "raw";
 }
 
+/** True when `expr` has arithmetic ops outside of `var(...)`. */
+function needsCalcWrapper(expr: string): boolean {
+  const stripped = expr.replace(/var\s*\(\s*--[A-Za-z_][\w-]*\s*\)/gi, "0");
+  return /[+\-*/]/.test(stripped);
+}
+
+/** Expand bare / `--name` param tokens to `var(--name)` (skip existing var()). */
+function expandParamsInExpr(
+  text: string,
+  effectiveBareNames: ReadonlySet<string>
+): string {
+  const tokens = findParamTokens(text);
+  let out = "";
+  let i = 0;
+  for (const t of tokens) {
+    out += text.slice(i, t.start);
+    if (
+      (t.kind === "bare" || t.kind === "dashed") &&
+      effectiveBareNames.has(t.bare)
+    ) {
+      out += `var(--${t.bare})`;
+    } else {
+      out += text.slice(t.start, t.end);
+    }
+    i = t.end;
+  }
+  out += text.slice(i);
+  return out;
+}
+
+/** Spaces around binary + - * /; keep `var(--x)` intact. */
+function beautifyCalcBody(expr: string): string {
+  const parts: string[] = [];
+  const protectedExpr = expr.replace(
+    /var\s*\(\s*--[A-Za-z_][\w-]*\s*\)/gi,
+    (m) => {
+      parts.push(m.replace(/\s+/g, ""));
+      return `\0${parts.length - 1}\0`;
+    }
+  );
+  let t = protectedExpr.replace(/\s+/g, "");
+  t = t.replace(/([+*/])/g, " $1 ");
+  t = t.replace(/-/g, " - ");
+  t = t.replace(/^\s*-\s+/, "-");
+  t = t.replace(/\(\s*-\s+/g, "(-");
+  t = t.replace(/\s+/g, " ").trim();
+  t = t.replace(/\0(\d+)\0/g, (_, idx: string) => parts[Number(idx)]!);
+  return t;
+}
+
 /**
  * Editor display → stored attribute value.
- * Bare name that matches an effective param → `var(--name)`.
- * Otherwise keep as typed (literal / full expression).
+ * - Bare name → `var(--name)` when it matches an effective param
+ * - Mixed math with params → `calc(60 + var(--radius))`
+ * - Literals / unknown text kept as typed
  */
 export function expandExprInput(
   display: string,
@@ -64,16 +128,31 @@ export function expandExprInput(
 ): string {
   const s = display.trim();
   if (!s) return "";
-  if (s.includes("var(") || s.includes("calc(")) return s;
+
+  const pureBare = bareNameFromPureVarExpr(s);
+  if (pureBare) return `var(--${pureBare})`;
+
   if (DASHED_IDENT_RE.test(s)) {
     const bare = s.slice(2);
-    if (effectiveBareNames.has(bare)) return `var(${s})`;
+    if (effectiveBareNames.has(bare)) return `var(--${bare})`;
     return s;
   }
-  if (BARE_IDENT_RE.test(s) && effectiveBareNames.has(s)) {
-    return `var(--${s})`;
+  if (BARE_IDENT_RE.test(s)) {
+    return effectiveBareNames.has(s) ? `var(--${s})` : s;
   }
-  return s;
+
+  // Already a full calc(...): still expand bare params inside.
+  const calcMatch = /^calc\s*\(([\s\S]*)\)\s*$/i.exec(s);
+  if (calcMatch) {
+    const inner = expandParamsInExpr(calcMatch[1]!, effectiveBareNames);
+    return `calc(${beautifyCalcBody(inner)})`;
+  }
+
+  const expanded = expandParamsInExpr(s, effectiveBareNames);
+  if (needsCalcWrapper(expanded)) {
+    return `calc(${beautifyCalcBody(expanded)})`;
+  }
+  return expanded;
 }
 
 export function bareParamName(dashedOrBare: string): string {
