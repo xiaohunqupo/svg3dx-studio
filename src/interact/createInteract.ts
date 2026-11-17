@@ -48,7 +48,7 @@ export class InteractViewport {
   readonly viewer: EmbedViewer;
 
   private onPick?: (path: string | null) => void;
-  private highlight = new SelectionHighlight();
+  private highlight: SelectionHighlight;
   private highlightPath: string | null = null;
   private raycaster = new THREE.Raycaster();
   private pointerNdc = new THREE.Vector2();
@@ -62,6 +62,10 @@ export class InteractViewport {
   ) {
     this.viewer = viewer;
     this.onPick = options.onPick;
+    // Official OutlinePass via EmbedViewer — materials stay untouched.
+    this.highlight = new SelectionHighlight((objects) => {
+      this.viewer.setSelectedObjects(objects);
+    });
 
     this.onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
@@ -152,6 +156,7 @@ export class InteractViewport {
     el.removeEventListener("pointerdown", this.onPointerDown);
     el.removeEventListener("pointerup", this.onPointerUp);
     this.highlight.clear();
+    this.viewer.setSelectedObjects([]);
     this.viewer.dispose();
   }
 
