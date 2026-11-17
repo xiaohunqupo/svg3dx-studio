@@ -157,6 +157,7 @@ function axisClass(axis: 0 | 1 | 2 | undefined): string {
   display: flex;
   align-items: center;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   height: var(--td-comp-size-xs, 24px);
   box-sizing: border-box;
@@ -164,6 +165,7 @@ function axisClass(axis: 0 | 1 | 2 | undefined): string {
   border-radius: var(--td-radius-default, var(--td-radius-small));
   background: var(--td-bg-color-specialcomponent, var(--td-bg-color-container));
   transition: border-color 0.15s ease;
+  overflow: hidden;
 }
 
 .vec-rgb-input.focused {
@@ -230,8 +232,11 @@ function axisClass(axis: 0 | 1 | 2 | undefined): string {
 .native {
   position: relative;
   z-index: 1;
-  flex: 1;
+  /* Kill intrinsic <input size=20> min-width that blows out flex layouts. */
+  flex: 1 1 0;
+  width: 0;
   min-width: 0;
+  max-width: 100%;
   height: 100%;
   margin: 0;
   padding: 0 8px;
@@ -240,6 +245,7 @@ function axisClass(axis: 0 | 1 | 2 | undefined): string {
   background: transparent;
   color: transparent;
   caret-color: var(--td-text-color-primary);
+  overflow-x: auto;
 }
 
 .has-clear .native {

@@ -101,13 +101,16 @@ async function loadContent(
       lastContent = text;
       return;
     }
+    // Only mark fitted when the scene has content (see InteractHost).
     const fit = !hasFitted;
     if (options.soft) {
       await v.applySvg(text, { fitCamera: fit });
     } else {
       await v.loadSvg(text, { fitCamera: fit });
     }
-    if (fit) hasFitted = true;
+    if (fit && v.viewer.root.children.length > 0) {
+      hasFitted = true;
+    }
     lastContent = text;
   } catch (e) {
     emit("error", e instanceof Error ? e.message : String(e));
@@ -156,7 +159,9 @@ defineExpose({
     if (embed && props.content) {
       hasFitted = false;
       await embed.loadSvg(props.content, { fitCamera: true });
-      hasFitted = true;
+      if (embed.viewer.root.children.length > 0) {
+        hasFitted = true;
+      }
       lastContent = props.content;
     }
   },

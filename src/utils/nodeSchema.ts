@@ -201,7 +201,8 @@ export function syncTransformPartsFromDisplay(raw: string): TransformParts {
  */
 export const APPEARANCE_FIELDS: AttrField[] = [
   { name: "fill", placeholder: "#87ABCCFF" },
-  { name: "material", placeholder: "default" },
+  /** Placeholder is localized via `materialLabel('default')` in the inspector. */
+  { name: "material" },
   { name: "opacity", placeholder: "1" },
 ];
 

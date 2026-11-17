@@ -10,6 +10,7 @@ import {
   ChartBubbleIcon,
   CircleIcon,
   DeleteIcon,
+  FilterClearIcon,
   FolderIcon,
   FrameIcon,
   GitBranchIcon,
@@ -21,7 +22,7 @@ import {
   ViewListIcon,
   WidgetIcon,
 } from "tdesign-icons-vue-next";
-import type { DropdownOption } from "tdesign-vue-next";
+import { DialogPlugin, type DropdownOption } from "tdesign-vue-next";
 import {
   type EvaluationResult,
   type GeometryInstruction,
@@ -92,11 +93,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [payload: TreeSelectPayload];
   addGroup: [];
+  addModel: [];
+  addUse: [payload: { modelId: string; path: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
   deleteNode: [payload: { path: string; groupId: string }];
+  optimize: [];
 }>();
 
-const { t, tagLabel } = useI18n();
+const { t, tagLabel, elementLabel } = useI18n();
 
 type TreeKind = "section" | "model" | "geometry" | "style" | "material";
 
@@ -120,8 +124,8 @@ type TreeItem = {
     materialColor?: string;
     materialMetalness?: string;
     materialRoughness?: string;
-    /** defs section → empty group; group node → child menu */
-    action?: "add-group" | "add-child";
+    /** Tree trailing action button(s). */
+    action?: "add-group" | "add-child" | "add-model" | "add-use";
     /** Own `id` on `<s3dx:use>` when present. */
     useId?: string;
     /** Label is only the href target (no own id) — render muted. */
@@ -231,7 +235,7 @@ function childrenFromGroupMarkup(
         const kind = local.toLowerCase() as GeometryKind;
         items.push({
           value: path,
-          label: kind,
+          label: elementLabel(kind),
           meta: {
             kind: "geometry",
             icon: kindIcon(kind),
@@ -239,12 +243,13 @@ function childrenFromGroupMarkup(
           },
         });
       } else {
+        const kind = local.toLowerCase();
         items.push({
           value: path,
-          label: local.toLowerCase(),
+          label: elementLabel(kind),
           meta: {
             kind: "geometry",
-            icon: kindIcon(local.toLowerCase()),
+            icon: kindIcon(kind),
             node: null,
           },
         });
@@ -416,13 +421,9 @@ function geometryIcon(inst: GeometryInstruction): Component {
   return kindIcon(inst.kind);
 }
 
-function menuLabel(zh: string, en: string): string {
-  return locale.value === "zh" ? zh : en;
-}
-
 function menuOptions(items: AddChildMenuItem[]): DropdownOption[] {
   return items.map((p) => ({
-    content: menuLabel(p.labelZh, p.labelEn),
+    content: elementLabel(p.kind),
     value: p.kind,
     prefixIcon: () => h(kindIcon(p.kind)),
   }));
@@ -440,6 +441,59 @@ function categoryOption(
     prefixIcon: () => h(icon),
     children: menuOptions(children),
   };
+}
+
+/** Panel header “more” menu (document-level actions). */
+const panelMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.optimize"),
+    value: "optimize",
+    prefixIcon: () => h(FilterClearIcon),
+  },
+]);
+
+/** Destructive confirm: red confirm, cancel as safer default. */
+function openDangerConfirm(options: {
+  header: string;
+  body: string;
+  confirmText: string;
+  onConfirm: () => void | Promise<void>;
+}): void {
+  const dialog = DialogPlugin.confirm({
+    header: options.header,
+    body: options.body,
+    theme: "danger",
+    confirmBtn: { content: options.confirmText, theme: "danger" },
+    cancelBtn: { content: t("app.cancel"), theme: "default" },
+    confirmOnEnter: false,
+    onOpened: () => {
+      const root = document.querySelector(
+        ".t-dialog__ctx--active .t-dialog__footer"
+      );
+      const cancel = root?.querySelector<HTMLButtonElement>(
+        ".t-button:not(.t-button--theme-danger)"
+      );
+      cancel?.focus();
+    },
+    onConfirm: async () => {
+      dialog.hide();
+      try {
+        await options.onConfirm();
+      } finally {
+        dialog.destroy();
+      }
+    },
+  });
+}
+
+function onPanelMoreClick(item: DropdownOption): void {
+  if (item.value !== "optimize") return;
+  openDangerConfirm({
+    header: t("app.optimizeHeader"),
+    body: t("app.optimizeBody"),
+    confirmText: t("app.optimizeConfirm"),
+    onConfirm: () => emit("optimize"),
+  });
 }
 
 /** Group row “more” menu: nested group / categorized children / delete. */
@@ -477,11 +531,11 @@ function shortId(id: string | undefined | null): string {
 function labelOf(inst: GeometryInstruction, useId?: string): string {
   switch (inst.type) {
     case "primitive":
-      return inst.kind;
+      return elementLabel(inst.kind);
     case "group":
       return inst.id ?? tagLabel("group");
     case "bool_op":
-      return `bool-${inst.op}`;
+      return elementLabel(`bool-${inst.op}`);
     case "instance":
       return useId?.trim() || (inst.group_id ? `#${inst.group_id}` : "");
     default:
@@ -514,8 +568,8 @@ function extractModelUses(
   let um: RegExpExecArray | null;
   while ((um = useRe.exec(body))) {
     const attrs = um[1] ?? "";
-    const href = attrOf(attrs, "href");
-    if (!href) continue;
+    // Keep empty href so the tree still shows unset references.
+    const href = attrOf(attrs, "href") ?? "";
     out.push({
       id: attrOf(attrs, "id"),
       groupId: href.replace(/^#/, ""),
@@ -532,7 +586,9 @@ function makeUseTreeItem(
 ): TreeItem {
   const id = useId?.trim() || undefined;
   // Own id → primary label; otherwise show target group id (full text, muted).
-  const label = id || (groupId ? `#${groupId}` : "");
+  // Unset href → localized placeholder (still a visible tree node).
+  const label =
+    id || (groupId ? `#${groupId}` : t("app.unsetHref"));
   return {
     value: path,
     label,
@@ -541,7 +597,7 @@ function makeUseTreeItem(
       icon: Link1Icon,
       node: syntheticInstance(groupId, path, transformM),
       useId: id,
-      useTargetLabel: !id && !!groupId,
+      useTargetLabel: !id,
     },
   };
 }
@@ -699,7 +755,7 @@ function buildTree(
     {
       value: "models",
       label: tagLabel("models"),
-      meta: { kind: "section", icon: ViewListIcon },
+      meta: { kind: "section", icon: ViewListIcon, action: "add-model" },
       children: result.models.map((m) => ({
         value: `model:${m.id}`,
         label: m.id,
@@ -708,13 +764,24 @@ function buildTree(
           icon: modelModeIcon(m.mode),
           modelId: m.id,
           modelMode: m.mode,
+          action: "add-use" as const,
         },
         children: (() => {
+          // Prefer XML order so empty/invalid href uses remain visible in the tree.
           const fromXml = content ? extractModelUses(content, m.id) : [];
-          return m.uses.map((u, i) => {
+          const rows =
+            fromXml.length > 0
+              ? fromXml
+              : m.uses.map((u) => ({
+                  id: null as string | null,
+                  groupId: u.group_id,
+                }));
+          return rows.map((u, i) => {
             const path = `model:${m.id}.${i}`;
-            const useId = fromXml[i]?.id ?? null;
-            return makeUseTreeItem(path, u.group_id, useId, u.transform?.m);
+            const transformM = u.groupId
+              ? m.uses.find((eu) => eu.group_id === u.groupId)?.transform?.m
+              : undefined;
+            return makeUseTreeItem(path, u.groupId, u.id, transformM);
           });
         })(),
       })),
@@ -973,6 +1040,20 @@ function onAddGroup(ev: Event): void {
   emit("addGroup");
 }
 
+function onAddModel(ev: Event): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  emit("addModel");
+}
+
+function onAddUse(ev: Event, item: TreeItem): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const modelId = item.meta.modelId;
+  if (!modelId) return;
+  emit("addUse", { modelId, path: item.value });
+}
+
 function isAddChildKind(v: unknown): v is AddChildKind {
   if (v === "group") return true;
   return ADD_CHILD_MENU.some((p) => p.kind === v);
@@ -1060,7 +1141,29 @@ defineExpose({ syncAfterEdit, selectPath });
 
 <template>
   <aside class="node-tree-panel">
-    <div class="panel-head">{{ t("app.nodes") }}</div>
+    <div class="panel-head">
+      <span class="panel-head-title">{{ t("app.nodes") }}</span>
+      <t-dropdown
+        :options="panelMoreOptions"
+        :max-column-width="160"
+        :min-column-width="120"
+        trigger="click"
+        placement="bottom-right"
+        @click="onPanelMoreClick"
+      >
+        <t-button
+          class="panel-more"
+          theme="default"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.moreActions')"
+          :aria-label="t('app.moreActions')"
+        >
+          <template #icon><MoreIcon /></template>
+        </t-button>
+      </t-dropdown>
+    </div>
     <PanelSkeleton v-if="loading && !treeData.length" :rows="8" />
     <t-tree
       v-else
@@ -1111,6 +1214,38 @@ defineExpose({ syncAfterEdit, selectPath });
         >
           <template #icon><AddIcon /></template>
         </t-button>
+        <t-button
+          v-else-if="
+            (node.data as TreeItem | undefined)?.meta?.action === 'add-model'
+          "
+          class="tree-action"
+          theme="primary"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.addModel')"
+          :aria-label="t('app.addModel')"
+          @click="onAddModel"
+          @mousedown.stop
+        >
+          <template #icon><AddIcon /></template>
+        </t-button>
+        <t-button
+          v-else-if="
+            (node.data as TreeItem | undefined)?.meta?.action === 'add-use'
+          "
+          class="tree-action"
+          theme="primary"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.addUse')"
+          :aria-label="t('app.addUse')"
+          @click="(e: Event) => onAddUse(e, node.data as TreeItem)"
+          @mousedown.stop
+        >
+          <template #icon><AddIcon /></template>
+        </t-button>
         <t-dropdown
           v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-child'"
           :options="groupMoreOptions"
@@ -1152,9 +1287,24 @@ defineExpose({ syncAfterEdit, selectPath });
 }
 
 .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   font-size: 13px;
   font-weight: 600;
-  padding: 4px 8px 10px;
+  padding: 4px 4px 10px 8px;
+}
+
+.panel-head-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-more {
+  flex-shrink: 0;
 }
 
 .empty {

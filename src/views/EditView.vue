@@ -24,8 +24,11 @@ import { downloadText } from "@/utils/storage";
 import {
   insertChildIntoGroup,
   insertEmptyGroup,
+  insertEmptyModel,
+  insertUseIntoModel,
   removeGroupById,
 } from "@/utils/svgEdit";
+import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
 import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
 import { applyAttrsAtPath } from "@/utils/nodeXmlEdit";
 
@@ -161,6 +164,35 @@ async function onAddGroup(): Promise<void> {
   MessagePlugin.success(`${t("app.addedGroup")} ${id}`);
 }
 
+async function onAddModel(): Promise<void> {
+  if (!file.value) return;
+  const { content, id } = insertEmptyModel(draftContent.value);
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("models");
+  status.value = `${t("app.addedModel")} ${id}`;
+  MessagePlugin.success(`${t("app.addedModel")} ${id}`);
+}
+
+async function onAddUse(payload: {
+  modelId: string;
+  path: string;
+}): Promise<void> {
+  if (!file.value) return;
+  const { content } = insertUseIntoModel(
+    draftContent.value,
+    payload.modelId,
+    ""
+  );
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(payload.path);
+  status.value = t("app.addedUse");
+  MessagePlugin.success(t("app.addedUse"));
+}
+
 async function onAddChild(payload: {
   parentPath: string;
   parentGroupId: string;
@@ -205,6 +237,31 @@ async function onDeleteNode(payload: {
   treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
   status.value = `${t("app.deletedNode")} ${payload.groupId}`;
   MessagePlugin.success(`${t("app.deletedNode")} ${payload.groupId}`);
+}
+
+async function onOptimize(): Promise<void> {
+  if (!file.value) return;
+  const { content, changed, stats } = optimizeSvg3dxContent(draftContent.value);
+  if (!changed) {
+    MessagePlugin.info(t("app.optimizeNoChange"));
+    status.value = t("app.optimizeNoChange");
+    return;
+  }
+  draftContent.value = content;
+  selected.value = null;
+  interactHost.value?.setHighlight(null);
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("models", { select: "self" });
+  const n =
+    stats.removedUses +
+    stats.removedGroups +
+    stats.removedContainers +
+    stats.removedMaterials +
+    stats.removedParams;
+  const msg = t("app.optimizeDone", { n: String(n) });
+  status.value = msg;
+  MessagePlugin.success(msg);
 }
 
 async function onSave(): Promise<void> {
@@ -376,8 +433,11 @@ onBeforeUnmount(() => {
         :loading="contentLoading"
         @select="onSelect"
         @add-group="onAddGroup"
+        @add-model="onAddModel"
+        @add-use="onAddUse"
         @add-child="onAddChild"
         @delete-node="onDeleteNode"
+        @optimize="onOptimize"
       />
       <div
         class="resize-handle resize-handle--tree"

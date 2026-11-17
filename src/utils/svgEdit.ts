@@ -209,6 +209,89 @@ export function insertEmptyGroup(content: string): { content: string; id: string
   return { content: svg, id };
 }
 
+function nextModelId(content: string): string {
+  const used = new Set<string>();
+  const re = /<s3dx:model\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    const id = attr(m[1] ?? "", "id");
+    if (id) used.add(id);
+  }
+  let n = 1;
+  while (used.has(`view-${n}`)) n += 1;
+  return `view-${n}`;
+}
+
+/** Insert an empty `<s3dx:model>` before `</svg>`. */
+export function insertEmptyModel(content: string): { content: string; id: string } {
+  let svg = ensureSvgShell(content);
+  const id = nextModelId(svg);
+  const nl = lineEnding(svg);
+  const block = `  <s3dx:model id="${id}" mode="solid">${nl}  </s3dx:model>${nl}`;
+  if (/<\/svg>/i.test(svg)) {
+    svg = svg.replace(/<\/svg>/i, `${block}</svg>`);
+  } else {
+    svg = `${svg}${nl}${block}`;
+  }
+  return { content: svg, id };
+}
+
+/**
+ * Insert `<s3dx:use>` into a model. `href` may be bare id or `#id`; empty allowed.
+ */
+export function insertUseIntoModel(
+  content: string,
+  modelId: string,
+  href = ""
+): { content: string; href: string } {
+  let svg = ensureSvgShell(content);
+  const bare = href.trim().replace(/^#/, "");
+  const hrefAttr = bare ? `#${bare}` : "";
+  const nl = lineEnding(svg);
+  const use = `    <s3dx:use href="${hrefAttr}"/>${nl}`;
+
+  const openRe = /<s3dx:model\b([^>]*)\/?>/gi;
+  let m: RegExpExecArray | null;
+  let openEnd = -1;
+  let selfClosing = false;
+  let openIndex = -1;
+  let openFull = "";
+  while ((m = openRe.exec(svg))) {
+    if (attr(m[1] ?? "", "id") !== modelId) continue;
+    openIndex = m.index;
+    openFull = m[0];
+    openEnd = m.index + m[0].length;
+    selfClosing = /\/\s*>$/.test(m[0]);
+    break;
+  }
+  if (openIndex < 0) return { content: svg, href: hrefAttr };
+
+  if (selfClosing) {
+    const openTag = openFull.replace(/\/\s*>$/, ">");
+    const replacement = `${openTag}${nl}${use}  </s3dx:model>`;
+    svg = svg.slice(0, openIndex) + replacement + svg.slice(openEnd);
+    return { content: svg, href: hrefAttr };
+  }
+
+  let depth = 1;
+  const tokenRe = /<\/?s3dx:model\b[^>]*>/gi;
+  tokenRe.lastIndex = openEnd;
+  let tm: RegExpExecArray | null;
+  while ((tm = tokenRe.exec(svg))) {
+    const full = tm[0];
+    if (/^<\//.test(full)) {
+      depth -= 1;
+      if (depth === 0) {
+        svg = svg.slice(0, tm.index) + use + svg.slice(tm.index);
+        return { content: svg, href: hrefAttr };
+      }
+      continue;
+    }
+    if (!/\/\s*>$/.test(full)) depth += 1;
+  }
+  return { content: svg, href: hrefAttr };
+}
+
 /** Insert a primitive group into defs and reference it from the active model. */
 export function insertPrimitive(content: string, kind: GeometryKind): string {
   let svg = ensureSvgShell(content);

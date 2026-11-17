@@ -8,7 +8,7 @@ export type MessageTree = {
 
 /**
  * Standard svg3dx tag / section names.
- * Keep in sync when adding editor tree vocabulary.
+ * Attribute / element / material nouns live in `./vocab.ts`.
  */
 export const TAG_LABELS = {
   /** Tree section headers. */
@@ -45,6 +45,10 @@ export const messages: Record<Locale, MessageTree> = {
       paramValue: "值",
       deleteParamNamed: "删除 {name}",
       addGroup: "添加组",
+      addModel: "添加模型",
+      addUse: "添加引用",
+      addedModel: "已新增模型",
+      addedUse: "已新增引用",
       addChild: "添加子节点",
       addCurve: "二维图元",
       addSolid: "三维图元",
@@ -53,6 +57,13 @@ export const messages: Record<Locale, MessageTree> = {
       addLogic: "逻辑",
       addLoop: "循环",
       moreActions: "更多",
+      optimize: "优化",
+      optimizeHeader: "优化文档结构",
+      optimizeBody:
+        "将移除未使用的引用、空节点、未被引用的定义组，以及未使用的材质与参数。此操作会改变文件结构，且不可自动撤销。",
+      optimizeConfirm: "优化",
+      optimizeNoChange: "没有可优化的内容",
+      optimizeDone: "已优化，移除 {n} 项",
       deleteNode: "删除",
       addedChild: "已添加",
       deletedNode: "已删除",
@@ -77,6 +88,9 @@ export const messages: Record<Locale, MessageTree> = {
       paramDefs: "参数定义",
       paramDefGroup: "参数定义组",
       unsetHint: "未设置",
+      noParamsAvailable: "当前节点没有可用参数",
+      noHrefTargets: "定义集中没有可引用的组",
+      unsetHref: "未设置引用",
       updatedNode: "已更新节点",
       resizePanel: "拖动调整宽度",
       classProps: "类属性",
@@ -148,6 +162,10 @@ export const messages: Record<Locale, MessageTree> = {
       paramValue: "Value",
       deleteParamNamed: "Delete {name}",
       addGroup: "Add group",
+      addModel: "Add model",
+      addUse: "Add reference",
+      addedModel: "Model added",
+      addedUse: "Reference added",
       addChild: "Add child",
       addCurve: "Curves",
       addSolid: "Solids",
@@ -156,6 +174,13 @@ export const messages: Record<Locale, MessageTree> = {
       addLogic: "Logic",
       addLoop: "Loop",
       moreActions: "More",
+      optimize: "Optimize",
+      optimizeHeader: "Optimize document structure",
+      optimizeBody:
+        "This removes unset references, empty nodes, unreferenced defs groups, and unused materials and parameters. It will change the file structure and cannot be undone automatically.",
+      optimizeConfirm: "Optimize",
+      optimizeNoChange: "Nothing to optimize",
+      optimizeDone: "Optimized — removed {n} item(s)",
       deleteNode: "Delete",
       addedChild: "Added",
       deletedNode: "Deleted",
@@ -180,6 +205,9 @@ export const messages: Record<Locale, MessageTree> = {
       paramDefs: "Param definitions",
       paramDefGroup: "Param group",
       unsetHint: "Unset",
+      noParamsAvailable: "No parameters available on this node",
+      noHrefTargets: "No referenceable groups in defs",
+      unsetHref: "Unset reference",
       updatedNode: "Updated node",
       resizePanel: "Drag to resize",
       classProps: "Class props",

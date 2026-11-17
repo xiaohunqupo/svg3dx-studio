@@ -106,13 +106,19 @@ async function loadContent(
       lastContent = text;
       return;
     }
+    // Only treat as fitted when the scene actually has content. An empty
+    // model (e.g. uses with cleared href) must not lock hasFitted — otherwise
+    // the next load with geometry skips fitCamera and OrbitControls stays
+    // singular (camera/target both at origin).
     const fit = !hasFitted;
     if (options.soft) {
       await v.applySvg(text, { fitCamera: fit });
     } else {
       await v.loadSvg(text, { fitCamera: fit });
     }
-    if (fit) hasFitted = true;
+    if (fit && v.viewer.viewer.root.children.length > 0) {
+      hasFitted = true;
+    }
     lastContent = text;
   } catch (e) {
     emit("error", e instanceof Error ? e.message : String(e));
@@ -161,7 +167,9 @@ defineExpose({
     if (interact && props.content) {
       hasFitted = false;
       await interact.loadSvg(props.content, { fitCamera: true });
-      hasFitted = true;
+      if (interact.viewer.viewer.root.children.length > 0) {
+        hasFitted = true;
+      }
       lastContent = props.content;
     }
   },

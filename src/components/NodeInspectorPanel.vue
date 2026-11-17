@@ -6,6 +6,8 @@ import type { SelectOption } from "tdesign-vue-next";
 import type { TreeSelectPayload } from "@/components/NodeTreePanel.vue";
 import StyleParamEditor from "@/components/StyleParamEditor.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
+import ExprAttrInput from "@/components/ExprAttrInput.vue";
+import HrefRefInput from "@/components/HrefRefInput.vue";
 import { useI18n } from "@/i18n";
 import {
   APPEARANCE_ATTR_NAMES,
@@ -33,6 +35,12 @@ import {
 } from "@/utils/documentMaterials";
 import { fillToHex8, hex8ToFill } from "@/utils/fillColor";
 import { readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import {
+  collectParamSourceGroups,
+  effectiveBareParamNames,
+} from "@/utils/paramScope";
+import { previewExprResult } from "@/utils/exprEval";
+import { extractDefsGroups } from "@/utils/styleClasses";
 
 const props = defineProps<{
   selected: TreeSelectPayload | null;
@@ -45,7 +53,7 @@ const emit = defineEmits<{
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
 }>();
 
-const { t, tagLabel } = useI18n();
+const { t, tagLabel, attrLabel, elementLabel, materialLabel } = useI18n();
 
 type FieldRow = AttrField & {
   key: string;
@@ -69,16 +77,20 @@ const openSections = ref<Array<string | number>>([]);
 function nodeTypeLabel(node: GeometryInstruction): string {
   switch (node.type) {
     case "primitive":
-      return node.kind;
+      return elementLabel(node.kind);
     case "group":
       return tagLabel("group");
     case "bool_op":
-      return `bool-${node.op}`;
+      return elementLabel(`bool-${node.op}`);
     case "instance":
       return tagLabel("use");
     default:
       return "node";
   }
+}
+
+function fieldDisplayName(name: string): string {
+  return attrLabel(name);
 }
 
 function attrLookup(
@@ -194,6 +206,8 @@ const styleBasicFields = computed((): FieldRow[] => {
 
 const materialBasicFields = computed((): FieldRow[] => {
   if (props.selected?.kind !== "material") return [];
+  // Touch locale via attrLabel/tagLabel so labels refresh on language switch.
+  void attrLabel("type");
   const sel = props.selected;
   return [
     {
@@ -217,13 +231,13 @@ const materialBasicFields = computed((): FieldRow[] => {
     {
       key: "material:metalness",
       name: "metalness",
-      value: sel.metalness ?? "",
+      value: String(sel.metalness ?? ""),
       readonly: true,
     },
     {
       key: "material:roughness",
       name: "roughness",
-      value: sel.roughness ?? "",
+      value: String(sel.roughness ?? ""),
       readonly: true,
     },
   ];
@@ -363,9 +377,9 @@ const geometryView = computed(() => {
     });
   } else if (node.type === "instance") {
     const idVal = attrLookup(xmlAttrs, "id") || sel.className || "";
-    const hrefVal =
-      attrLookup(xmlAttrs, "href") ||
-      (node.group_id ? `#${node.group_id}` : "");
+    // Prefer XML href only — do not fall back to node.group_id, or clearing
+    // the attr would be immediately restored on the next seedDraft.
+    const hrefVal = attrLookup(xmlAttrs, "href");
     sections.push({
       id: "basic",
       title: t("app.basicInfo"),
@@ -639,6 +653,65 @@ function isVecRgbField(field: AttrField): boolean {
   return looksLikeVecRgbText(field.placeholder ?? "");
 }
 
+/** Scalar geometry attrs that accept literals / var / calc. */
+const EXPR_ATTR_SKIP = new Set([
+  "id",
+  "class",
+  "type",
+  "href",
+  "xlink:href",
+  "fill",
+  "material",
+  "opacity",
+  "s3dx:transform",
+  "blend",
+  "orient",
+  "corner",
+  "solid",
+  "path",
+  "refDir",
+]);
+
+function isExprScalarField(field: AttrField): boolean {
+  if (EXPR_ATTR_SKIP.has(field.name)) return false;
+  if (isVecRgbField(field)) return false;
+  return true;
+}
+
+const paramSourceGroups = computed(() => {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry" || !props.content) return [];
+  return collectParamSourceGroups(props.content, sel.path);
+});
+
+const effectiveParamNames = computed(() =>
+  effectiveBareParamNames(paramSourceGroups.value)
+);
+
+/** Top-level `<g id>` under `<defs>` — href targets for `<s3dx:use>`. */
+const defsHrefOptions = computed(() =>
+  extractDefsGroups(props.content ?? "").map((g) => g.id)
+);
+
+/** Effective param bare-name → value, for expression result preview. */
+const effectiveParamValues = computed(() => {
+  const map = new Map<string, string>();
+  for (const g of paramSourceGroups.value) {
+    for (const it of g.items) {
+      if (!it.overridden) map.set(it.bare, it.value);
+    }
+  }
+  return map;
+});
+
+/** Resolved numeric preview shown beside the attr label. */
+function exprResultBesideName(field: AttrField): string | null {
+  if (!isExprScalarField(field)) return null;
+  const raw = (draft[field.name] ?? "").trim();
+  if (!raw) return null;
+  return previewExprResult(raw, effectiveParamValues.value);
+}
+
 function swatchStyle(colorRaw: string | undefined): Record<string, string> {
   const hex = colorRaw ? fillToHex8(colorRaw) : "";
   return {
@@ -676,14 +749,17 @@ type MaterialOption = {
 
 const materialSelectOptions = computed((): SelectOption[] => {
   const builtin: MaterialOption[] = Object.entries(BUILTIN_MATERIALS).map(
-    ([id, desc]) => ({
-      label: id,
-      value: id,
-      content: materialOptionContent(
-        id,
-        desc.color ? desc.color.join(" ") : undefined
-      ),
-    })
+    ([id, desc]) => {
+      const label = materialLabel(id);
+      return {
+        label,
+        value: id,
+        content: materialOptionContent(
+          label,
+          desc.color ? desc.color.join(" ") : undefined
+        ),
+      };
+    }
   );
 
   const docs = extractDocumentMaterials(props.content ?? "");
@@ -760,7 +836,9 @@ function onStyleChange(map: Record<string, string>): void {
       >
         <t-list-item v-for="field in styleBasicFields" :key="field.key">
           <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{ field.name }}</span>
+            <span class="name" :title="field.name">{{
+              fieldDisplayName(field.name)
+            }}</span>
             <span class="value">{{ field.value }}</span>
           </div>
         </t-list-item>
@@ -786,7 +864,9 @@ function onStyleChange(map: Record<string, string>): void {
       >
         <t-list-item v-for="field in modelBasicFields" :key="field.key">
           <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{ field.name }}</span>
+            <span class="name" :title="field.name">{{
+              fieldDisplayName(field.name)
+            }}</span>
             <span class="value">{{ field.value }}</span>
           </div>
         </t-list-item>
@@ -803,7 +883,9 @@ function onStyleChange(map: Record<string, string>): void {
       >
         <t-list-item v-for="field in materialBasicFields" :key="field.key">
           <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{ field.name }}</span>
+            <span class="name" :title="field.name">{{
+              fieldDisplayName(field.name)
+            }}</span>
             <span class="value">{{ field.value || "—" }}</span>
           </div>
         </t-list-item>
@@ -837,7 +919,9 @@ function onStyleChange(map: Record<string, string>): void {
                 v-if="row.kind === 'transform-part'"
                 class="param-row transform-part-row"
               >
-                <span class="name">{{ row.key }}</span>
+                <span class="name" :title="row.key">{{
+                  fieldDisplayName(row.key)
+                }}</span>
                 <div class="value-cell">
                   <VecRgbInput
                     v-model="transformParts[row.key]"
@@ -858,9 +942,22 @@ function onStyleChange(map: Record<string, string>): void {
               >
                 <span
                   class="name"
-                  :title="row.field.description || row.field.name"
-                  >{{ row.field.name }}</span
+                  :title="
+                    row.field.description ||
+                    (fieldDisplayName(row.field.name) !== row.field.name
+                      ? row.field.name
+                      : undefined)
+                  "
                 >
+                  <span class="name-label">{{
+                    fieldDisplayName(row.field.name)
+                  }}</span>
+                  <span
+                    v-if="exprResultBesideName(row.field)"
+                    class="name-result"
+                    >{{ exprResultBesideName(row.field) }}</span
+                  >
+                </span>
                 <span v-if="row.field.readonly" class="value">{{
                   draft[row.field.name] ?? row.field.value
                 }}</span>
@@ -908,9 +1005,7 @@ function onStyleChange(map: Record<string, string>): void {
                     clearable
                     filterable
                     size="small"
-                    :placeholder="
-                      row.field.placeholder || t('app.unsetHint')
-                    "
+                    :placeholder="materialLabel('default')"
                     class="material-select"
                     @change="onMaterialChange"
                     @clear="onMaterialClear"
@@ -960,6 +1055,50 @@ function onStyleChange(map: Record<string, string>): void {
                     :placeholder="
                       row.field.placeholder || t('app.unsetHint')
                     "
+                    @blur="commitField(row.field.name)"
+                    @enter="commitField(row.field.name)"
+                    @clear="
+                      () => {
+                        draft[row.field.name] = '';
+                        commitField(row.field.name);
+                      }
+                    "
+                  />
+                  <HrefRefInput
+                    v-else-if="
+                      row.field.name === 'href' ||
+                      row.field.name === 'xlink:href'
+                    "
+                    :model-value="draft[row.field.name]"
+                    clearable
+                    class="value-input"
+                    :options="defsHrefOptions"
+                    :placeholder="row.field.placeholder || '#groupId'"
+                    @update:model-value="
+                      (v: string) => {
+                        draft[row.field.name] = v ?? '';
+                        commitField(row.field.name);
+                      }
+                    "
+                    @blur="commitField(row.field.name)"
+                    @enter="commitField(row.field.name)"
+                    @clear="
+                      () => {
+                        draft[row.field.name] = '';
+                        commitField(row.field.name);
+                      }
+                    "
+                  />
+                  <ExprAttrInput
+                    v-else-if="isExprScalarField(row.field)"
+                    v-model="draft[row.field.name]"
+                    clearable
+                    class="value-input"
+                    :placeholder="
+                      row.field.placeholder || t('app.unsetHint')
+                    "
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
                     @blur="commitField(row.field.name)"
                     @enter="commitField(row.field.name)"
                     @clear="
@@ -1054,7 +1193,7 @@ function onStyleChange(map: Record<string, string>): void {
 
 .param-row {
   display: grid;
-  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 5.5rem) minmax(0, 1fr);
   gap: 8px;
   align-items: start;
   width: 100%;
@@ -1080,16 +1219,42 @@ function onStyleChange(map: Record<string, string>): void {
 }
 
 .name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
   font-weight: 600;
+  overflow: hidden;
+}
+
+.name-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.name-result {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-weight: 500;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--td-text-color-secondary);
 }
 
 .value {
   min-width: 0;
   word-break: break-word;
   font-variant-numeric: tabular-nums;
+}
+
+.value-input {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .value-input :deep(.t-input) {
@@ -1140,12 +1305,16 @@ function onStyleChange(map: Record<string, string>): void {
   align-items: center;
   gap: 2px;
   min-width: 0;
+  max-width: 100%;
   width: 100%;
+  overflow: hidden;
 }
 
 .transform-compact .value-input {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .transform-part-row .name {

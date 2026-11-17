@@ -9,8 +9,10 @@ declare module 'vue' {
   export interface GlobalComponents {
     BrowsePageSkeleton: typeof import('./components/skeletons/BrowsePageSkeleton.vue')['default']
     EditPageSkeleton: typeof import('./components/skeletons/EditPageSkeleton.vue')['default']
+    ExprAttrInput: typeof import('./components/ExprAttrInput.vue')['default']
     FileDropZone: typeof import('./components/FileDropZone.vue')['default']
     FileListPanel: typeof import('./components/FileListPanel.vue')['default']
+    HrefRefInput: typeof import('./components/HrefRefInput.vue')['default']
     InteractHost: typeof import('./components/InteractHost.vue')['default']
     LocaleSwitch: typeof import('./components/LocaleSwitch.vue')['default']
     NodeInspectorPanel: typeof import('./components/NodeInspectorPanel.vue')['default']
