@@ -62,10 +62,12 @@ export class InteractViewport {
   ) {
     this.viewer = viewer;
     this.onPick = options.onPick;
-    // Official OutlinePass via EmbedViewer — materials stay untouched.
+    // Meshes → OutlinePass; curve wires (line/arc/path) get color highlight inside SelectionHighlight.
     this.highlight = new SelectionHighlight((objects) => {
       this.viewer.setSelectedObjects(objects);
     });
+    // Thin THREE.Line wires need a wider pick band than the default (1 world unit).
+    this.raycaster.params.Line = { threshold: 4 };
 
     this.onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
