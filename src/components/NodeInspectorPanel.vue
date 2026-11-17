@@ -44,8 +44,8 @@ import {
   collectParamSourceGroups,
   effectiveBareParamNames,
 } from "@/utils/paramScope";
-import { previewExprResult } from "@/utils/exprEval";
 import { extractDefsGroups } from "@/utils/styleClasses";
+import { blankIfEqualsDefault } from "@/utils/attrDefault";
 
 const props = defineProps<{
   selected: TreeSelectPayload | null;
@@ -165,7 +165,8 @@ function seedDraft(fields: FieldRow[], path: string): void {
       draft[f.name] = f.value;
       fillHexUi.value = fillToHex8(f.value);
     } else {
-      draft[f.name] = f.value;
+      // Studio rule: value === placeholder/default → show as unset.
+      draft[f.name] = blankIfEqualsDefault(f.value, f.placeholder, f.name);
     }
   }
 }
@@ -533,13 +534,20 @@ function commitField(name: string): void {
   let changed = false;
   for (const f of view.allFields) {
     if (f.readonly || f.name === "type") continue;
-    const raw = (draft[f.name] ?? "").trim();
+    let raw = (draft[f.name] ?? "").trim();
+    if (f.name === "s3dx:transform") {
+      if (isIdentityTransformDisplay(raw)) raw = "";
+    } else {
+      raw = blankIfEqualsDefault(raw, f.placeholder, f.name);
+    }
+    // Keep draft aligned with the unset-default rule.
+    if (draft[f.name] !== raw) draft[f.name] = raw;
     const next =
       f.name === "s3dx:transform" ? transformToAttr(raw) : raw;
     const prev =
       f.name === "s3dx:transform"
         ? transformToAttr(f.value ?? "")
-        : (f.value ?? "").trim();
+        : blankIfEqualsDefault(f.value ?? "", f.placeholder, f.name);
     updates[f.name] = next;
     if (next !== prev) changed = true;
   }
@@ -556,8 +564,13 @@ function commitMaterialAttrs(_name?: string): void {
   let changed = false;
   for (const f of fields) {
     if (f.readonly || f.name === "type") continue;
-    const next = (draft[f.name] ?? "").trim();
-    const prev = (f.value ?? "").trim();
+    const next = blankIfEqualsDefault(
+      draft[f.name] ?? "",
+      f.placeholder,
+      f.name
+    );
+    if (draft[f.name] !== next) draft[f.name] = next;
+    const prev = blankIfEqualsDefault(f.value ?? "", f.placeholder, f.name);
     updates[f.name] = next;
     if (next !== prev) changed = true;
   }
@@ -807,14 +820,6 @@ const effectiveParamValues = computed(() => {
   }
   return map;
 });
-
-/** Resolved numeric preview shown beside the attr label. */
-function exprResultBesideName(field: AttrField): string | null {
-  if (!isExprScalarField(field)) return null;
-  const raw = (draft[field.name] ?? "").trim();
-  if (!raw) return null;
-  return previewExprResult(raw, effectiveParamValues.value);
-}
 
 function swatchStyle(colorRaw: string | undefined): Record<string, string> {
   const hex = colorRaw ? fillToHex8(colorRaw) : "";
@@ -1125,6 +1130,10 @@ function onStyleChange(map: Record<string, string>): void {
                     clearable
                     class="value-input"
                     :placeholder="transformPartPlaceholder(row.key)"
+                    :max-components="3"
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
                     @blur="commitTransformParts"
                     @enter="commitTransformParts"
                     @clear="() => clearTransformPart(row.key)"
@@ -1170,11 +1179,6 @@ function onStyleChange(map: Record<string, string>): void {
                       <ChevronDownIcon v-else />
                     </template>
                   </t-button>
-                  <span
-                    v-if="exprResultBesideName(row.field)"
-                    class="name-result"
-                    >{{ exprResultBesideName(row.field) }}</span
-                  >
                 </span>
                 <span v-if="row.field.readonly" class="value">{{
                   draft[row.field.name] ?? row.field.value
@@ -1272,6 +1276,9 @@ function onStyleChange(map: Record<string, string>): void {
                     :clearable="!transformExpanded"
                     :placeholder="IDENTITY_TRANSFORM_DISPLAY"
                     class="value-input"
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
                     @update:model-value="
                       (v: string) => {
                         if (!transformExpanded)
@@ -1290,6 +1297,9 @@ function onStyleChange(map: Record<string, string>): void {
                     :placeholder="
                       row.field.placeholder || t('app.unsetHint')
                     "
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
                     @blur="commitField(row.field.name)"
                     @enter="commitField(row.field.name)"
                     @clear="
@@ -1334,6 +1344,7 @@ function onStyleChange(map: Record<string, string>): void {
                     "
                     :param-groups="paramSourceGroups"
                     :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
                     @blur="commitField(row.field.name)"
                     @enter="commitField(row.field.name)"
                     @clear="
@@ -1482,15 +1493,6 @@ function onStyleChange(map: Record<string, string>): void {
   flex-shrink: 0;
 }
 
-.name-result {
-  flex-shrink: 0;
-  margin-left: auto;
-  font-weight: 500;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--td-text-color-secondary);
-}
-
 .value {
   min-width: 0;
   word-break: break-word;
@@ -1500,7 +1502,6 @@ function onStyleChange(map: Record<string, string>): void {
 .value-input {
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
 }
 
 .value-input :deep(.t-input) {

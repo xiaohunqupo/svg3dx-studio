@@ -12,6 +12,8 @@ import {
   replaceSelectionWithParam,
   simplifyExprDisplay,
 } from "@/utils/exprAttr";
+import { blankIfEqualsDefault } from "@/utils/attrDefault";
+import { previewExprResult } from "@/utils/exprEval";
 import type { ParamSourceGroup } from "@/utils/paramScope";
 
 const props = withDefaults(
@@ -20,6 +22,10 @@ const props = withDefaults(
     placeholder?: string;
     paramGroups?: ParamSourceGroup[];
     effectiveNames?: ReadonlySet<string> | Set<string>;
+    /** Param bare-name → value, for the numeric preview under the field. */
+    paramValues?: ReadonlyMap<string, string> | Map<string, string>;
+    /** When false, hide the numeric preview (e.g. VecRgb owns its own). */
+    showResult?: boolean;
     clearable?: boolean;
     readonly?: boolean;
     disabled?: boolean;
@@ -28,6 +34,7 @@ const props = withDefaults(
     modelValue: "",
     placeholder: "",
     paramGroups: () => [],
+    showResult: true,
     clearable: false,
     readonly: false,
     disabled: false,
@@ -61,6 +68,8 @@ const effective = computed(
   () => props.effectiveNames ?? new Set<string>()
 );
 
+const emptyParams = new Map<string, string>();
+
 /** Shown text: keep mixed expressions intact; only pure var/calc(var) simplify. */
 function toDisplay(stored: string): string {
   return simplifyExprDisplay(stored);
@@ -73,6 +82,16 @@ const displayText = computed(() =>
 const colorTokens = computed(() =>
   colorizeExprDisplay(displayText.value, effective.value)
 );
+
+/** Numeric preview under the field (same placement as VecRgb result). */
+const resultText = computed((): string | null => {
+  if (!props.showResult) return null;
+  const raw = focused.value
+    ? expandExprInput(editText.value, effective.value)
+    : (props.modelValue ?? "");
+  if (!raw.trim()) return null;
+  return previewExprResult(raw, props.paramValues ?? emptyParams);
+});
 
 const showClear = computed(
   () =>
@@ -148,8 +167,15 @@ function onDocPointerDown(e: PointerEvent): void {
   commitAndClose();
 }
 
+function normalizeStored(stored: string): string {
+  // Studio rule: equal to placeholder/default → unset.
+  return blankIfEqualsDefault(stored, props.placeholder);
+}
+
 function commitAndClose(): void {
-  const stored = expandExprInput(editText.value, effective.value);
+  const stored = normalizeStored(
+    expandExprInput(editText.value, effective.value)
+  );
   emit("update:modelValue", stored);
   focused.value = false;
   activeBare.value = null;
@@ -185,7 +211,9 @@ function onScrollOrResize(): void {
 }
 
 function commitFromEdit(): void {
-  const stored = expandExprInput(editText.value, effective.value);
+  const stored = normalizeStored(
+    expandExprInput(editText.value, effective.value)
+  );
   emit("update:modelValue", stored);
 }
 
@@ -369,6 +397,9 @@ onBeforeUnmount(() => {
         <CloseCircleFilledIcon />
       </button>
     </div>
+    <div v-if="resultText" class="expr-result" aria-hidden="true">{{
+      resultText
+    }}</div>
 
     <Teleport to="body">
       <div
@@ -419,10 +450,12 @@ onBeforeUnmount(() => {
   --expr-purple: #7c4dff;
   --expr-blue: #448aff;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
 }
 
 .expr-field {
@@ -441,6 +474,19 @@ onBeforeUnmount(() => {
   transition: box-shadow 0.15s ease;
   isolation: isolate;
   overflow: hidden;
+}
+
+.expr-result {
+  min-width: 0;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.3;
+  color: var(--td-text-color-secondary);
 }
 
 .expr-field::before {

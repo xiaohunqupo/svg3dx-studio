@@ -76,14 +76,57 @@ export function transformPartPlaceholder(key: TransformPartKey): string {
 }
 
 /**
+ * Split a space/comma-separated vector, respecting parentheses so spaces
+ * inside `calc(...)` / `var(...)` do not create extra components.
+ */
+export function splitVecTokens(raw: string): string[] {
+  const s = raw.trim();
+  if (!s) return [];
+  const out: string[] = [];
+  let buf = "";
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (c === "(") {
+      depth += 1;
+      buf += c;
+      continue;
+    }
+    if (c === ")") {
+      depth = Math.max(0, depth - 1);
+      buf += c;
+      continue;
+    }
+    if (
+      depth === 0 &&
+      (c === " " || c === "\t" || c === "\n" || c === "\r" || c === ",")
+    ) {
+      if (buf.trim()) out.push(buf.trim());
+      buf = "";
+      continue;
+    }
+    buf += c;
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out;
+}
+
+/** Keep at most `maxComponents` vector tokens (drop extras). */
+export function clampVecTokens(raw: string, maxComponents: number): string {
+  const toks = splitVecTokens(raw);
+  if (!toks.length) return "";
+  if (maxComponents <= 0 || toks.length <= maxComponents) {
+    return toks.join(" ");
+  }
+  return toks.slice(0, maxComponents).join(" ");
+}
+
+/**
  * Whether text looks like one or more XYZ triplets (points / vectors / matrices).
- * Used to enable R/G/B segmented coloring in the inspector.
+ * Used to enable the vector inspector control.
  */
 export function looksLikeVecRgbText(raw: string): boolean {
-  const nums = raw
-    .trim()
-    .split(/[\s,]+/)
-    .filter(Boolean);
+  const nums = splitVecTokens(raw);
   return nums.length >= 3 && nums.length % 3 === 0;
 }
 
@@ -113,11 +156,10 @@ function formatVec3(a: number, b: number, c: number): string {
 export function parseTransform12(raw: string): number[] | null {
   const inner = transformToDisplay(raw);
   if (!inner) return null;
-  const nums = inner
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number);
-  if (nums.length !== 12 || nums.some((n) => !Number.isFinite(n))) return null;
+  const toks = splitVecTokens(inner);
+  if (toks.length !== 12) return null;
+  const nums = toks.map(Number);
+  if (nums.some((n) => !Number.isFinite(n))) return null;
   return nums;
 }
 
@@ -140,13 +182,26 @@ export function transformPartsFrom12(m: number[]): TransformParts {
 }
 
 export function parseVec3(raw: string): [number, number, number] | null {
-  const nums = raw
-    .trim()
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number);
-  if (nums.length !== 3 || nums.some((n) => !Number.isFinite(n))) return null;
+  const toks = splitVecTokens(raw);
+  if (toks.length !== 3) return null;
+  const nums = toks.map(Number);
+  if (nums.some((n) => !Number.isFinite(n))) return null;
   return [nums[0]!, nums[1]!, nums[2]!];
+}
+
+/** Three expression-capable components, or null. */
+export function parseVec3Components(raw: string): [string, string, string] | null {
+  const toks = splitVecTokens(raw);
+  if (toks.length !== 3) return null;
+  return [toks[0]!, toks[1]!, toks[2]!];
+}
+
+/** Twelve expression-capable matrix tokens, or null. */
+export function parseTransform12Components(raw: string): string[] | null {
+  const inner = transformToDisplay(raw);
+  if (!inner) return null;
+  const toks = splitVecTokens(inner);
+  return toks.length === 12 ? toks : null;
 }
 
 function vec3Equals(
@@ -160,6 +215,23 @@ function vec3Equals(
   );
 }
 
+/** True when `value` is numerically (or textually) the same as the default vec. */
+export function vecEqualsDefault(value: string, identity: string): boolean {
+  const v = (value ?? "").trim();
+  const id = (identity ?? "").trim();
+  if (!v) return true;
+  if (!id) return false;
+  const vn = parseVec3(v);
+  const i = parseVec3(id);
+  if (vn && i) return vec3Equals(vn, i);
+  return clampVecTokens(v, 3) === clampVecTokens(id, 3);
+}
+
+/** Identity / default → "" so the editor shows placeholder (not a sticky value). */
+export function blankIfIdentityVec(value: string, identity: string): string {
+  return vecEqualsDefault(value, identity) ? "" : (value ?? "").trim();
+}
+
 /** Blank parts resolve to identity so compose / commit stay valid. */
 export function transformPartsWithDefaults(parts: TransformParts): TransformParts {
   const id = identityTransformParts();
@@ -171,7 +243,7 @@ export function transformPartsWithDefaults(parts: TransformParts): TransformPart
   };
 }
 
-/** Build bare 12-number display from parts; null if any non-empty part is invalid. */
+/** Build bare 12-token display from parts; null if any part is not 3 components. */
 export function transformDisplayFromParts(parts: TransformParts): string | null {
   return transformDisplayFromPartsResolved(transformPartsWithDefaults(parts));
 }
@@ -179,35 +251,47 @@ export function transformDisplayFromParts(parts: TransformParts): string | null 
 function transformDisplayFromPartsResolved(
   parts: TransformParts
 ): string | null {
-  const x = parseVec3(parts.xdir);
-  const y = parseVec3(parts.ydir);
-  const z = parseVec3(parts.zdir);
-  const t = parseVec3(parts.translation);
-  if (!x || !y || !z || !t) return null;
-  return [...x, ...y, ...z, ...t].map(formatTransformNum).join(" ");
+  const axes = [parts.xdir, parts.ydir, parts.zdir, parts.translation] as const;
+  const all: string[] = [];
+  for (const axis of axes) {
+    const toks = parseVec3Components(axis);
+    if (!toks) return null;
+    all.push(...toks);
+  }
+  const nums = all.map(Number);
+  if (nums.every((n) => Number.isFinite(n))) {
+    return nums.map(formatTransformNum).join(" ");
+  }
+  return all.join(" ");
 }
 
 /**
  * Sync editors from compact display. Identity / unset → empty strings so
- * placeholders show defaults (not "has value").
+ * placeholders show defaults (not "has value"). Same for expression matrices
+ * when a part is numerically the identity default.
  */
 export function syncTransformPartsFromDisplay(raw: string): TransformParts {
-  const m = parseTransform12(raw);
-  if (!m || isIdentityTransformDisplay(raw)) return emptyTransformParts();
-  const parts = transformPartsFrom12(m);
+  if (isIdentityTransformDisplay(raw)) return emptyTransformParts();
+
   const id = identityTransformParts();
-  const blankIfIdentity = (value: string, identity: string): string => {
-    const v = parseVec3(value);
-    const i = parseVec3(identity);
-    if (v && i && vec3Equals(v, i)) return "";
-    return value;
-  };
-  return {
-    xdir: blankIfIdentity(parts.xdir, id.xdir),
-    ydir: blankIfIdentity(parts.ydir, id.ydir),
-    zdir: blankIfIdentity(parts.zdir, id.zdir),
-    translation: blankIfIdentity(parts.translation, id.translation),
-  };
+  const blankParts = (parts: TransformParts): TransformParts => ({
+    xdir: blankIfIdentityVec(parts.xdir, id.xdir),
+    ydir: blankIfIdentityVec(parts.ydir, id.ydir),
+    zdir: blankIfIdentityVec(parts.zdir, id.zdir),
+    translation: blankIfIdentityVec(parts.translation, id.translation),
+  });
+
+  const m = parseTransform12(raw);
+  if (m) return blankParts(transformPartsFrom12(m));
+
+  const toks = parseTransform12Components(raw);
+  if (!toks) return emptyTransformParts();
+  return blankParts({
+    xdir: toks.slice(0, 3).join(" "),
+    ydir: toks.slice(3, 6).join(" "),
+    zdir: toks.slice(6, 9).join(" "),
+    translation: toks.slice(9, 12).join(" "),
+  });
 }
 
 /**

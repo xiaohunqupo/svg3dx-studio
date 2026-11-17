@@ -1,7 +1,10 @@
 /**
  * Display / edit helpers for expression-capable scalar attrs
  * (`var(--name)`, `calc(var(--name))`, literals).
+ * Multi-component vectors are expanded / simplified per token.
  */
+
+import { splitVecTokens } from "@/utils/nodeSchema";
 
 const PURE_VAR_RE = /^var\(\s*(--([A-Za-z_][\w-]*))\s*\)$/i;
 const PURE_CALC_VAR_RE =
@@ -20,12 +23,7 @@ export function bareNameFromPureVarExpr(stored: string): string | null {
   return null;
 }
 
-/**
- * Stored → editor display.
- * `calc(var(--length))` / `var(--length)` → `length`;
- * `calc(60 + var(--radius))` / `60+radius` → `60 + radius`.
- */
-export function simplifyExprDisplay(stored: string): string {
+function simplifyExprDisplayOne(stored: string): string {
   const bare = bareNameFromPureVarExpr(stored);
   if (bare) return bare;
   let s = stored.trim();
@@ -40,6 +38,20 @@ export function simplifyExprDisplay(stored: string): string {
   // Unwrapped calc of a single token, or unchanged literal.
   if (calcBody) return s;
   return stored.trim();
+}
+
+/**
+ * Stored → editor display.
+ * `calc(var(--length))` / `var(--length)` → `length`;
+ * `calc(60 + var(--radius))` / `60+radius` → `60 + radius`.
+ * Vectors: simplify each component independently.
+ */
+export function simplifyExprDisplay(stored: string): string {
+  const s = stored.trim();
+  if (!s) return "";
+  const toks = splitVecTokens(s);
+  if (toks.length <= 1) return simplifyExprDisplayOne(s);
+  return toks.map(simplifyExprDisplayOne).join(" ");
 }
 
 export type ExprDisplayKind = "empty" | "literal" | "param-ok" | "param-bad" | "raw";
@@ -116,13 +128,7 @@ function beautifyCalcBody(expr: string): string {
   return t;
 }
 
-/**
- * Editor display → stored attribute value.
- * - Bare name → `var(--name)` when it matches an effective param
- * - Mixed math with params → `calc(60 + var(--radius))`
- * - Literals / unknown text kept as typed
- */
-export function expandExprInput(
+function expandExprInputOne(
   display: string,
   effectiveBareNames: ReadonlySet<string>
 ): string {
@@ -145,14 +151,57 @@ export function expandExprInput(
   const calcMatch = /^calc\s*\(([\s\S]*)\)\s*$/i.exec(s);
   if (calcMatch) {
     const inner = expandParamsInExpr(calcMatch[1]!, effectiveBareNames);
-    return `calc(${beautifyCalcBody(inner)})`;
+    return `calc(${beautifyCalcBody(unwrapBalancedOuterParens(inner))})`;
   }
 
   const expanded = expandParamsInExpr(s, effectiveBareNames);
   if (needsCalcWrapper(expanded)) {
-    return `calc(${beautifyCalcBody(expanded)})`;
+    return `calc(${beautifyCalcBody(unwrapBalancedOuterParens(expanded))})`;
   }
   return expanded;
+}
+
+/** `(1 + x)` → `1 + x` so we don't store `calc((1 + x))`. */
+function unwrapBalancedOuterParens(expr: string): string {
+  let s = expr.trim();
+  while (s.startsWith("(") && s.endsWith(")")) {
+    let depth = 0;
+    let wrapsAll = true;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]!;
+      if (c === "(") depth += 1;
+      else if (c === ")") {
+        depth -= 1;
+        if (depth === 0 && i < s.length - 1) {
+          wrapsAll = false;
+          break;
+        }
+      }
+    }
+    if (!wrapsAll || depth !== 0) break;
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+/**
+ * Editor display → stored attribute value.
+ * - Bare name → `var(--name)` when it matches an effective param
+ * - Mixed math with params → `calc(60 + var(--radius))`
+ * - Literals / unknown text kept as typed
+ * - Vectors: expand each component independently
+ */
+export function expandExprInput(
+  display: string,
+  effectiveBareNames: ReadonlySet<string>
+): string {
+  const s = display.trim();
+  if (!s) return "";
+  const toks = splitVecTokens(s);
+  if (toks.length <= 1) return expandExprInputOne(s, effectiveBareNames);
+  return toks
+    .map((tok) => expandExprInputOne(tok, effectiveBareNames))
+    .join(" ");
 }
 
 export function bareParamName(dashedOrBare: string): string {
