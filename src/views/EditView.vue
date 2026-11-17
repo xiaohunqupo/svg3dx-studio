@@ -5,6 +5,7 @@ import {
   ChevronLeftIcon,
   DownloadIcon,
   SaveIcon,
+  ViewListIcon,
 } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import type { EvaluationResult } from "svg3dx-viewer";
@@ -13,6 +14,7 @@ import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
 import NodeTreePanel, {
   type TreeSelectPayload,
 } from "@/components/NodeTreePanel.vue";
+import SourceEditorPanel from "@/components/SourceEditorPanel.vue";
 import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
@@ -33,7 +35,11 @@ import {
 import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
 import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
 import { rewriteMaterialIdRefs } from "@/utils/documentMaterials";
-import { applyAttrsAtPath, removeElementAtPath } from "@/utils/nodeXmlEdit";
+import {
+  applyAttrsAtPath,
+  normalizeXmlNewlines,
+  removeElementAtPath,
+} from "@/utils/nodeXmlEdit";
 
 const props = defineProps<{ id: string }>();
 
@@ -44,17 +50,34 @@ const { t } = useI18n();
 
 const TREE_W_KEY = "svg3dx.studio.treeWidth";
 const INSPECTOR_W_KEY = "svg3dx.studio.inspectorWidth";
+const SOURCE_W_KEY = "svg3dx.studio.sourceWidth";
+const SHOW_MODEL_KEY = "svg3dx.studio.showModel";
+const SHOW_SOURCE_KEY = "svg3dx.studio.showSource";
 const TREE_W_MIN = 180;
 const TREE_W_MAX = 480;
 const INSPECTOR_W_MIN = 220;
 const INSPECTOR_W_MAX = 520;
+const SOURCE_W_MIN = 240;
+const SOURCE_W_MAX = 720;
 const TREE_W_DEFAULT = 260;
 const INSPECTOR_W_DEFAULT = 280;
+const SOURCE_W_DEFAULT = 360;
 
 function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
   try {
     const n = Number(localStorage.getItem(key));
     if (Number.isFinite(n)) return Math.min(max, Math.max(min, n));
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+function readStoredBool(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === "1" || raw === "true") return true;
+    if (raw === "0" || raw === "false") return false;
   } catch {
     /* ignore */
   }
@@ -67,11 +90,16 @@ const status = ref("");
 const draftContent = ref("");
 /** Currently displayed `s3dx:model` id. */
 const activeModelId = ref("");
+const showModel = ref(readStoredBool(SHOW_MODEL_KEY, true));
+const showSource = ref(readStoredBool(SHOW_SOURCE_KEY, false));
 const treeWidth = ref(readStoredWidth(TREE_W_KEY, TREE_W_DEFAULT, TREE_W_MIN, TREE_W_MAX));
 const inspectorWidth = ref(
   readStoredWidth(INSPECTOR_W_KEY, INSPECTOR_W_DEFAULT, INSPECTOR_W_MIN, INSPECTOR_W_MAX)
 );
-const resizing = ref<"tree" | "inspector" | null>(null);
+const sourceWidth = ref(
+  readStoredWidth(SOURCE_W_KEY, SOURCE_W_DEFAULT, SOURCE_W_MIN, SOURCE_W_MAX)
+);
+const resizing = ref<"tree" | "inspector" | "source" | null>(null);
 const treePanel = ref<{
   syncAfterEdit: (
     parentPath?: string,
@@ -82,11 +110,77 @@ const treePanel = ref<{
 const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
 } | null>(null);
+const sourcePanel = ref<{
+  revealPath: (path: string | null | undefined) => void;
+} | null>(null);
+/** True while applying a caret→tree selection (skip source re-reveal scroll). */
+let syncingFromSource = false;
 
 const workspaceEl = ref<HTMLElement | null>(null);
-const workspaceStyle = computed(() => ({
-  gridTemplateColumns: `${treeWidth.value}px 0px minmax(0, 1fr) 0px ${inspectorWidth.value}px`,
-}));
+const workspaceStyle = computed(() => {
+  const cols: string[] = [`${treeWidth.value}px`, "0px"];
+  if (showSource.value && showModel.value) {
+    cols.push(`${sourceWidth.value}px`, "0px", "minmax(0, 1fr)", "0px");
+  } else {
+    cols.push("minmax(0, 1fr)", "0px");
+  }
+  cols.push(`${inspectorWidth.value}px`);
+  return { gridTemplateColumns: cols.join(" ") };
+});
+
+function persistViewFlags(): void {
+  try {
+    localStorage.setItem(SHOW_MODEL_KEY, showModel.value ? "1" : "0");
+    localStorage.setItem(SHOW_SOURCE_KEY, showSource.value ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function setShowModel(next: boolean): void {
+  if (!next && !showSource.value) return;
+  showModel.value = next;
+  persistViewFlags();
+}
+
+function setShowSource(next: boolean): void {
+  if (!next && !showModel.value) return;
+  showSource.value = next;
+  persistViewFlags();
+}
+
+function onViewModelChange(value: boolean | string | number): void {
+  setShowModel(Boolean(value));
+}
+
+function onViewSourceChange(value: boolean | string | number): void {
+  setShowSource(Boolean(value));
+}
+
+function revealSelectedInSource(): void {
+  if (syncingFromSource) return;
+  if (!showSource.value || !sourcePanel.value) return;
+  sourcePanel.value.revealPath(selected.value?.path);
+}
+
+async function onSourceCursorPath(path: string | null): Promise<void> {
+  if (!path) return;
+  if (selected.value?.path === path) {
+    interactHost.value?.setHighlight(path);
+    return;
+  }
+  // selectPath emits select on a nested nextTick — keep the guard until then
+  // so watch(selected) does not scroll/re-reveal the source caret.
+  syncingFromSource = true;
+  try {
+    treePanel.value?.selectPath(path);
+    interactHost.value?.setHighlight(path);
+    await nextTick();
+    await nextTick();
+  } finally {
+    syncingFromSource = false;
+  }
+}
 
 const bootstrapping = ref(true);
 
@@ -94,7 +188,11 @@ const file = computed(() => store.getById(props.id) ?? null);
 const dirty = computed(() => file.value?.dirty || draftContent.value !== (file.value?.content ?? ""));
 const pageReady = computed(() => store.ready && !!file.value && !bootstrapping.value);
 const contentLoading = computed(
-  () => pageReady.value && !!draftContent.value && !result.value
+  () =>
+    pageReady.value &&
+    showModel.value &&
+    !!draftContent.value &&
+    !result.value
 );
 
 onMounted(async () => {
@@ -117,6 +215,16 @@ watch(
   () => syncFromStore()
 );
 
+watch(selected, () => {
+  revealSelectedInSource();
+});
+
+watch(showSource, async (visible) => {
+  if (!visible) return;
+  await nextTick();
+  revealSelectedInSource();
+});
+
 function syncFromStore(): void {
   const f = store.getById(props.id);
   if (!f) {
@@ -125,7 +233,8 @@ function syncFromStore(): void {
     return;
   }
   store.select(f.id);
-  draftContent.value = f.content;
+  // Keep LF so source offsets match CodeMirror (which always normalizes CRLF).
+  draftContent.value = normalizeXmlNewlines(f.content);
   selected.value = null;
   result.value = null;
   activeModelId.value = "";
@@ -358,6 +467,14 @@ function onViewportPick(path: string | null): void {
   treePanel.value?.selectPath(path);
 }
 
+async function onSourceContent(next: string): Promise<void> {
+  if (!file.value) return;
+  const normalized = normalizeXmlNewlines(next);
+  if (normalized === draftContent.value) return;
+  draftContent.value = normalized;
+  await store.updateContent(file.value.id, normalized, true);
+}
+
 async function onStyleParamsChange(propsMap: Record<string, string>): Promise<void> {
   const sel = selected.value;
   if (!sel || sel.kind !== "style" || !file.value) return;
@@ -379,6 +496,8 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
   selected.value = { ...sel, props: propsMap };
   await store.updateContent(file.value.id, next, true);
   status.value = `${t("app.updatedStyle")} ${isRoot ? ":root" : `.${className}`}`;
+  await nextTick();
+  revealSelectedInSource();
 }
 
 async function onNodeAttrsChange(payload: {
@@ -421,6 +540,9 @@ async function onNodeAttrsChange(payload: {
       treePanel.value?.syncAfterEdit("materials");
       await nextTick();
       treePanel.value?.selectPath(newPath);
+    } else {
+      await nextTick();
+      revealSelectedInSource();
     }
     return;
   }
@@ -428,12 +550,15 @@ async function onNodeAttrsChange(payload: {
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);
   status.value = t("app.updatedNode");
+  await nextTick();
+  revealSelectedInSource();
 }
 
 function persistWidths(): void {
   try {
     localStorage.setItem(TREE_W_KEY, String(treeWidth.value));
     localStorage.setItem(INSPECTOR_W_KEY, String(inspectorWidth.value));
+    localStorage.setItem(SOURCE_W_KEY, String(sourceWidth.value));
   } catch {
     /* ignore */
   }
@@ -448,6 +573,12 @@ function onResizeMove(ev: PointerEvent): void {
     treeWidth.value = Math.min(
       TREE_W_MAX,
       Math.max(TREE_W_MIN, ev.clientX - rect.left)
+    );
+  } else if (side === "source") {
+    const sourceLeft = rect.left + treeWidth.value;
+    sourceWidth.value = Math.min(
+      SOURCE_W_MAX,
+      Math.max(SOURCE_W_MIN, ev.clientX - sourceLeft)
     );
   } else {
     inspectorWidth.value = Math.min(
@@ -465,7 +596,7 @@ function stopResize(): void {
   persistWidths();
 }
 
-function startResize(side: "tree" | "inspector", ev: PointerEvent): void {
+function startResize(side: "tree" | "inspector" | "source", ev: PointerEvent): void {
   ev.preventDefault();
   resizing.value = side;
   document.body.style.cursor = "col-resize";
@@ -507,6 +638,39 @@ onBeforeUnmount(() => {
         >
           {{ t("app.unsaved") }}
         </t-tag>
+      </div>
+      <div class="view-menu">
+        <t-popup
+          trigger="click"
+          placement="bottom"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <t-button variant="text">
+            <template #icon><ViewListIcon /></template>
+            {{ t("app.view") }}
+          </t-button>
+          <template #content>
+            <t-space
+              class="view-menu-panel"
+              direction="vertical"
+              size="small"
+              role="menu"
+            >
+              <t-checkbox
+                :checked="showModel"
+                @change="onViewModelChange"
+              >
+                {{ t("app.viewModel") }}
+              </t-checkbox>
+              <t-checkbox
+                :checked="showSource"
+                @change="onViewSourceChange"
+              >
+                {{ t("app.viewSource") }}
+              </t-checkbox>
+            </t-space>
+          </template>
+        </t-popup>
       </div>
       <div class="right">
         <span class="status">{{ status }}</span>
@@ -553,7 +717,26 @@ onBeforeUnmount(() => {
         @pointerdown="(e) => startResize('tree', e)"
       />
 
-      <main class="viewport">
+      <SourceEditorPanel
+        v-if="showSource"
+        ref="sourcePanel"
+        class="source"
+        :heading="t('app.sourceCode')"
+        :model-value="draftContent"
+        @update:model-value="onSourceContent"
+        @cursor-path="onSourceCursorPath"
+      />
+      <div
+        v-if="showSource && showModel"
+        class="resize-handle resize-handle--source"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-valuenow="sourceWidth"
+        :title="t('app.resizePanel')"
+        @pointerdown="(e) => startResize('source', e)"
+      />
+
+      <main v-if="showModel" class="viewport">
         <ViewportSkeleton v-if="contentLoading" />
         <InteractHost
           ref="interactHost"
@@ -600,6 +783,7 @@ onBeforeUnmount(() => {
 }
 
 .topbar {
+  position: relative;
   height: 52px;
   flex-shrink: 0;
   display: flex;
@@ -653,6 +837,18 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.view-menu {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+.view-menu-panel {
+  min-width: 140px;
+  padding: 10px 12px;
+}
+
 .right {
   margin-left: auto;
 }
@@ -678,10 +874,15 @@ onBeforeUnmount(() => {
 }
 
 .tree,
+.source,
 .inspector {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.source {
+  overflow: hidden;
 }
 
 .viewport {

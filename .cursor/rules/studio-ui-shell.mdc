@@ -17,6 +17,8 @@ Left cluster must stay:
 
 Do not put Settings only on one page. File name / status / export / save stay to the right of that cluster.
 
+Edit page may place a centered「视图 / View」menu (toggle Model / Source panels) between the left cluster and the right actions. Do not put view toggles inside Settings.
+
 ## Settings menu
 
 - Trigger: TDesign text square button + `SettingIcon`

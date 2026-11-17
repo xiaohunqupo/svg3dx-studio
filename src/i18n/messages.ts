@@ -112,6 +112,10 @@ export const messages: Record<Locale, MessageTree> = {
       themeLight: "浅色",
       themeDark: "深色",
       cancel: "取消",
+      view: "视图",
+      viewModel: "模型",
+      viewSource: "源码",
+      sourceCode: "源码",
     },
     browse: {
       editCurrent: "编辑当前文件",
@@ -235,6 +239,10 @@ export const messages: Record<Locale, MessageTree> = {
       themeLight: "Light",
       themeDark: "Dark",
       cancel: "Cancel",
+      view: "View",
+      viewModel: "Model",
+      viewSource: "Source",
+      sourceCode: "Source",
     },
     browse: {
       editCurrent: "Edit current",

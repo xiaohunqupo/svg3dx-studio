@@ -10,6 +10,9 @@
         <t-skeleton animation="gradient" :row-col="[{ width: '88px', height: '28px' }]" />
       </div>
       <t-skeleton animation="gradient" :row-col="[{ width: '140px', height: '16px' }]" />
+      <div class="view-menu">
+        <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
+      </div>
       <div class="right">
         <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
         <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
@@ -65,6 +68,7 @@
 }
 
 .topbar {
+  position: relative;
   height: 52px;
   flex-shrink: 0;
   display: flex;
@@ -73,6 +77,12 @@
   padding: 0 16px;
   background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-border);
+}
+
+.view-menu {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .brand,
