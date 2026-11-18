@@ -219,6 +219,40 @@ export function normalizeXmlNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+/**
+ * Smallest contiguous replacement that turns `from` into `to`
+ * (shared prefix + suffix). Used so external sync / undo / redo
+ * update CodeMirror locally instead of rewriting the whole doc.
+ */
+export function minimalStringChange(
+  from: string,
+  to: string
+): { from: number; to: number; insert: string } | null {
+  if (from === to) return null;
+  const fromLen = from.length;
+  const toLen = to.length;
+  const minLen = Math.min(fromLen, toLen);
+  let start = 0;
+  while (start < minLen && from.charCodeAt(start) === to.charCodeAt(start)) {
+    start += 1;
+  }
+  let endFrom = fromLen;
+  let endTo = toLen;
+  while (
+    endFrom > start &&
+    endTo > start &&
+    from.charCodeAt(endFrom - 1) === to.charCodeAt(endTo - 1)
+  ) {
+    endFrom -= 1;
+    endTo -= 1;
+  }
+  return {
+    from: start,
+    to: endFrom,
+    insert: to.slice(start, endTo),
+  };
+}
+
 /** Locate a CSS rule inside the first `<style>` block. */
 function findStyleRuleRange(
   content: string,

@@ -133,6 +133,7 @@ const treePanel = ref<{
     opts?: { select?: "last-child" | "self" }
   ) => void;
   selectPath: (path: string | null | undefined) => void;
+  resyncAfterHistory: (path?: string | null) => boolean;
 } | null>(null);
 const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
@@ -141,6 +142,7 @@ const sourcePanel = ref<{
   revealPath: (path: string | null | undefined) => void;
   applyFormat: (text: string, mode?: FormatXmlMode) => Promise<string>;
   measureEditorPrintWidth: () => number;
+  focus: () => void;
 } | null>(null);
 /** Active source format style (pretty | compact). */
 const sourceFormatMode = ref<FormatXmlMode>(readSourceFormatMode());
@@ -316,28 +318,43 @@ watch(draftContent, (next, prev) => {
   recordHistory(prev);
 });
 
-async function applyHistoryContent(next: string): Promise<void> {
+async function applyHistoryContent(
+  next: string,
+  options: { focusSource?: boolean } = {}
+): Promise<void> {
   if (!file.value) return;
+  const keepPath = selected.value?.path ?? null;
   applyingHistory = true;
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);
   applyingHistory = false;
   await nextTick();
-  treePanel.value?.syncAfterEdit();
+  // syncAfterEdit() defaults to defs/last-child — that hijacks selection and
+  // scrolls the source reveal to the wrong node after undo/redo.
+  const restored = treePanel.value?.resyncAfterHistory(keepPath) ?? false;
+  if (keepPath && !restored) {
+    selected.value = null;
+    interactHost.value?.setHighlight(null);
+  }
+  await nextTick();
+  revealSelectedInSource();
+  if (options.focusSource && showSource.value) {
+    sourcePanel.value?.focus();
+  }
 }
 
-async function onUndo(): Promise<void> {
+async function onUndo(options: { focusSource?: boolean } = {}): Promise<void> {
   if (!undoStack.value.length || !file.value) return;
   const prev = undoStack.value.pop()!;
   redoStack.value.push(draftContent.value);
-  await applyHistoryContent(prev);
+  await applyHistoryContent(prev, options);
 }
 
-async function onRedo(): Promise<void> {
+async function onRedo(options: { focusSource?: boolean } = {}): Promise<void> {
   if (!redoStack.value.length || !file.value) return;
   const next = redoStack.value.pop()!;
   undoStack.value.push(draftContent.value);
-  await applyHistoryContent(next);
+  await applyHistoryContent(next, options);
 }
 
 async function onFormatMenu(): Promise<void> {
@@ -633,9 +650,9 @@ function onDownload(): void {
   MessagePlugin.success(t("app.downloaded"));
 }
 
-function onSelect(payload: TreeSelectPayload): void {
+function onSelect(payload: TreeSelectPayload | null): void {
   selected.value = payload;
-  interactHost.value?.setHighlight(payload.path);
+  interactHost.value?.setHighlight(payload?.path ?? null);
 }
 
 function onViewportPick(path: string | null): void {
@@ -895,8 +912,8 @@ onBeforeUnmount(() => {
         @save="onSave"
         @export="onDownload"
         @back="goBrowse"
-        @undo="onUndo"
-        @redo="onRedo"
+        @undo="() => onUndo({ focusSource: true })"
+        @redo="() => onRedo({ focusSource: true })"
         @format="onFormatMenu"
         @optimize="onOptimize"
         @toggle-model="setShowModel(!showModel)"

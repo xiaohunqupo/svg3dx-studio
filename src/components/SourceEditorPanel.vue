@@ -28,6 +28,7 @@ import {
 import {
   findRangeForTreePath,
   findTreePathAtOffset,
+  minimalStringChange,
   normalizeXmlNewlines,
   type TextRange,
 } from "@/utils/nodeXmlEdit";
@@ -282,19 +283,33 @@ function setDoc(
   if (!view) return;
   const normalized = normalizeXmlNewlines(text);
   const cur = view.state.doc.toString();
-  if (cur === normalized) return;
+  const change = minimalStringChange(cur, normalized);
+  if (!change) return;
   const addToHistory = options.addToHistory === true;
   applyingExternal = !addToHistory;
   suppressPathEmit = true;
+  const insertLen = change.insert.length;
+  const head = change.from + insertLen;
+  // Local replace (shared prefix/suffix). For external sync, park the caret
+  // on the changed span so undo/redo does not leave a mapped ghost position.
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: normalized },
+    changes: change,
+    selection: addToHistory
+      ? undefined
+      : { anchor: change.from, head: Math.max(change.from, head) },
     // External sync must not create undo steps (would break Ctrl+Z).
     // User actions like Format should remain undoable.
     annotations: Transaction.addToHistory.of(addToHistory),
-    effects: setRevealEffect.of(null),
+    effects: addToHistory
+      ? undefined
+      : EditorView.scrollIntoView(change.from, { y: "nearest" }),
   });
   applyingExternal = false;
   suppressPathEmit = false;
+}
+
+function focusEditor(): void {
+  view?.focus();
 }
 
 /** Approx. printable columns from the live editor width (auto format). */
@@ -425,7 +440,12 @@ onBeforeUnmount(() => {
   view = null;
 });
 
-defineExpose({ revealPath, applyFormat, measureEditorPrintWidth });
+defineExpose({
+  revealPath,
+  applyFormat,
+  measureEditorPrintWidth,
+  focus: focusEditor,
+});
 </script>
 
 <template>

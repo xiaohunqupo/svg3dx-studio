@@ -98,7 +98,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  select: [payload: TreeSelectPayload];
+  /** `null` when the active node is toggled off (second click). */
+  select: [payload: TreeSelectPayload | null];
   addGroup: [];
   addModel: [];
   addMaterial: [];
@@ -1131,8 +1132,12 @@ function findItem(items: TreeItem[], value: string): TreeItem | null {
 function onActive(values: Array<string | number>): void {
   const path = String(values[0] ?? "");
   actived.value = path ? [path] : [];
+  // Second click clears tree active — mirror that in source / viewer / inspector.
+  if (!path) {
+    emit("select", null);
+    return;
+  }
   if (
-    !path ||
     path === "models" ||
     path === "defs" ||
     path === "materials" ||
@@ -1387,7 +1392,23 @@ function onActiveSafe(
   onActive(values.map(String));
 }
 
-defineExpose({ syncAfterEdit, selectPath });
+/**
+ * After undo/redo: rebuild tree and restore the previous path when it still
+ * exists. Returns false when the path vanished (caller should clear selection).
+ * Unlike syncAfterEdit(), never jumps to defs/last-child.
+ */
+function resyncAfterHistory(path?: string | null): boolean {
+  rebuildTree();
+  if (path && findItem(treeData.value, path)) {
+    ensureExpanded(ancestorPaths(path));
+    activatePath(path);
+    return true;
+  }
+  actived.value = [];
+  return false;
+}
+
+defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
 </script>
 
 <template>
