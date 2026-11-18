@@ -760,6 +760,32 @@ async function onNodeAttrsChange(payload: {
     return;
   }
 
+  if (sel?.kind === "model" && payload.path.startsWith("model:")) {
+    const oldId = payload.path.slice("model:".length).split(".")[0]!;
+    const newId = (payload.updates.id ?? oldId).trim() || oldId;
+    next = await formatDraftContent(next);
+    const newPath = `model:${newId}`;
+    selected.value = {
+      kind: "model",
+      path: newPath,
+      modelId: newId,
+    };
+    if (activeModelId.value === oldId) {
+      activeModelId.value = newId;
+    }
+    draftContent.value = next;
+    await store.updateContent(file.value.id, next, true);
+    if (newPath !== payload.path) {
+      treePanel.value?.syncAfterEdit("models");
+      await nextTick();
+      treePanel.value?.selectPath(newPath);
+    } else {
+      await nextTick();
+      revealSelectedInSource();
+    }
+    return;
+  }
+
   next = await formatDraftContent(next);
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);

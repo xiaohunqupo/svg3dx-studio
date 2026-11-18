@@ -12,8 +12,10 @@ import { useI18n } from "@/i18n";
 import {
   APPEARANCE_ATTR_NAMES,
   APPEARANCE_FIELDS,
+  BOOL_ATTR_VALUES,
   GROUP_BASIC_FIELDS,
   IDENTITY_TRANSFORM_DISPLAY,
+  MODEL_MODE_VALUES,
   TRANSFORM_FIELDS,
   TRANSFORM_PART_KEYS,
   emptyTransformParts,
@@ -68,8 +70,15 @@ const emit = defineEmits<{
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
 }>();
 
-const { t, tagLabel, attrLabel, attrValueLabel, elementLabel, materialLabel } =
-  useI18n();
+const {
+  t,
+  tagLabel,
+  attrLabel,
+  attrValueLabel,
+  elementLabel,
+  materialLabel,
+  modeLabel,
+} = useI18n();
 
 type FieldRow = AttrField & {
   key: string;
@@ -93,6 +102,8 @@ const openSections = ref<Array<string | number>>([]);
 const styleOpenSections = ref<Array<string | number>>(["basic", "params"]);
 /** Material inspector section. */
 const materialOpenSections = ref<Array<string | number>>(["basic"]);
+/** Model inspector sections. */
+const modelOpenSections = ref<Array<string | number>>(["basic", "transform"]);
 
 /** Color swatch / picker fallback: fill default vs material color default. */
 const colorSwatchDefaultHex = computed(() =>
@@ -281,6 +292,10 @@ const materialBasicFields = computed((): FieldRow[] => {
 
 const modelBasicFields = computed((): FieldRow[] => {
   if (props.selected?.kind !== "model") return [];
+  void attrLabel("type");
+  void modeLabel("solid");
+  const sel = props.selected;
+  const xml = props.content ? readAttrsAtPath(props.content, sel.path) : null;
   return [
     {
       key: "model:type",
@@ -291,11 +306,40 @@ const modelBasicFields = computed((): FieldRow[] => {
     {
       key: "model:id",
       name: "id",
-      value: props.selected.modelId,
-      readonly: true,
+      value: xml?.id ?? sel.modelId,
+    },
+    {
+      key: "model:mode",
+      name: "mode",
+      value: attrLookup(xml, "mode") || "solid",
+      placeholder: "solid",
+      enumValues: MODEL_MODE_VALUES,
+    },
+    {
+      key: "model:active",
+      name: "active",
+      value: attrLookup(xml, "active"),
+      enumValues: BOOL_ATTR_VALUES,
     },
   ];
 });
+
+const modelTransformFields = computed((): FieldRow[] => {
+  if (props.selected?.kind !== "model") return [];
+  const xml = props.content
+    ? readAttrsAtPath(props.content, props.selected.path)
+    : null;
+  return TRANSFORM_FIELDS.map((f) => ({
+    ...f,
+    key: `model:${f.name}`,
+    value: attrLookup(xml, f.name),
+  }));
+});
+
+const modelAllFields = computed((): FieldRow[] => [
+  ...modelBasicFields.value,
+  ...modelTransformFields.value,
+]);
 
 const geometryView = computed(() => {
   const sel = props.selected;
@@ -537,6 +581,15 @@ watch(
       if (!samePath) materialOpenSections.value = ["basic"];
       return;
     }
+    if (props.selected?.kind === "model") {
+      const path = props.selected.path;
+      const samePath = draftPath === path;
+      openSections.value = [];
+      materialOpenSections.value = ["basic"];
+      seedDraft(modelAllFields.value, path);
+      if (!samePath) modelOpenSections.value = ["basic", "transform"];
+      return;
+    }
     const view = geometryView.value;
     if (!view) {
       draftPath = "";
@@ -644,6 +697,58 @@ function commitMaterialAttrs(_name?: string): void {
     return;
   }
   emit("nodeAttrsChange", { path: sel.path, updates });
+}
+
+/** Commit editable model attrs (id / mode / active / transform). */
+function commitModelAttrs(_name?: string): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "model" || draftPath !== sel.path) return;
+  const fields = modelAllFields.value;
+  const updates: Record<string, string> = {};
+  let changed = false;
+  for (const f of fields) {
+    if (f.readonly || f.name === "type") continue;
+    let raw = (draft[f.name] ?? "").trim();
+    if (f.name === "s3dx:transform") {
+      if (isIdentityTransformDisplay(raw)) raw = "";
+    } else {
+      raw = blankIfEqualsDefault(raw, f.placeholder, f.name);
+    }
+    if (draft[f.name] !== raw) draft[f.name] = raw;
+    const next =
+      f.name === "s3dx:transform" ? transformToAttr(raw) : raw;
+    const prev =
+      f.name === "s3dx:transform"
+        ? transformToAttr(f.value ?? "")
+        : blankIfEqualsDefault(f.value ?? "", f.placeholder, f.name);
+    updates[f.name] = next;
+    if (next !== prev) changed = true;
+  }
+  if (!changed) return;
+  if (!updates.id) {
+    draft.id = sel.modelId;
+    return;
+  }
+  if (!updates.mode) {
+    draft.mode = "solid";
+    updates.mode = "solid";
+  }
+  emit("nodeAttrsChange", { path: sel.path, updates });
+}
+
+function onModelEnumChange(name: string, value: unknown): void {
+  if (value == null || value === "") {
+    draft[name] = "";
+  } else if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    draft[name] = String(value);
+  } else {
+    return;
+  }
+  commitModelAttrs(name);
 }
 
 let fillCommitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -779,6 +884,42 @@ function clearTransformPart(key: TransformPartKey): void {
   commitTransformParts();
 }
 
+function commitModelTransformCompact(): void {
+  if (transformExpanded.value) return;
+  const raw = (draft["s3dx:transform"] ?? "").trim();
+  if (raw && isIdentityTransformDisplay(raw)) {
+    draft["s3dx:transform"] = "";
+  }
+  syncPartsFromCompact();
+  commitModelAttrs("s3dx:transform");
+}
+
+function clearModelTransform(): void {
+  if (transformExpanded.value) return;
+  draft["s3dx:transform"] = "";
+  Object.assign(transformParts, emptyTransformParts());
+  commitModelAttrs("s3dx:transform");
+}
+
+function commitModelTransformParts(): void {
+  const next = transformDisplayFromParts(transformParts);
+  if (next == null) {
+    syncPartsFromCompact();
+    return;
+  }
+  draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+  Object.assign(
+    transformParts,
+    syncTransformPartsFromDisplay(draft["s3dx:transform"])
+  );
+  commitModelAttrs("s3dx:transform");
+}
+
+function clearModelTransformPart(key: TransformPartKey): void {
+  transformParts[key] = "";
+  commitModelTransformParts();
+}
+
 /** Flat rows so transform parts sit as siblings of s3dx:transform. */
 type InspectorRow =
   | { kind: "field"; field: FieldRow }
@@ -795,7 +936,10 @@ function isFieldVisible(field: AttrField): boolean {
 
 function enumOptionsFor(field: AttrField): SelectOption[] {
   return (field.enumValues ?? []).map((value) => ({
-    label: attrValueLabel(field.name, value),
+    label:
+      field.name === "mode"
+        ? modeLabel(value)
+        : attrValueLabel(field.name, value),
     value,
   }));
 }
@@ -1098,21 +1242,145 @@ function commitStyleCategoryName(): void {
 
     <!-- Model -->
     <template v-else-if="selected?.kind === 'model'">
-      <t-list
-        :header="t('app.basicInfo')"
-        :split="true"
-        size="small"
-        class="param-list"
+      <t-collapse
+        v-model="modelOpenSections"
+        expand-icon-placement="left"
+        class="param-collapse"
       >
-        <t-list-item v-for="field in modelBasicFields" :key="field.key">
-          <div class="param-row readonly-row">
-            <span class="name" :title="field.name">{{
-              fieldDisplayName(field.name)
-            }}</span>
-            <span class="value">{{ field.value }}</span>
+        <t-collapse-panel value="basic" :header="t('app.basicInfo')">
+          <div class="param-fields">
+            <div
+              v-for="field in modelBasicFields"
+              :key="field.key"
+              class="param-row"
+              :class="{ 'readonly-row': field.readonly }"
+            >
+              <span class="name" :title="field.name">{{
+                fieldDisplayName(field.name)
+              }}</span>
+              <span v-if="field.readonly" class="value">{{
+                draft[field.name] ?? field.value
+              }}</span>
+              <div v-else class="value-cell">
+                <t-select
+                  v-if="field.enumValues"
+                  :value="draft[field.name] || undefined"
+                  :options="enumOptionsFor(field)"
+                  clearable
+                  size="small"
+                  :placeholder="
+                    field.placeholder
+                      ? field.name === 'mode'
+                        ? modeLabel(field.placeholder)
+                        : attrValueLabel(field.name, field.placeholder)
+                      : t('app.unsetHint')
+                  "
+                  class="enum-select"
+                  @change="(v: unknown) => onModelEnumChange(field.name, v)"
+                  @clear="() => onModelEnumChange(field.name, '')"
+                />
+                <t-input
+                  v-else
+                  v-model="draft[field.name]"
+                  size="small"
+                  clearable
+                  :placeholder="field.placeholder || undefined"
+                  class="value-input"
+                  @blur="commitModelAttrs(field.name)"
+                  @enter="commitModelAttrs(field.name)"
+                  @clear="
+                    () => {
+                      draft[field.name] = '';
+                      commitModelAttrs(field.name);
+                    }
+                  "
+                />
+              </div>
+            </div>
           </div>
-        </t-list-item>
-      </t-list>
+        </t-collapse-panel>
+        <t-collapse-panel value="transform" :header="t('app.transform')">
+          <div class="param-fields">
+            <div
+              v-for="field in modelTransformFields"
+              :key="field.key"
+              class="param-row"
+            >
+              <span
+                class="name"
+                :title="
+                  fieldDisplayName(field.name) !== field.name
+                    ? field.name
+                    : undefined
+                "
+              >
+                <span class="name-label">{{
+                  fieldDisplayName(field.name)
+                }}</span>
+                <t-button
+                  size="small"
+                  variant="text"
+                  shape="square"
+                  class="name-action"
+                  :title="
+                    transformExpanded
+                      ? t('app.collapseTransform')
+                      : t('app.expandTransform')
+                  "
+                  @click="toggleTransformExpand"
+                >
+                  <template #icon>
+                    <ChevronUpIcon v-if="transformExpanded" />
+                    <ChevronDownIcon v-else />
+                  </template>
+                </t-button>
+              </span>
+              <div class="value-cell">
+                <ExprAttrInput
+                  :model-value="transformCompactShown"
+                  clearable
+                  class="value-input"
+                  :placeholder="IDENTITY_TRANSFORM_DISPLAY"
+                  :param-groups="paramSourceGroups"
+                  :effective-names="effectiveParamNames"
+                  :param-values="effectiveParamValues"
+                  @update:model-value="
+                    (v: string) => {
+                      if (!transformExpanded)
+                        draft['s3dx:transform'] = String(v ?? '');
+                    }
+                  "
+                  @blur="commitModelTransformCompact"
+                  @enter="commitModelTransformCompact"
+                  @clear="clearModelTransform"
+                />
+              </div>
+            </div>
+            <div
+              v-for="key in transformExpanded ? TRANSFORM_PART_KEYS : []"
+              :key="key"
+              class="param-row"
+            >
+              <span class="name">{{ fieldDisplayName(key) }}</span>
+              <div class="value-cell">
+                <VecRgbInput
+                  v-model="transformParts[key]"
+                  clearable
+                  class="value-input"
+                  :placeholder="transformPartPlaceholder(key)"
+                  :max-components="3"
+                  :param-groups="paramSourceGroups"
+                  :effective-names="effectiveParamNames"
+                  :param-values="effectiveParamValues"
+                  @blur="commitModelTransformParts"
+                  @enter="commitModelTransformParts"
+                  @clear="() => clearModelTransformPart(key)"
+                />
+              </div>
+            </div>
+          </div>
+        </t-collapse-panel>
+      </t-collapse>
     </template>
 
     <!-- Material -->

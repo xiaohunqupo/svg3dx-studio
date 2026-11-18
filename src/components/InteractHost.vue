@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { EvaluationResult } from "svg3dx-viewer";
 import { createInteract, type InteractViewport } from "@/interact";
+import { useI18n } from "@/i18n";
 import { useTheme } from "@/theme";
 import { readViewportBackground } from "@/utils/viewportTheme";
 
@@ -22,6 +23,7 @@ const props = withDefaults(
 );
 
 const { colorScheme } = useTheme();
+const { locale } = useI18n();
 
 const emit = defineEmits<{
   result: [EvaluationResult];
@@ -82,6 +84,7 @@ async function ensureInteract(): Promise<InteractViewport | null> {
     paramsEl: props.paramsEl ?? undefined,
     background: resolveBackground(),
     model: props.model,
+    locale: locale.value,
     onResult: (r) => emit("result", r),
     onWarnings: (w) => w.forEach((m) => console.warn("[svg3dx]", m)),
     onPick: (path) => {
@@ -156,6 +159,10 @@ watch(
     syncBackground();
   }
 );
+
+watch(locale, (loc) => {
+  interact?.viewer.setLocale(loc);
+});
 
 onBeforeUnmount(() => {
   interact?.dispose();

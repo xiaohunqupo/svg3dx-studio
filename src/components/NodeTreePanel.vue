@@ -52,6 +52,7 @@ import {
   SOLID_MENU,
   type AddChildMenuItem,
 } from "@/utils/svgEdit";
+import { readAttrsAtPath } from "@/utils/nodeXmlEdit";
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
@@ -261,25 +262,32 @@ function childrenFromGroupMarkup(
         );
       } else if (PRIMITIVE_KIND_SET.has(local.toLowerCase())) {
         const kind = local.toLowerCase() as GeometryKind;
+        const elemId = attrOf(attrs, "id") ?? undefined;
+        const classAttr = attrOf(attrs, "class");
         items.push({
           value: path,
-          label: elementLabel(kind),
+          // No id → empty label (icon only); class stays as small hint.
+          label: elemId ?? "",
           meta: {
             kind: "geometry",
             icon: kindIcon(kind),
             node: syntheticPrimitive(kind, parentPath),
+            className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
             action: "geom-more",
           },
         });
       } else {
         const kind = local.toLowerCase();
+        const elemId = attrOf(attrs, "id") ?? undefined;
+        const classAttr = attrOf(attrs, "class");
         items.push({
           value: path,
-          label: elementLabel(kind),
+          label: elemId ?? "",
           meta: {
             kind: "geometry",
             icon: kindIcon(kind),
             node: null,
+            className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
             action: "geom-more",
           },
         });
@@ -526,6 +534,25 @@ function onPanelMoreClick(item: DropdownOption): void {
   });
 }
 
+/** Submenu targets for「添加引用到」— models in the current document. */
+function modelUseTargetOptions(): DropdownOption[] {
+  const models = props.result?.models ?? [];
+  if (!models.length) {
+    return [
+      {
+        content: t("app.noActiveModel"),
+        value: "__use-in-model-empty",
+        disabled: true,
+      },
+    ];
+  }
+  return models.map((m) => ({
+    content: m.id,
+    value: `use-in-model:${m.id}`,
+    prefixIcon: () => h(modelModeIcon(m.mode)),
+  }));
+}
+
 /** Group row “more” menu: nested group / categorized children / delete. */
 const groupMoreOptions = computed<DropdownOption[]>(() => [
   {
@@ -545,9 +572,15 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
     divider: true,
   },
   {
-    content: t("app.addUseToCurrentModel"),
-    value: "use-in-model",
+    content: t("app.addUseTo"),
+    value: "__use-in-model",
     prefixIcon: () => h(Link1Icon),
+    children: modelUseTargetOptions(),
+  },
+  {
+    content: "",
+    value: "__divider-use",
+    divider: true,
   },
   {
     content: t("app.deleteNode"),
@@ -619,12 +652,6 @@ const styleMoreOptions = computed<DropdownOption[]>(() => [
     prefixIcon: () => h(DeleteIcon),
   },
 ]);
-
-function shortId(id: string | undefined | null): string {
-  if (!id) return "";
-  const parts = id.split("/");
-  return parts[parts.length - 1] || id;
-}
 
 function labelOf(inst: GeometryInstruction, useId?: string): string {
   switch (inst.type) {
@@ -720,17 +747,27 @@ function findGroupById(
 function mapGeometry(
   inst: GeometryInstruction,
   path: string,
-  classById: Map<string, string>
+  classById: Map<string, string>,
+  content?: string
 ): TreeItem {
+  const xml = content ? readAttrsAtPath(content, path) : null;
+  const elemId = xml?.id?.trim() || undefined;
+  const classFromXml = xml?.class?.trim() || undefined;
   const className =
-    inst.type === "group" && inst.id ? classById.get(inst.id) : undefined;
+    classFromXml ||
+    (inst.type === "group" && inst.id ? classById.get(inst.id) : undefined);
   const hrefGroupId =
     inst.type === "instance" && inst.group_id?.trim()
       ? inst.group_id.trim()
       : undefined;
+  // Primitives / bools: only show real XML id (empty if none). Groups / uses keep labelOf.
+  let label = labelOf(inst);
+  if (inst.type === "primitive" || inst.type === "bool_op") {
+    label = elemId ?? "";
+  }
   return {
     value: path,
-    label: labelOf(inst),
+    label,
     meta: {
       kind: "geometry",
       icon: geometryIcon(inst),
@@ -745,7 +782,7 @@ function mapGeometry(
             : ("geom-more" as const),
     },
     children: childrenOf(inst).map((c, i) =>
-      mapGeometry(c, `${path}.${i}`, classById)
+      mapGeometry(c, `${path}.${i}`, classById, content)
     ),
   };
 }
@@ -779,7 +816,7 @@ function makeDefsGroupItem(
     (contentKids.length === 0 ||
       childrenOf(evaluated).length === contentKids.length)
   ) {
-    const item = mapGeometry(evaluated, path, classById);
+    const item = mapGeometry(evaluated, path, classById, content);
     if (className) item.meta.className = className;
     item.meta.action = "add-child";
     return item;
@@ -828,7 +865,7 @@ function buildDefsChildren(
     const key =
       inst.type === "group" ? inst.id ?? inst.node_id : inst.node_id;
     if (key && seen.has(key)) return;
-    children.push(mapGeometry(inst, `i${i}`, classById));
+    children.push(mapGeometry(inst, `i${i}`, classById, content));
   });
 
   return children;
@@ -1146,8 +1183,9 @@ function labelHint(item: TreeItem | undefined): string {
   const meta = item?.meta;
   if (!meta) return "";
   if (meta.kind === "style") {
+    // Category rows: do not hint a single consumer id (many may share it).
     if (meta.styleScope === "root") return ":root";
-    return meta.styleGroupId ?? "";
+    return "";
   }
   if (meta.className) return meta.className;
   if (meta.kind === "model" && meta.modelMode) {
@@ -1162,8 +1200,8 @@ function labelHint(item: TreeItem | undefined): string {
       if (meta.useId && n.group_id) return `#${n.group_id}`;
       return "";
     }
-    if (n.type === "group" && n.id) return "";
-    return shortId(n.node_id);
+    // Groups / primitives: class stays as small hint; never show box:0 serials.
+    return "";
   }
   return "";
 }
@@ -1277,6 +1315,10 @@ const MENU_CATEGORY_VALUES = new Set([
   "__add-logic",
   "__add-loop",
   "__divider",
+  "__divider-use",
+  /** Parent of「添加引用到」submenu — expand only, no action. */
+  "__use-in-model",
+  "__use-in-model-empty",
 ]);
 
 function onGroupMoreClick(
@@ -1293,8 +1335,10 @@ function onGroupMoreClick(
     emit("deleteNode", { path: parent.value, groupId });
     return;
   }
-  if (value === "use-in-model") {
-    emit("addUse", { path: parent.value, href: groupId });
+  if (typeof value === "string" && value.startsWith("use-in-model:")) {
+    const modelId = value.slice("use-in-model:".length).trim();
+    if (!modelId) return;
+    emit("addUse", { modelId, path: parent.value, href: groupId });
     return;
   }
   if (!isAddChildKind(value)) return;

@@ -551,6 +551,17 @@ export const GROUP_BASIC_FIELDS: AttrField[] = [
   { name: "class" },
 ];
 
+/** `<s3dx:model mode>` values (draft §7.1 + studio `lite-solid`). */
+export const MODEL_MODE_VALUES = [
+  "solid",
+  "wireframe",
+  "hidden-line",
+  "lite-solid",
+] as const;
+
+/** Optional boolean attrs written as `"true"` / `"false"`. */
+export const BOOL_ATTR_VALUES = ["true", "false"] as const;
+
 export function primitiveAttrFields(kind: string): AttrField[] {
   return PRIMITIVE_ATTRS[kind] ?? [];
 }
