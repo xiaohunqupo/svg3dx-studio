@@ -127,6 +127,10 @@ defineExpose({
   min-width: 0;
 }
 
+.drag-content:not(.compact) .text {
+  text-align: center;
+}
+
 .title {
   font-size: 18px;
   font-weight: 600;
