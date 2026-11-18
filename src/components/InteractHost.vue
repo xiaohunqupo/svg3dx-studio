@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { EvaluationResult } from "svg3dx-viewer";
-import { createInteract, type InteractViewport } from "@/interact";
+import {
+  createInteract,
+  type InteractViewport,
+  type TransformCommitPayload,
+  type TransformMode,
+} from "@/interact";
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/theme";
 import { readViewportBackground } from "@/utils/viewportTheme";
+import { MoveIcon, RotateIcon, Measurement1Icon } from "tdesign-icons-vue-next";
 
 const props = withDefaults(
   defineProps<{
@@ -23,7 +29,7 @@ const props = withDefaults(
 );
 
 const { colorScheme } = useTheme();
-const { locale } = useI18n();
+const { locale, t } = useI18n();
 
 const emit = defineEmits<{
   result: [EvaluationResult];
@@ -31,9 +37,13 @@ const emit = defineEmits<{
   ready: [InteractViewport];
   /** Viewport pick → Studio tree path (null = empty click). */
   pick: [path: string | null];
+  /** TransformControls drag finished → write `s3dx:transform`. */
+  transform: [payload: TransformCommitPayload];
 }>();
 
 const host = ref<HTMLElement | null>(null);
+const gizmoActive = ref(false);
+const transformMode = ref<TransformMode>("translate");
 let interact: InteractViewport | null = null;
 let loadSeq = 0;
 let lastContent = "";
@@ -80,6 +90,23 @@ function syncBackground(): void {
   interact?.setBackground(resolveBackground());
 }
 
+function syncGizmoUi(): void {
+  gizmoActive.value = Boolean(interact?.hasTransformGizmo());
+  if (interact) transformMode.value = interact.getTransformMode();
+}
+
+function onTransformModeChange(mode: TransformMode): void {
+  transformMode.value = mode;
+  interact?.setTransformMode(mode);
+}
+
+function onTransformModeRadio(value: string | number | boolean): void {
+  const mode = String(value);
+  if (mode === "translate" || mode === "rotate" || mode === "scale") {
+    onTransformModeChange(mode);
+  }
+}
+
 async function ensureInteract(): Promise<InteractViewport | null> {
   if (interact) return interact;
   if (!host.value) return null;
@@ -93,9 +120,12 @@ async function ensureInteract(): Promise<InteractViewport | null> {
     onPick: (path) => {
       if (applyingHighlight) return;
       emit("pick", path);
+      syncGizmoUi();
     },
+    onTransformCommit: (payload) => emit("transform", payload),
   });
   emit("ready", interact);
+  syncGizmoUi();
   return interact;
 }
 
@@ -126,6 +156,7 @@ async function loadContent(
       hasFitted = true;
     }
     lastContent = text;
+    syncGizmoUi();
   } catch (e) {
     emit("error", e instanceof Error ? e.message : String(e));
   }
@@ -152,7 +183,9 @@ watch(
   () => props.model,
   (model) => {
     if (!interact) return;
-    void interact.setModel(model || undefined, { fitCamera: true });
+    void interact.setModel(model || undefined, { fitCamera: true }).then(() => {
+      syncGizmoUi();
+    });
   }
 );
 
@@ -181,6 +214,7 @@ defineExpose({
         hasFitted = true;
       }
       lastContent = props.content;
+      syncGizmoUi();
     }
   },
   getResult(): EvaluationResult | null {
@@ -197,12 +231,39 @@ defineExpose({
     } finally {
       applyingHighlight = false;
     }
+    syncGizmoUi();
   },
 });
 </script>
 
 <template>
-  <div ref="host" class="interact-host" />
+  <div class="interact-host">
+    <div ref="host" class="interact-canvas" />
+    <div v-if="gizmoActive" class="xform-toolbar" role="toolbar" :aria-label="t('app.transform')">
+      <t-radio-group
+        :value="transformMode"
+        variant="default-filled"
+        size="small"
+        @change="onTransformModeRadio"
+      >
+        <t-radio-button value="translate" :title="`${t('app.transformTranslate')} (${t('app.transformTranslateHint')})`">
+          <MoveIcon size="16px" />
+          <span class="xform-label">{{ t("app.transformTranslate") }}</span>
+          <kbd>{{ t("app.transformTranslateHint") }}</kbd>
+        </t-radio-button>
+        <t-radio-button value="rotate" :title="`${t('app.transformRotate')} (${t('app.transformRotateHint')})`">
+          <RotateIcon size="16px" />
+          <span class="xform-label">{{ t("app.transformRotate") }}</span>
+          <kbd>{{ t("app.transformRotateHint") }}</kbd>
+        </t-radio-button>
+        <t-radio-button value="scale" :title="`${t('app.transformScale')} (${t('app.transformScaleHint')})`">
+          <Measurement1Icon size="16px" />
+          <span class="xform-label">{{ t("app.transformScale") }}</span>
+          <kbd>{{ t("app.transformScaleHint") }}</kbd>
+        </t-radio-button>
+      </t-radio-group>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -212,5 +273,48 @@ defineExpose({
   min-height: 240px;
   position: relative;
   overflow: hidden;
+}
+
+.interact-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.xform-toolbar {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  padding: 4px;
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
+  box-shadow: var(--td-shadow-1);
+}
+
+.xform-toolbar :deep(.t-radio-button) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.xform-label {
+  font-size: 12px;
+}
+
+.xform-toolbar kbd {
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--td-component-border);
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+@media (max-width: 720px) {
+  .xform-label {
+    display: none;
+  }
 }
 </style>

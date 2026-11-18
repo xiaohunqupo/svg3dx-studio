@@ -665,6 +665,16 @@ function onViewportPick(path: string | null): void {
   treePanel.value?.selectPath(path);
 }
 
+async function onViewportTransform(payload: {
+  path: string;
+  transform: string;
+}): Promise<void> {
+  await onNodeAttrsChange({
+    path: payload.path,
+    updates: { "s3dx:transform": payload.transform },
+  });
+}
+
 async function onSourceContent(next: string): Promise<void> {
   if (!file.value) return;
   const normalized = normalizeXmlNewlines(next);
@@ -1008,6 +1018,7 @@ onBeforeUnmount(() => {
             @result="onResult"
             @error="(m) => MessagePlugin.error(m)"
             @pick="onViewportPick"
+            @transform="onViewportTransform"
           />
         </main>
       </div>

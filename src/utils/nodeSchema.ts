@@ -49,6 +49,38 @@ export function transformToAttr(display: string): string {
   return `matrix(${inner})`;
 }
 
+/**
+ * Persist a numeric 12-vector as `s3dx:transform`.
+ * Identity / empty → `""` so the attribute is removed.
+ */
+export function matrix12ToTransformAttr(m: number[]): string {
+  if (m.length !== 12) return "";
+  const display = m.map(formatTransformNum).join(" ");
+  if (isIdentityTransformDisplay(display)) return "";
+  return transformToAttr(display);
+}
+
+/** THREE.Matrix4 (column-major) → svg3dx Mat4x3 12-vector. */
+export function matrix4ToMat4x3(matrix: {
+  elements: ArrayLike<number>;
+}): number[] {
+  const e = matrix.elements;
+  return [
+    e[0]!,
+    e[1]!,
+    e[2]!,
+    e[4]!,
+    e[5]!,
+    e[6]!,
+    e[8]!,
+    e[9]!,
+    e[10]!,
+    e[12]!,
+    e[13]!,
+    e[14]!,
+  ];
+}
+
 /** Column-vector axes + translation (matches core `Mat4x3`). */
 export type TransformParts = {
   xdir: string;
