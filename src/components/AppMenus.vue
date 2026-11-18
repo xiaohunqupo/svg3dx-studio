@@ -65,7 +65,7 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
     class="app-menus"
     theme="light"
     expand-type="popup"
-    :value="null"
+    :value="undefined"
     @change="onChange"
   >
     <t-menu-item value="back">
