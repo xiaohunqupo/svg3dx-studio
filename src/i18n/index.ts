@@ -8,12 +8,14 @@ import {
 } from "./messages";
 import {
   ATTR_LABELS,
+  BLEND_VALUE_LABELS,
   CORNER_VALUE_LABELS,
   ELEMENT_LABELS,
   FORM_VALUE_LABELS,
   MATERIAL_LABELS,
   ORIENT_VALUE_LABELS,
   type AttrKey,
+  type BlendValueKey,
   type CornerValueKey,
   type ElementKey,
   type FormValueKey,
@@ -131,7 +133,7 @@ export function materialLabel(id: string): string {
   return hit ? hit[locale.value] : id;
 }
 
-/** Enum attr value display name (`orient` / `corner` / `form`, …). */
+/** Enum attr value display name (`orient` / `corner` / `form` / `blend`, …). */
 export function attrValueLabel(attr: string, value: string): string {
   const v = value.trim();
   if (!v) return v;
@@ -145,6 +147,10 @@ export function attrValueLabel(attr: string, value: string): string {
   }
   if (attr === "form") {
     const hit = FORM_VALUE_LABELS[v as FormValueKey];
+    return hit ? hit[locale.value] : v;
+  }
+  if (attr === "blend") {
+    const hit = BLEND_VALUE_LABELS[v as BlendValueKey];
     return hit ? hit[locale.value] : v;
   }
   return v;
@@ -204,6 +210,7 @@ export type {
   MaterialKey,
   OrientValueKey,
   CornerValueKey,
+  BlendValueKey,
 };
 export {
   TAG_LABELS,
@@ -213,4 +220,5 @@ export {
   MATERIAL_LABELS,
   ORIENT_VALUE_LABELS,
   CORNER_VALUE_LABELS,
+  BLEND_VALUE_LABELS,
 };

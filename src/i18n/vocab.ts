@@ -37,10 +37,10 @@ export const ELEMENT_LABELS = {
   prism: { zh: "棱柱", en: "Prism" },
   "sector-cylinder": { zh: "扇形柱", en: "Sector Cylinder" },
   pyramid: { zh: "棱锥", en: "Pyramid" },
-  extrude: { zh: "拉伸", en: "Extrude" },
-  revolve: { zh: "旋转", en: "Revolve" },
-  loft: { zh: "放样", en: "Loft" },
-  sweep: { zh: "扫掠", en: "Sweep" },
+  extrude: { zh: "拉伸体", en: "Extrude" },
+  revolve: { zh: "旋转体", en: "Revolve" },
+  loft: { zh: "放样体", en: "Loft" },
+  sweep: { zh: "扫掠体", en: "Sweep" },
   pipe: { zh: "圆管", en: "Pipe" },
   mesh: { zh: "网格", en: "Mesh" },
   triangles: { zh: "三角面", en: "Triangles" },
@@ -167,8 +167,20 @@ export const FORM_VALUE_LABELS = {
   ends: { zh: "起终点", en: "Endpoints" },
   polyline: { zh: "折线", en: "Polyline" },
   segments: { zh: "曲线段", en: "Segments" },
+  /** Pipe trajectory shorthand only (`sweep` is always child path). */
   inline: { zh: "内联", en: "Inline" },
   child: { zh: "子路径", en: "Child path" },
 } as const satisfies Record<string, LocalePair>;
 
 export type FormValueKey = keyof typeof FORM_VALUE_LABELS;
+
+/** `blend` enum values (§3.2 loft approach law). */
+export const BLEND_VALUE_LABELS = {
+  linear: { zh: "线性", en: "Linear" },
+  sine: { zh: "正弦", en: "Sine" },
+  cosine: { zh: "余弦", en: "Cosine" },
+  tan: { zh: "正切", en: "Tan" },
+  cotan: { zh: "余切", en: "Cotan" },
+} as const satisfies Record<string, LocalePair>;
+
+export type BlendValueKey = keyof typeof BLEND_VALUE_LABELS;

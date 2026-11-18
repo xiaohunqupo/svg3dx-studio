@@ -34,15 +34,7 @@ export const PRIMITIVE_FORMS: Readonly<Record<string, PrimitiveFormSpec>> = {
       segments: [],
     },
   },
-  sweep: {
-    values: ["inline", "child"],
-    default: "child",
-    shared: [],
-    byForm: {
-      inline: ["path"],
-      child: [],
-    },
-  },
+  // `sweep` has no `form`: trajectory is always a child `<s3dx:path>`.
   pipe: {
     values: ["inline", "child"],
     default: "child",
@@ -96,7 +88,7 @@ export function inferPrimitiveForm(
     if (attrNonEmpty(attrs, "points")) return "polyline";
     return spec.default;
   }
-  if (kind === "sweep" || kind === "pipe") {
+  if (kind === "pipe") {
     if (opts?.hasPathChild) return "child";
     if (attrNonEmpty(attrs, "path")) return "inline";
     return spec.default;

@@ -49,9 +49,10 @@ function structureKey(svg: string): string {
 /**
  * Drop empty groups + normalize newlines so adding an unused `<g>` to defs
  * does not force a viewer rebuild (those groups never affect evaluation).
+ * Keep `<style>` text — `:root` / class custom properties drive evaluation.
  */
 function evalAffectingKey(svg: string): string {
-  return structureKey(svg)
+  return svg
     .replace(/<g\b[^>]*>\s*<\/g>/gi, "")
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
@@ -66,6 +67,8 @@ function isStyleOnlyChange(prev: string, next: string): boolean {
 
 function isEvalNoopChange(prev: string, next: string): boolean {
   if (!prev.trim() || !next.trim()) return false;
+  // Style-only edits (params) must re-evaluate — never treat as noop.
+  if (isStyleOnlyChange(prev, next) && prev !== next) return false;
   return evalAffectingKey(prev) === evalAffectingKey(next);
 }
 

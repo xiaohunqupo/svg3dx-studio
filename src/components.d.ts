@@ -8,6 +8,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppMenus: typeof import('./components/AppMenus.vue')['default']
+    BlendAttrSelect: typeof import('./components/BlendAttrSelect.vue')['default']
     BrowsePageSkeleton: typeof import('./components/skeletons/BrowsePageSkeleton.vue')['default']
     EditPageSkeleton: typeof import('./components/skeletons/EditPageSkeleton.vue')['default']
     ExprAttrInput: typeof import('./components/ExprAttrInput.vue')['default']

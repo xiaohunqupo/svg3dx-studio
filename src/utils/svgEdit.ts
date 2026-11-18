@@ -47,7 +47,7 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
           <circle cx="0" cy="0" r="40"/>
         </s3dx:section>
       </s3dx:loft>`,
-  sweep: `<s3dx:sweep form="child" orient="frenet" solid="true" corner="arc" cornerRadius="50">
+  sweep: `<s3dx:sweep orient="frenet" solid="true" corner="arc" cornerRadius="50">
         <s3dx:section>
           <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
         </s3dx:section>
@@ -520,10 +520,10 @@ export const SOLID_MENU: AddChildMenuItem[] = [
 
 /** Construction solids — draft §3.2.4 (menu: 造型图元). */
 export const MODELING_MENU: AddChildMenuItem[] = [
-  { kind: "extrude", labelZh: "拉伸", labelEn: "Extrude" },
-  { kind: "revolve", labelZh: "旋转", labelEn: "Revolve" },
-  { kind: "loft", labelZh: "放样", labelEn: "Loft" },
-  { kind: "sweep", labelZh: "扫掠", labelEn: "Sweep" },
+  { kind: "extrude", labelZh: "拉伸体", labelEn: "Extrude" },
+  { kind: "revolve", labelZh: "旋转体", labelEn: "Revolve" },
+  { kind: "loft", labelZh: "放样体", labelEn: "Loft" },
+  { kind: "sweep", labelZh: "扫掠体", labelEn: "Sweep" },
   { kind: "pipe", labelZh: "圆管", labelEn: "Pipe" },
 ];
 

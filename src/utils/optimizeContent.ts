@@ -8,7 +8,8 @@
  * 4. Unused document materials and CSS custom properties (params)
  * 5. Empty style rules (no parameters)
  * 6. `class` tokens that no longer match a defined style rule
- * 7. Primitive `form` normalization — drop attrs / children that don't match
+ * 7. Sweep trajectory → always child `<s3dx:path>` (drop inline `path` / `form`)
+ * 8. Primitive `form` normalization — drop attrs / children that don't match
  */
 
 import { extractClassRules, extractDefsGroups } from "@/utils/styleClasses";
@@ -464,11 +465,91 @@ function stripDirectChildren(
 }
 
 /**
- * Normalize `form` on arc / path / sweep / pipe: write inferred form, strip
+ * Sweep has no inline trajectory: ensure child `<s3dx:path>`, drop `form` /
+ * parent `path=` (promote path attr to a polyline child when missing).
+ */
+function normalizeSweepChildPath(svg: string, stats: OptimizeStats): string {
+  const tag = "s3dx:sweep";
+  const openRe = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*)(\\/?)>`, "gi");
+  const matches: Array<{
+    start: number;
+    end: number;
+    attrs: string;
+    selfClosing: boolean;
+  }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(svg))) {
+    matches.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      attrs: m[1] ?? "",
+      selfClosing: /\/\s*$/.test(m[2] ?? "") || /\/\s*>$/.test(m[0]),
+    });
+  }
+
+  let out = svg;
+  for (let i = matches.length - 1; i >= 0; i -= 1) {
+    const hit = matches[i]!;
+    const map = parseAttrMap(hit.attrs);
+    let inner = "";
+    let closeEnd = hit.end;
+    if (!hit.selfClosing) {
+      const spans = findTagSpans(out, tag).filter((s) => s.start === hit.start);
+      const span = spans[0];
+      if (span) {
+        inner = out.slice(hit.end, span.end).replace(
+          new RegExp(`</${escapeRegExp(tag)}\\s*>$`, "i"),
+          ""
+        );
+        closeEnd = span.end;
+      }
+    }
+
+    let changed = false;
+    let nextInner = inner;
+    const hasPathChild = elementHasDirectChild(nextInner, ["path"]);
+    const pathAttr = (map.path ?? "").trim();
+
+    if (pathAttr && !hasPathChild) {
+      const indent = "\n        ";
+      nextInner =
+        nextInner.replace(/\s*$/, "") +
+        `${indent}<s3dx:path form="polyline" points="${pathAttr}"/>\n      `;
+      changed = true;
+      stats.removedFormAttrs += 1;
+    }
+
+    if ("path" in map) {
+      delete map.path;
+      changed = true;
+      stats.removedFormAttrs += 1;
+    }
+    if ("form" in map) {
+      delete map.form;
+      changed = true;
+      stats.removedFormAttrs += 1;
+    }
+
+    if (!changed) continue;
+
+    const open =
+      hit.selfClosing && !nextInner.trim()
+        ? `<${tag}${serializeAttrMap(map)}/>`
+        : `<${tag}${serializeAttrMap(map)}>`;
+    const close = nextInner.trim() || !hit.selfClosing ? `</${tag}>` : "";
+    const body = close ? `${nextInner}${close}` : "";
+    out = out.slice(0, hit.start) + open + body + out.slice(closeEnd);
+  }
+  return out;
+}
+
+/**
+ * Normalize `form` on arc / path / pipe: write inferred form, strip
  * inactive attrs, and drop children that conflict with the active form.
+ * (`sweep` has no `form` — see `normalizeSweepChildPath`.)
  */
 function normalizePrimitiveForms(svg: string, stats: OptimizeStats): string {
-  const kinds = ["arc", "path", "sweep", "pipe"] as const;
+  const kinds = ["arc", "path", "pipe"] as const;
   let out = svg;
 
   for (const kind of kinds) {
@@ -608,7 +689,10 @@ export function optimizeSvg3dxContent(content: string): OptimizeResult {
   // 6. class attrs pointing at styles that no longer exist
   svg = removeInvalidClassAttrs(svg, stats);
 
-  // 7. form attrs / mismatched geometry parameters
+  // 7. sweep → child path only
+  svg = normalizeSweepChildPath(svg, stats);
+
+  // 8. form attrs / mismatched geometry parameters
   svg = normalizePrimitiveForms(svg, stats);
 
   return {

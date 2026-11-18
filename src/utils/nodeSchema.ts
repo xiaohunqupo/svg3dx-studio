@@ -3,6 +3,7 @@
  * Used by the inspector to show empty fields for unset attrs.
  */
 
+import { BLEND_VALUES } from "@/utils/blendSchematic";
 import { DEFAULT_FILL_HEX8 } from "@/utils/fillColor";
 
 export type AttrField = {
@@ -13,6 +14,8 @@ export type AttrField = {
   description?: string;
   /** Fixed enum choices — inspector shows a select; values are XML identifiers. */
   enumValues?: readonly string[];
+  /** Boolean attr — inspector shows a checkbox (`"true"` / `"false"`). */
+  boolean?: boolean;
   /**
    * Only show this field when another attr’s current value is in `values`.
    * Empty / unset `name` is treated as `whenEmpty` (if provided).
@@ -459,20 +462,14 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "angle", placeholder: "360" },
   ],
   loft: [
-    { name: "solid", placeholder: "true" },
+    { name: "solid", placeholder: "true", boolean: true },
     {
       name: "blend",
       placeholder: "linear",
-      description:
-        "截面形状趋近律：linear（匀速）/ sine（前慢后快）/ cosine（两端慢中间快）/ tan（前更慢）/ cotan（前更快）",
+      enumValues: BLEND_VALUES,
     },
   ],
   sweep: [
-    {
-      name: "form",
-      placeholder: "child",
-      enumValues: ["inline", "child"],
-    },
     {
       name: "orient",
       placeholder: "frenet",
@@ -487,7 +484,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
         whenEmpty: "frenet",
       },
     },
-    { name: "solid", placeholder: "true" },
+    { name: "solid", placeholder: "true", boolean: true },
     {
       name: "corner",
       placeholder: "arc",
@@ -500,15 +497,6 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
         name: "corner",
         values: ["arc", "chamfer"],
         whenEmpty: "arc",
-      },
-    },
-    {
-      name: "path",
-      placeholder: "0 0 0  100 0 0  100 0 100",
-      visibleWhen: {
-        name: "form",
-        values: ["inline"],
-        whenEmpty: "child",
       },
     },
   ],

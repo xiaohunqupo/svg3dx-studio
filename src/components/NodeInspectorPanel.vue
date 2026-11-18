@@ -5,6 +5,7 @@ import { BUILTIN_MATERIALS, type GeometryInstruction } from "svg3dx-viewer";
 import { MessagePlugin, type SelectOption } from "tdesign-vue-next";
 import type { TreeSelectPayload } from "@/components/NodeTreePanel.vue";
 import StyleParamEditor from "@/components/StyleParamEditor.vue";
+import BlendAttrSelect from "@/components/BlendAttrSelect.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
 import ExprAttrInput from "@/components/ExprAttrInput.vue";
 import HrefRefInput from "@/components/HrefRefInput.vue";
@@ -84,6 +85,8 @@ type FieldRow = AttrField & {
   key: string;
   value: string;
   readonly?: boolean;
+  /** Hover tip on the value (e.g. raw XML type / kind). */
+  valueTitle?: string;
 };
 
 type Section = {
@@ -130,6 +133,27 @@ function nodeTypeLabel(node: GeometryInstruction): string {
     default:
       return "node";
   }
+}
+
+/** Raw type token for hover tip (XML / kind id, not localized). */
+function nodeTypeRaw(node: GeometryInstruction): string {
+  switch (node.type) {
+    case "primitive":
+      return node.kind;
+    case "group":
+      return "g";
+    case "bool_op":
+      return `bool-${node.op}`;
+    case "instance":
+      return "use";
+    default:
+      return "node";
+  }
+}
+
+function withTypeTip(row: FieldRow, raw: string): FieldRow {
+  row.valueTitle = raw;
+  return row;
 }
 
 function fieldDisplayName(name: string): string {
@@ -214,6 +238,7 @@ const styleBasicFields = computed((): FieldRow[] => {
         name: "type",
         value: tagLabel("root"),
         readonly: true,
+        valueTitle: ":root",
       },
       {
         key: "style:selector",
@@ -229,6 +254,7 @@ const styleBasicFields = computed((): FieldRow[] => {
       name: "type",
       value: tagLabel("category"),
       readonly: true,
+      valueTitle: "class",
     },
     {
       key: "style:class",
@@ -263,6 +289,7 @@ const materialBasicFields = computed((): FieldRow[] => {
       name: "type",
       value: tagLabel("material"),
       readonly: true,
+      valueTitle: "material",
     },
     {
       key: "material:id",
@@ -302,6 +329,7 @@ const modelBasicFields = computed((): FieldRow[] => {
       name: "type",
       value: tagLabel("model"),
       readonly: true,
+      valueTitle: "model",
     },
     {
       key: "model:id",
@@ -370,7 +398,10 @@ const geometryView = computed(() => {
 
   if (node.type === "group") {
     const basic: FieldRow[] = [
-      pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+      withTypeTip(
+        pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+        nodeTypeRaw(node)
+      ),
       ...GROUP_BASIC_FIELDS.map((f) => {
         let value = attrLookup(xmlAttrs, f.name);
         if (!value && f.name === "id") value = node.id ?? "";
@@ -410,7 +441,10 @@ const geometryView = computed(() => {
       id: "basic",
       title: t("app.basicInfo"),
       fields: [
-        pushField("basic", { name: "type" }, node.kind, true),
+        withTypeTip(
+          pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+          nodeTypeRaw(node)
+        ),
         pushField("basic", { name: "id" }, idVal),
         pushField("basic", classFieldWithCategories(classVal), classVal),
       ],
@@ -472,7 +506,10 @@ const geometryView = computed(() => {
       id: "basic",
       title: t("app.basicInfo"),
       fields: [
-        pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+        withTypeTip(
+          pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+          nodeTypeRaw(node)
+        ),
         pushField("basic", { name: "id" }, idVal),
         pushField("basic", { name: "href" }, hrefVal),
       ],
@@ -491,7 +528,10 @@ const geometryView = computed(() => {
       id: "basic",
       title: t("app.basicInfo"),
       fields: [
-        pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+        withTypeTip(
+          pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
+          nodeTypeRaw(node)
+        ),
         pushField("basic", { name: "id" }, attrLookup(xmlAttrs, "id")),
         pushField(
           "basic",
@@ -966,6 +1006,21 @@ function onEnumAttrChange(name: string, value: unknown): void {
   commitField(name);
 }
 
+/** Effective checked state for boolean attrs (empty → placeholder default). */
+function isBoolAttrChecked(field: AttrField): boolean {
+  const raw = (draft[field.name] ?? "").trim().toLowerCase();
+  if (!raw) {
+    return (field.placeholder ?? "true").trim().toLowerCase() !== "false";
+  }
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+
+function onBoolAttrChange(field: AttrField, checked: unknown): void {
+  const on = checked === true || checked === "true" || checked === 1;
+  draft[field.name] = on ? "true" : "false";
+  commitField(field.name);
+}
+
 function rowsForSection(fields: FieldRow[]): InspectorRow[] {
   const rows: InspectorRow[] = [];
   for (const field of fields) {
@@ -1214,9 +1269,12 @@ function commitStyleCategoryName(): void {
               <span class="name" :title="field.name">{{
                 fieldDisplayName(field.name)
               }}</span>
-              <span v-if="field.readonly" class="value">{{
-                draft[field.name] ?? field.value
-              }}</span>
+              <span
+                v-if="field.readonly"
+                class="value"
+                :title="field.valueTitle || undefined"
+                >{{ draft[field.name] ?? field.value }}</span
+              >
               <div v-else class="value-cell">
                 <t-input
                   v-model="draft[field.name]"
@@ -1258,9 +1316,12 @@ function commitStyleCategoryName(): void {
               <span class="name" :title="field.name">{{
                 fieldDisplayName(field.name)
               }}</span>
-              <span v-if="field.readonly" class="value">{{
-                draft[field.name] ?? field.value
-              }}</span>
+              <span
+                v-if="field.readonly"
+                class="value"
+                :title="field.valueTitle || undefined"
+                >{{ draft[field.name] ?? field.value }}</span
+              >
               <div v-else class="value-cell">
                 <t-select
                   v-if="field.enumValues"
@@ -1401,9 +1462,12 @@ function commitStyleCategoryName(): void {
               <span class="name" :title="field.name">{{
                 fieldDisplayName(field.name)
               }}</span>
-              <span v-if="field.readonly" class="value">{{
-                draft[field.name] ?? field.value
-              }}</span>
+              <span
+                v-if="field.readonly"
+                class="value"
+                :title="field.valueTitle || undefined"
+                >{{ draft[field.name] ?? field.value }}</span
+              >
               <div v-else class="value-cell">
                 <div
                   v-if="field.name === 'color'"
@@ -1555,9 +1619,12 @@ function commitStyleCategoryName(): void {
                     </template>
                   </t-button>
                 </span>
-                <span v-if="row.field.readonly" class="value">{{
-                  draft[row.field.name] ?? row.field.value
-                }}</span>
+                <span
+                  v-if="row.field.readonly"
+                  class="value"
+                  :title="row.field.valueTitle || undefined"
+                  >{{ draft[row.field.name] ?? row.field.value }}</span
+                >
                 <div v-else class="value-cell">
                   <div
                     v-if="row.field.name === 'fill'"
@@ -1600,6 +1667,24 @@ function commitStyleCategoryName(): void {
                       @clear="onFillClear"
                     />
                   </div>
+                  <t-checkbox
+                    v-else-if="row.field.boolean"
+                    :checked="isBoolAttrChecked(row.field)"
+                    class="bool-check"
+                    @change="(v: unknown) => onBoolAttrChange(row.field, v)"
+                  />
+                  <BlendAttrSelect
+                    v-else-if="row.field.name === 'blend'"
+                    :model-value="draft[row.field.name]"
+                    clearable
+                    :placeholder="
+                      row.field.placeholder
+                        ? attrValueLabel('blend', row.field.placeholder)
+                        : t('app.unsetHint')
+                    "
+                    @change="(v: string) => onEnumAttrChange('blend', v)"
+                    @clear="() => onEnumAttrChange('blend', '')"
+                  />
                   <t-select
                     v-else-if="
                       row.field.enumValues || row.field.name === 'class'
