@@ -56,6 +56,7 @@ function onClick(dropdownItem: DropdownOption): void {
       class="repos-trigger"
       variant="text"
       shape="square"
+      size="small"
       :title="t('app.repos')"
       :aria-label="t('app.repos')"
     >

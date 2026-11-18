@@ -219,9 +219,10 @@ export function normalizeXmlNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-/** Locate `:root { … }` inside the first `<style>` block. */
-function findRootRuleRange(
-  content: string
+/** Locate a CSS rule inside the first `<style>` block. */
+function findStyleRuleRange(
+  content: string,
+  ruleRe: RegExp
 ): { start: number; end: number } | null {
   const styleRe = /<style\b[^>]*>/i;
   const open = styleRe.exec(content);
@@ -230,13 +231,51 @@ function findRootRuleRange(
   const close = content.slice(bodyStart).search(/<\/style\s*>/i);
   if (close < 0) return null;
   const body = content.slice(bodyStart, bodyStart + close);
-  const ruleRe = /:root\s*\{[^}]*\}/;
   const m = ruleRe.exec(body);
   if (!m) return null;
   return {
     start: bodyStart + m.index,
     end: bodyStart + m.index + m[0].length,
   };
+}
+
+/** Locate `:root { … }` inside the first `<style>` block. */
+function findRootRuleRange(
+  content: string
+): { start: number; end: number } | null {
+  return findStyleRuleRange(content, /:root\s*\{[^}]*\}/);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Locate `.className { … }` inside the first `<style>` block. */
+function findClassRuleRange(
+  content: string,
+  className: string
+): { start: number; end: number } | null {
+  const cls = className.trim().replace(/^\./, "");
+  if (!cls) return null;
+  return findStyleRuleRange(
+    content,
+    new RegExp(`\\.${escapeRegExp(cls)}\\s*\\{[^}]*\\}`)
+  );
+}
+
+/** Parse `style::root` / `style:.className` / legacy `style:groupId`. */
+function stylePathTarget(
+  path: string
+): { kind: "root" } | { kind: "class"; name: string } | { kind: "group"; id: string } | null {
+  if (!path.startsWith("style:")) return null;
+  const rest = path.slice("style:".length);
+  if (!rest) return null;
+  if (rest === ":root" || rest === "root") return { kind: "root" };
+  if (rest.startsWith(".")) {
+    const name = rest.slice(1).trim();
+    return name ? { kind: "class", name } : null;
+  }
+  return { kind: "group", id: rest };
 }
 
 export type TextRange = { start: number; end: number };
@@ -328,12 +367,14 @@ export function findRangeForTreePath(
 ): TextRange | null {
   if (!path) return null;
   if (path.startsWith("style:")) {
-    const rest = path.slice("style:".length);
-    if (rest === ":root" || rest === "root") {
-      return findRootRuleRange(content);
+    const target = stylePathTarget(path);
+    if (!target) return null;
+    if (target.kind === "root") return findRootRuleRange(content);
+    if (target.kind === "class") {
+      return findClassRuleRange(content, target.name);
     }
-    // Class styles in the tree are keyed by the owning group id.
-    const g = findGroupOpen(content, rest);
+    // Legacy: class styles keyed by the owning group id.
+    const g = findGroupOpen(content, target.id);
     return g ? { start: g.start, end: elementEnd(content, g) } : null;
   }
   const open = findOpenTagAtPath(content, path);
@@ -351,12 +392,17 @@ export function findTagPairRanges(
 ): { open: TextRange; close: TextRange | null } | null {
   if (!path) return null;
   if (path.startsWith("style:")) {
-    const rest = path.slice("style:".length);
-    if (rest === ":root" || rest === "root") {
+    const target = stylePathTarget(path);
+    if (!target) return null;
+    if (target.kind === "root") {
       const root = findRootRuleRange(content);
       return root ? { open: root, close: null } : null;
     }
-    const g = findGroupOpen(content, rest);
+    if (target.kind === "class") {
+      const rule = findClassRuleRange(content, target.name);
+      return rule ? { open: rule, close: null } : null;
+    }
+    const g = findGroupOpen(content, target.id);
     if (!g) return null;
     return tagPairFromOpen(content, g);
   }
@@ -402,6 +448,24 @@ export function findTreePathAtOffset(
   const root = findRootRuleRange(content);
   if (root && offset >= root.start && offset < root.end) {
     return "style::root";
+  }
+
+  const styleOpen = /<style\b[^>]*>/i.exec(content);
+  if (styleOpen) {
+    const bodyStart = styleOpen.index + styleOpen[0].length;
+    const close = content.slice(bodyStart).search(/<\/style\s*>/i);
+    if (close >= 0) {
+      const body = content.slice(bodyStart, bodyStart + close);
+      const ruleRe = /\.([A-Za-z_][\w-]*)\s*\{[^}]*\}/g;
+      let rm: RegExpExecArray | null;
+      while ((rm = ruleRe.exec(body))) {
+        const start = bodyStart + rm.index;
+        const end = start + rm[0].length;
+        if (offset >= start && offset < end) {
+          return `style:.${rm[1]}`;
+        }
+      }
+    }
   }
 
   for (const id of listMaterialIds(content)) {

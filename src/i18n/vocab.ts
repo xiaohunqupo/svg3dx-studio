@@ -69,10 +69,11 @@ export type ElementKey = keyof typeof ELEMENT_LABELS;
 export const ATTR_LABELS = {
   // common / identity
   id: { zh: "标识", en: "id" },
-  class: { zh: "类名", en: "class" },
+  class: { zh: "分类", en: "class" },
   type: { zh: "类型", en: "type" },
   href: { zh: "引用", en: "href" },
   mode: { zh: "模式", en: "mode" },
+  form: { zh: "形式", en: "form" },
   test: { zh: "条件", en: "test" },
   active: { zh: "激活", en: "active" },
   svg3d: { zh: "三维开关", en: "svg3d" },
@@ -156,3 +157,18 @@ export const CORNER_VALUE_LABELS = {
 } as const satisfies Record<string, LocalePair>;
 
 export type CornerValueKey = keyof typeof CORNER_VALUE_LABELS;
+
+/**
+ * Shared `form` enum values (§3.2).
+ * Not every primitive uses every value — see `primitiveForms.ts`.
+ */
+export const FORM_VALUE_LABELS = {
+  angles: { zh: "角参数", en: "Angles" },
+  ends: { zh: "起终点", en: "Endpoints" },
+  polyline: { zh: "折线", en: "Polyline" },
+  segments: { zh: "曲线段", en: "Segments" },
+  inline: { zh: "内联", en: "Inline" },
+  child: { zh: "子路径", en: "Child path" },
+} as const satisfies Record<string, LocalePair>;
+
+export type FormValueKey = keyof typeof FORM_VALUE_LABELS;

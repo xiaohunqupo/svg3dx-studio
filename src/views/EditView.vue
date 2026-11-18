@@ -29,7 +29,13 @@ import {
   removeModelById,
 } from "@/utils/svgEdit";
 import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
-import { setClassRuleProps, setRootRuleProps } from "@/utils/styleClasses";
+import {
+  insertEmptyStyleCategory,
+  removeStyleCategory,
+  renameStyleCategory,
+  setClassRuleProps,
+  setRootRuleProps,
+} from "@/utils/styleClasses";
 import { rewriteMaterialIdRefs } from "@/utils/documentMaterials";
 import {
   formatXml,
@@ -439,6 +445,17 @@ async function onAddMaterial(): Promise<void> {
   MessagePlugin.success(`${t("app.addedMaterial")} ${id}`);
 }
 
+async function onAddStyleCategory(): Promise<void> {
+  if (!file.value) return;
+  const { content, name } = insertEmptyStyleCategory(draftContent.value);
+  const next = await formatDraftContent(content);
+  draftContent.value = next;
+  await store.updateContent(file.value.id, next, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(`style:.${name}`, { select: "self" });
+  MessagePlugin.success(`${t("app.addedStyleCategory")} ${name}`);
+}
+
 async function onAddUse(payload: {
   modelId?: string;
   path: string;
@@ -555,6 +572,28 @@ async function onDeleteUse(payload: { path: string }): Promise<void> {
   MessagePlugin.success(t("app.deletedNode"));
 }
 
+async function onDeleteStyleCategory(payload: {
+  path: string;
+  name: string;
+}): Promise<void> {
+  if (!file.value) return;
+  const name = payload.name.trim().replace(/^\./, "");
+  if (!name || name === ":root") return;
+
+  let next = removeStyleCategory(draftContent.value, name);
+  if (next === draftContent.value) return;
+  next = await formatDraftContent(next);
+  draftContent.value = next;
+  if (selected.value?.kind === "style" && selected.value.path === payload.path) {
+    selected.value = null;
+    interactHost.value?.setHighlight(null);
+  }
+  await store.updateContent(file.value.id, next, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("style", { select: "self" });
+  MessagePlugin.success(`${t("app.deletedNode")} ${name}`);
+}
+
 async function onOptimize(): Promise<void> {
   if (!file.value) return;
   const { content, changed, stats } = optimizeSvg3dxContent(draftContent.value);
@@ -573,7 +612,10 @@ async function onOptimize(): Promise<void> {
     stats.removedGroups +
     stats.removedContainers +
     stats.removedMaterials +
-    stats.removedParams;
+    stats.removedParams +
+    stats.removedStyles +
+    stats.removedClassAttrs +
+    stats.removedFormAttrs;
   const msg = t("app.optimizeDone", { n: String(n) });
   MessagePlugin.success(msg);
 }
@@ -636,6 +678,38 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
   selected.value = { ...sel, props: propsMap };
   await store.updateContent(file.value.id, next, true);
   await nextTick();
+  revealSelectedInSource();
+}
+
+async function onStyleCategoryRename(payload: {
+  from: string;
+  to: string;
+}): Promise<void> {
+  const sel = selected.value;
+  if (!sel || sel.kind !== "style" || !file.value) return;
+  if (sel.scope === "root") return;
+
+  const from = payload.from.trim();
+  const to = payload.to.trim();
+  if (!from || !to || from === to) return;
+
+  let next = renameStyleCategory(draftContent.value, from, to);
+  if (next === draftContent.value) {
+    MessagePlugin.warning(t("app.styleCategoryDuplicate"));
+    return;
+  }
+  next = await formatDraftContent(next);
+  const newPath = `style:.${to}`;
+  draftContent.value = next;
+  selected.value = {
+    ...sel,
+    path: newPath,
+    name: to,
+    groupId: sel.groupId,
+  };
+  await store.updateContent(file.value.id, next, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(newPath, { select: "self" });
   revealSelectedInSource();
 }
 
@@ -784,7 +858,7 @@ onBeforeUnmount(() => {
   <div v-else-if="file" class="edit-page">
     <header class="topbar">
       <div class="brand">
-        <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
+        <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
         <span class="product">svg3dx Studio</span>
       </div>
       <AppMenus
@@ -826,12 +900,14 @@ onBeforeUnmount(() => {
         @add-group="onAddGroup"
         @add-model="onAddModel"
         @add-material="onAddMaterial"
+        @add-style-category="onAddStyleCategory"
         @add-use="onAddUse"
         @add-child="onAddChild"
         @delete-node="onDeleteNode"
         @delete-model="onDeleteModel"
         @delete-use="onDeleteUse"
         @delete-element="onDeleteUse"
+        @delete-style-category="onDeleteStyleCategory"
         @optimize="onOptimize"
       />
       <div
@@ -911,6 +987,7 @@ onBeforeUnmount(() => {
           :selected="selected"
           :content="draftContent"
           @style-params-change="onStyleParamsChange"
+          @style-category-rename="onStyleCategoryRename"
           @node-attrs-change="onNodeAttrsChange"
         />
       </aside>
@@ -928,12 +1005,12 @@ onBeforeUnmount(() => {
 
 .topbar {
   position: relative;
-  height: 52px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 0 12px;
   background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-border);
 }
@@ -941,26 +1018,26 @@ onBeforeUnmount(() => {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .logo {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
   border-radius: 4px;
 }
 
 .product {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
 }

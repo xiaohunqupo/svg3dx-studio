@@ -21,6 +21,7 @@ function onSchemeChange(value: string | number | boolean): void {
       class="settings-trigger"
       variant="text"
       shape="square"
+      size="small"
       :title="t('app.settings')"
       :aria-label="t('app.settings')"
     >

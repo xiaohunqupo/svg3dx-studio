@@ -136,16 +136,16 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
   background: transparent;
   box-shadow: none;
   border: none;
-  height: 32px;
-  line-height: 32px;
+  height: 28px;
+  line-height: 28px;
   padding: 0;
   margin: 0;
 }
 
 .app-menus :deep(.t-head-menu__inner) {
   width: auto;
-  height: 32px;
-  line-height: 32px;
+  height: 28px;
+  line-height: 28px;
   display: inline-flex;
   align-items: center;
 }
@@ -174,12 +174,12 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
 
 .app-menus :deep(.t-head-menu__inner > .t-menu > .t-menu__item),
 .app-menus :deep(.t-submenu > .t-menu__item) {
-  height: 32px;
-  line-height: 32px;
+  height: 28px;
+  line-height: 28px;
   margin: 0;
-  padding: 0 10px;
-  gap: 6px;
-  font-size: 14px;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary);
   background: transparent !important;

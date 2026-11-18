@@ -373,16 +373,76 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "to", placeholder: "100 0 0" },
   ],
   arc: [
+    {
+      name: "form",
+      placeholder: "angles",
+      enumValues: ["angles", "ends"],
+    },
     { name: "center", placeholder: "0 0 0" },
     { name: "normal", placeholder: "0 0 1" },
     { name: "radius", placeholder: "100" },
-    { name: "xDir", placeholder: "1 0 0" },
-    { name: "startAngle", placeholder: "0" },
-    { name: "angle", placeholder: "90" },
-    { name: "from" },
-    { name: "to" },
+    {
+      name: "xDir",
+      placeholder: "1 0 0",
+      visibleWhen: {
+        name: "form",
+        values: ["angles"],
+        whenEmpty: "angles",
+      },
+    },
+    {
+      name: "startAngle",
+      placeholder: "0",
+      visibleWhen: {
+        name: "form",
+        values: ["angles"],
+        whenEmpty: "angles",
+      },
+    },
+    {
+      name: "angle",
+      placeholder: "90",
+      visibleWhen: {
+        name: "form",
+        values: ["angles"],
+        whenEmpty: "angles",
+      },
+    },
+    {
+      name: "from",
+      placeholder: "0 0 0",
+      visibleWhen: {
+        name: "form",
+        values: ["ends"],
+        whenEmpty: "angles",
+      },
+    },
+    {
+      name: "to",
+      placeholder: "100 0 0",
+      visibleWhen: {
+        name: "form",
+        values: ["ends"],
+        whenEmpty: "angles",
+      },
+    },
   ],
-  path: [{ name: "points", placeholder: "0 0 0  100 0 0  100 0 100" }],
+  path: [
+    {
+      name: "form",
+      placeholder: "segments",
+      enumValues: ["polyline", "segments"],
+    },
+    {
+      name: "points",
+      placeholder: "0 0 0  100 0 0  100 0 100",
+      visibleWhen: {
+        name: "form",
+        values: ["polyline"],
+        whenEmpty: "segments",
+      },
+    },
+  ],
   extrude: [
     { name: "origin", placeholder: "0 0 0" },
     { name: "normal", placeholder: "0 0 1" },
@@ -408,6 +468,11 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     },
   ],
   sweep: [
+    {
+      name: "form",
+      placeholder: "child",
+      enumValues: ["inline", "child"],
+    },
     {
       name: "orient",
       placeholder: "frenet",
@@ -437,9 +502,22 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
         whenEmpty: "arc",
       },
     },
-    { name: "path" },
+    {
+      name: "path",
+      placeholder: "0 0 0  100 0 0  100 0 100",
+      visibleWhen: {
+        name: "form",
+        values: ["inline"],
+        whenEmpty: "child",
+      },
+    },
   ],
   pipe: [
+    {
+      name: "form",
+      placeholder: "child",
+      enumValues: ["inline", "child"],
+    },
     { name: "radius", placeholder: "20" },
     { name: "innerRadius", placeholder: "16" },
     {
@@ -456,7 +534,15 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
         whenEmpty: "arc",
       },
     },
-    { name: "path" },
+    {
+      name: "path",
+      placeholder: "0 0 0  100 0 0  100 0 100",
+      visibleWhen: {
+        name: "form",
+        values: ["inline"],
+        whenEmpty: "child",
+      },
+    },
   ],
 };
 

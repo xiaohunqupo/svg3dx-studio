@@ -10,11 +10,13 @@ import {
   ATTR_LABELS,
   CORNER_VALUE_LABELS,
   ELEMENT_LABELS,
+  FORM_VALUE_LABELS,
   MATERIAL_LABELS,
   ORIENT_VALUE_LABELS,
   type AttrKey,
   type CornerValueKey,
   type ElementKey,
+  type FormValueKey,
   type MaterialKey,
   type OrientValueKey,
 } from "./vocab";
@@ -129,7 +131,7 @@ export function materialLabel(id: string): string {
   return hit ? hit[locale.value] : id;
 }
 
-/** Enum attr value display name (`orient` / `corner`, …). */
+/** Enum attr value display name (`orient` / `corner` / `form`, …). */
 export function attrValueLabel(attr: string, value: string): string {
   const v = value.trim();
   if (!v) return v;
@@ -139,6 +141,10 @@ export function attrValueLabel(attr: string, value: string): string {
   }
   if (attr === "corner") {
     const hit = CORNER_VALUE_LABELS[v as CornerValueKey];
+    return hit ? hit[locale.value] : v;
+  }
+  if (attr === "form") {
+    const hit = FORM_VALUE_LABELS[v as FormValueKey];
     return hit ? hit[locale.value] : v;
   }
   return v;

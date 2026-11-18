@@ -2,7 +2,7 @@
 import { computed, h, reactive, ref, watch } from "vue";
 import { ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { BUILTIN_MATERIALS, type GeometryInstruction } from "svg3dx-viewer";
-import type { SelectOption } from "tdesign-vue-next";
+import { MessagePlugin, type SelectOption } from "tdesign-vue-next";
 import type { TreeSelectPayload } from "@/components/NodeTreePanel.vue";
 import StyleParamEditor from "@/components/StyleParamEditor.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
@@ -44,8 +44,17 @@ import {
   collectParamSourceGroups,
   effectiveBareParamNames,
 } from "@/utils/paramScope";
-import { extractDefsGroups } from "@/utils/styleClasses";
+import {
+  extractDefsGroups,
+  isValidStyleCategoryName,
+  listStyleCategories,
+} from "@/utils/styleClasses";
 import { blankIfEqualsDefault } from "@/utils/attrDefault";
+import {
+  inactiveFormAttrNames,
+  inferPrimitiveForm,
+  primitiveFormSpec,
+} from "@/utils/primitiveForms";
 
 const props = defineProps<{
   selected: TreeSelectPayload | null;
@@ -55,6 +64,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   styleParamsChange: [propsMap: Record<string, string>];
+  styleCategoryRename: [payload: { from: string; to: string }];
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
 }>();
 
@@ -183,12 +193,15 @@ const styleClassName = computed(() => {
 
 const styleBasicFields = computed((): FieldRow[] => {
   if (props.selected?.kind !== "style" || !styleClassName.value) return [];
+  // Touch locale so labels refresh on language switch.
+  void attrLabel("class");
+  void tagLabel("category");
   if (styleIsRoot.value) {
     return [
       {
         key: "style:type",
         name: "type",
-        value: tagLabel("style"),
+        value: tagLabel("root"),
         readonly: true,
       },
       {
@@ -197,35 +210,35 @@ const styleBasicFields = computed((): FieldRow[] => {
         value: ":root",
         readonly: true,
       },
-      {
-        key: "style:label",
-        name: "label",
-        value: tagLabel("root"),
-        readonly: true,
-      },
     ];
   }
   return [
     {
       key: "style:type",
       name: "type",
-      value: tagLabel("style"),
+      value: tagLabel("category"),
       readonly: true,
     },
     {
       key: "style:class",
       name: "class",
-      value: `.${styleClassName.value}`,
-      readonly: true,
-    },
-    {
-      key: "style:group",
-      name: t("app.paramDefGroup"),
-      value: props.selected.groupId || "—",
-      readonly: true,
+      value: styleClassName.value,
     },
   ];
 });
+
+/** Categories from `<style>` (excl. `:root`) for the class / 分类 picker. */
+const styleCategoryNames = computed(() =>
+  listStyleCategories(props.content ?? "")
+);
+
+function classFieldWithCategories(value: string): AttrField {
+  const cur = value.trim();
+  const cats = styleCategoryNames.value;
+  const enumValues =
+    cur && !cats.includes(cur) ? [...cats, cur] : [...cats];
+  return { name: "class", enumValues };
+}
 
 const materialBasicFields = computed((): FieldRow[] => {
   if (props.selected?.kind !== "material") return [];
@@ -318,6 +331,9 @@ const geometryView = computed(() => {
         let value = attrLookup(xmlAttrs, f.name);
         if (!value && f.name === "id") value = node.id ?? "";
         if (!value && f.name === "class" && sel.className) value = sel.className;
+        if (f.name === "class") {
+          return pushField("basic", classFieldWithCategories(value), value);
+        }
         return pushField("basic", f, value);
       }),
     ];
@@ -352,14 +368,19 @@ const geometryView = computed(() => {
       fields: [
         pushField("basic", { name: "type" }, node.kind, true),
         pushField("basic", { name: "id" }, idVal),
-        pushField("basic", { name: "class" }, classVal),
+        pushField("basic", classFieldWithCategories(classVal), classVal),
       ],
     });
 
     const schema = primitiveAttrFields(node.kind);
-    const paramFields = schema.map((f) =>
-      pushField("params", f, attrLookup(xmlAttrs, f.name))
-    );
+    const inferredForm = primitiveFormSpec(node.kind)
+      ? inferPrimitiveForm(node.kind, xmlAttrs ?? {})
+      : "";
+    const paramFields = schema.map((f) => {
+      let value = attrLookup(xmlAttrs, f.name);
+      if (f.name === "form" && !value && inferredForm) value = inferredForm;
+      return pushField("params", f, value);
+    });
     if (xmlAttrs) {
       const known = new Set([
         ...schema.map((f) => f.name.toLowerCase()),
@@ -421,13 +442,18 @@ const geometryView = computed(() => {
       ),
     });
   } else {
+    const otherClassVal = attrLookup(xmlAttrs, "class");
     sections.push({
       id: "basic",
       title: t("app.basicInfo"),
       fields: [
         pushField("basic", { name: "type" }, nodeTypeLabel(node), true),
         pushField("basic", { name: "id" }, attrLookup(xmlAttrs, "id")),
-        pushField("basic", { name: "class" }, attrLookup(xmlAttrs, "class")),
+        pushField(
+          "basic",
+          classFieldWithCategories(otherClassVal),
+          otherClassVal
+        ),
       ],
     });
 
@@ -486,14 +512,18 @@ watch(
     ] as const,
   () => {
     if (props.selected?.kind === "style") {
-      draftPath = "";
       openSections.value = [];
       styleOpenSections.value = ["basic", "params"];
       materialOpenSections.value = ["basic"];
       fillHexUi.value = "";
       transformExpanded.value = false;
       Object.assign(transformParts, emptyTransformParts());
-      for (const k of Object.keys(draft)) delete draft[k];
+      if (styleIsRoot.value) {
+        draftPath = "";
+        for (const k of Object.keys(draft)) delete draft[k];
+      } else {
+        seedDraft(styleBasicFields.value, props.selected.path);
+      }
       return;
     }
     if (props.selected?.kind === "material") {
@@ -534,6 +564,10 @@ function commitField(name: string): void {
   let changed = false;
   for (const f of view.allFields) {
     if (f.readonly || f.name === "type") continue;
+    // Hidden form-dependent fields are not written; cleared below when form applies.
+    if (!isFieldVisible(f) && f.visibleWhen?.name === "form") {
+      continue;
+    }
     let raw = (draft[f.name] ?? "").trim();
     if (f.name === "s3dx:transform") {
       if (isIdentityTransformDisplay(raw)) raw = "";
@@ -551,6 +585,35 @@ function commitField(name: string): void {
     updates[f.name] = next;
     if (next !== prev) changed = true;
   }
+
+  const sel = props.selected;
+  const kind =
+    sel?.kind === "geometry" && sel.node?.type === "primitive"
+      ? sel.node.kind
+      : "";
+  if (kind && primitiveFormSpec(kind)) {
+    const form =
+      (updates.form ?? draft.form ?? "").trim() ||
+      inferPrimitiveForm(kind, { ...draft, ...updates });
+    if (form) {
+      const prevForm =
+        view.allFields.find((f) => f.name === "form")?.value?.trim() ?? "";
+      updates.form = form;
+      draft.form = form;
+      if (form !== prevForm) changed = true;
+      for (const inactive of inactiveFormAttrNames(kind, form)) {
+        const prev =
+          view.allFields.find((f) => f.name === inactive)?.value?.trim() ?? "";
+        const cur = (updates[inactive] ?? draft[inactive] ?? "").trim();
+        if (cur || prev) {
+          updates[inactive] = "";
+          draft[inactive] = "";
+          changed = true;
+        }
+      }
+    }
+  }
+
   if (!changed) return;
   emit("nodeAttrsChange", { path: view.path, updates });
 }
@@ -737,6 +800,13 @@ function enumOptionsFor(field: AttrField): SelectOption[] {
   }));
 }
 
+function classSelectOptions(current: string): SelectOption[] {
+  const cur = current.trim();
+  const cats = styleCategoryNames.value;
+  const values = cur && !cats.includes(cur) ? [...cats, cur] : cats;
+  return values.map((value) => ({ label: value, value }));
+}
+
 function onEnumAttrChange(name: string, value: unknown): void {
   if (value == null || value === "") {
     draft[name] = "";
@@ -776,6 +846,7 @@ const EXPR_ATTR_SKIP = new Set([
   "id",
   "class",
   "type",
+  "form",
   "href",
   "xlink:href",
   "fill",
@@ -952,6 +1023,31 @@ function onMaterialClear(): void {
 function onStyleChange(map: Record<string, string>): void {
   emit("styleParamsChange", map);
 }
+
+function commitStyleCategoryName(): void {
+  if (props.selected?.kind !== "style" || styleIsRoot.value) return;
+  if (draftPath !== props.selected.path) return;
+  const from = styleClassName.value;
+  const to = (draft.class ?? "").trim();
+  if (!to || to === from) {
+    draft.class = from;
+    return;
+  }
+  if (!isValidStyleCategoryName(to)) {
+    MessagePlugin.warning(t("app.styleCategoryInvalid"));
+    draft.class = from;
+    return;
+  }
+  const taken = styleCategoryNames.value.some(
+    (c) => c !== from && c === to
+  );
+  if (taken) {
+    MessagePlugin.warning(t("app.styleCategoryDuplicate"));
+    draft.class = from;
+    return;
+  }
+  emit("styleCategoryRename", { from, to });
+}
 </script>
 
 <template>
@@ -968,19 +1064,30 @@ function onStyleChange(map: Record<string, string>): void {
             <div
               v-for="field in styleBasicFields"
               :key="field.key"
-              class="param-row readonly-row"
+              class="param-row"
+              :class="{ 'readonly-row': field.readonly }"
             >
               <span class="name" :title="field.name">{{
                 fieldDisplayName(field.name)
               }}</span>
-              <span class="value">{{ field.value }}</span>
+              <span v-if="field.readonly" class="value">{{
+                draft[field.name] ?? field.value
+              }}</span>
+              <div v-else class="value-cell">
+                <t-input
+                  v-model="draft[field.name]"
+                  size="small"
+                  class="value-input"
+                  @blur="commitStyleCategoryName"
+                  @enter="commitStyleCategoryName"
+                />
+              </div>
             </div>
           </div>
         </t-collapse-panel>
         <t-collapse-panel value="params" :header="t('app.paramDefs')">
           <StyleParamEditor
             :class-name="styleClassName"
-            :group-id="styleIsRoot ? undefined : selected.groupId"
             :model-value="selected.props"
             embedded
             @change="onStyleChange"
@@ -1226,15 +1333,26 @@ function onStyleChange(map: Record<string, string>): void {
                     />
                   </div>
                   <t-select
-                    v-else-if="row.field.enumValues?.length"
+                    v-else-if="
+                      row.field.enumValues || row.field.name === 'class'
+                    "
                     :value="draft[row.field.name] || undefined"
-                    :options="enumOptionsFor(row.field)"
+                    :options="
+                      row.field.name === 'class'
+                        ? classSelectOptions(draft[row.field.name] ?? '')
+                        : enumOptionsFor(row.field)
+                    "
                     clearable
                     size="small"
                     :placeholder="
-                      row.field.placeholder
-                        ? attrValueLabel(row.field.name, row.field.placeholder)
-                        : t('app.unsetHint')
+                      row.field.name === 'class'
+                        ? ''
+                        : row.field.placeholder
+                          ? attrValueLabel(
+                              row.field.name,
+                              row.field.placeholder
+                            )
+                          : t('app.unsetHint')
                     "
                     class="enum-select"
                     @change="(v: unknown) => onEnumAttrChange(row.field.name, v)"

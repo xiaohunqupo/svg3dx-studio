@@ -81,6 +81,7 @@ function onAdd(): void {
     name = `--New${n++}`;
   }
   rows.value = [...rows.value, { key: `p-${seq++}-new`, name, value: "0" }];
+  commit();
 }
 
 function onRemove(key: string): void {
@@ -152,9 +153,6 @@ function onNameBlur(row: StyleParamRow): void {
           <template #icon><DeleteIcon /></template>
         </t-button>
       </div>
-      <div v-if="!rows.length" class="param-row empty-row">
-        <div class="empty">{{ t("app.noParams") }}</div>
-      </div>
       <div class="param-row add-row">
         <t-button size="small" variant="outline" @click="onAdd">
           <template #icon><AddIcon /></template>
@@ -200,9 +198,6 @@ function onNameBlur(row: StyleParamRow): void {
             <template #icon><DeleteIcon /></template>
           </t-button>
         </div>
-      </t-list-item>
-      <t-list-item v-if="!rows.length">
-        <div class="empty">{{ t("app.noParams") }}</div>
       </t-list-item>
       <t-list-item v-if="hideTitle">
         <t-button size="small" variant="outline" @click="onAdd">
@@ -288,7 +283,6 @@ function onNameBlur(row: StyleParamRow): void {
   box-sizing: border-box;
 }
 
-.param-row.empty-row,
 .param-row.add-row {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -296,12 +290,6 @@ function onNameBlur(row: StyleParamRow): void {
 .name-input :deep(.t-input),
 .value-input :deep(.t-input) {
   font-variant-numeric: tabular-nums;
-}
-
-.empty {
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  padding: 2px 0;
 }
 
 :deep(.t-list__header) {

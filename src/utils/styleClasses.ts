@@ -242,3 +242,149 @@ export function setRootRuleProps(
   const ruleText = `:root {${formatRuleBody(normalized)}}`;
   return upsertStyleRule(svgText, ruleText, /:root\s*\{[^}]*\}/m);
 }
+
+/**
+ * Style categories available for the `class` attribute picker.
+ * Union of `.class { }` rules and classes used on `<g>` — never includes `:root`.
+ */
+export function listStyleCategories(svgText: string): string[] {
+  const seen = new Set<string>();
+  for (const name of Object.keys(extractClassRules(svgText))) {
+    if (name && name !== ":root") seen.add(name);
+  }
+  for (const g of extractClassedGroups(svgText)) {
+    for (const c of g.classes) {
+      if (c && c !== ":root") seen.add(c);
+    }
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/** Next unused `class-N` category name. */
+export function nextStyleCategoryName(svgText: string): string {
+  const used = new Set(listStyleCategories(svgText));
+  let n = 1;
+  while (used.has(`class-${n}`)) n += 1;
+  return `class-${n}`;
+}
+
+/** Insert an empty `.class-N { }` rule; returns the new category name. */
+export function insertEmptyStyleCategory(
+  svgText: string
+): { content: string; name: string } {
+  const name = nextStyleCategoryName(svgText);
+  return { content: setClassRuleProps(svgText, name, {}), name };
+}
+
+const CLASS_NAME_RE = /^[A-Za-z_][\w-]*$/;
+
+/** Valid CSS class / style-category identifier (no leading `.`). */
+export function isValidStyleCategoryName(name: string): boolean {
+  return CLASS_NAME_RE.test(name.trim());
+}
+
+/**
+ * Delete a style category: drop `.className { }`, strip that token from
+ * element `class` attrs, and remove empty `<style>` blocks.
+ */
+export function removeStyleCategory(
+  svgText: string,
+  className: string
+): string {
+  const cls = className.trim().replace(/^\./, "");
+  if (!cls) return svgText;
+
+  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let out = svgText.replace(styleRe, (full, css: string) => {
+    const nextCss = css
+      .replace(new RegExp(`\\.${escapeRegExp(cls)}\\s*\\{[^}]*\\}`, "g"), "")
+      .replace(/[ \t]*\n(?:[ \t]*\n)+/g, "\n");
+    return full.replace(css, nextCss);
+  });
+  out = out.replace(/\s*<style\b[^>]*>\s*<\/style>/gi, "\n");
+
+  const tagRe = /<([A-Za-z_][\w:.-]*)(\s[^>]*?)(\s*\/?\s*)>/g;
+  out = out.replace(tagRe, (full, tag: string, attrs: string, close: string) => {
+    const m = /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    if (!m) return full;
+    const quote = m[1] != null ? '"' : "'";
+    const tokens = (m[1] ?? m[2] ?? "").trim().split(/\s+/).filter(Boolean);
+    if (!tokens.includes(cls)) return full;
+    const kept = tokens.filter((t) => t !== cls);
+    const selfClosing = /\/\s*$/.test(close);
+    if (!kept.length) {
+      const nextAttrs = attrs.replace(m[0], "");
+      if (!nextAttrs.trim()) {
+        return selfClosing ? `<${tag}/>` : `<${tag}>`;
+      }
+      return selfClosing ? `<${tag}${nextAttrs}/>` : `<${tag}${nextAttrs}>`;
+    }
+    const nextAttrs = attrs.replace(
+      m[0],
+      ` class=${quote}${kept.join(" ")}${quote}`
+    );
+    return selfClosing ? `<${tag}${nextAttrs}/>` : `<${tag}${nextAttrs}>`;
+  });
+
+  return out;
+}
+
+/**
+ * Rename a style category: `.old { }` → `.new { }`, and rewrite matching
+ * `class` tokens on elements. No-op when names are equal/invalid/duplicate.
+ */
+export function renameStyleCategory(
+  svgText: string,
+  from: string,
+  to: string
+): string {
+  const oldName = from.trim().replace(/^\./, "");
+  const newName = to.trim().replace(/^\./, "");
+  if (!oldName || !newName || oldName === newName) return svgText;
+  if (!isValidStyleCategoryName(newName)) return svgText;
+
+  const cats = listStyleCategories(svgText);
+  if (cats.includes(newName)) return svgText;
+
+  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let out = svgText.replace(styleRe, (full, css: string) => {
+    const nextCss = css.replace(
+      new RegExp(`\\.${escapeRegExp(oldName)}(\\s*\\{)`, "g"),
+      `.${newName}$1`
+    );
+    return full.replace(css, nextCss);
+  });
+
+  const tagRe = /<([A-Za-z_][\w:.-]*)(\s[^>]*?)(\s*\/?\s*)>/g;
+  out = out.replace(tagRe, (full, tag: string, attrs: string, close: string) => {
+    const m = /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    if (!m) return full;
+    const quote = m[1] != null ? '"' : "'";
+    const tokens = (m[1] ?? m[2] ?? "").trim().split(/\s+/).filter(Boolean);
+    if (!tokens.includes(oldName)) return full;
+    const nextTokens = tokens.map((t) => (t === oldName ? newName : t));
+    const nextAttrs = attrs.replace(
+      m[0],
+      ` class=${quote}${nextTokens.join(" ")}${quote}`
+    );
+    const selfClosing = /\/\s*$/.test(close);
+    return selfClosing ? `<${tag}${nextAttrs}/>` : `<${tag}${nextAttrs}>`;
+  });
+
+  return out;
+}
+
+/** First group id that uses `className` (document order), if any. */
+export function firstGroupIdForClass(
+  svgText: string,
+  className: string
+): string {
+  const needle = className.trim();
+  if (!needle) return "";
+  for (const g of extractClassedGroups(svgText)) {
+    if (g.classes.includes(needle) && !g.id.startsWith("__anon_g_")) {
+      return g.id;
+    }
+  }
+  return "";
+}

@@ -6,10 +6,18 @@
  * 2. Unreferenced top-level defs `<g id>`
  * 3. Empty bool / logic / loop containers, then empty `<g>`
  * 4. Unused document materials and CSS custom properties (params)
+ * 5. Empty style rules (no parameters)
+ * 6. `class` tokens that no longer match a defined style rule
+ * 7. Primitive `form` normalization — drop attrs / children that don't match
  */
 
-import { extractDefsGroups } from "@/utils/styleClasses";
+import { extractClassRules, extractDefsGroups } from "@/utils/styleClasses";
 import { extractDocumentMaterials } from "@/utils/documentMaterials";
+import {
+  inactiveFormAttrNames,
+  inferPrimitiveForm,
+  primitiveFormSpec,
+} from "@/utils/primitiveForms";
 import { removeGroupById } from "@/utils/svgEdit";
 
 export type OptimizeStats = {
@@ -18,6 +26,9 @@ export type OptimizeStats = {
   removedContainers: number;
   removedMaterials: number;
   removedParams: number;
+  removedStyles: number;
+  removedClassAttrs: number;
+  removedFormAttrs: number;
 };
 
 export type OptimizeResult = {
@@ -341,6 +352,218 @@ function removeUnusedParams(svg: string, stats: OptimizeStats): string {
   return out;
 }
 
+/** True when a CSS rule body declares no properties. */
+function ruleBodyHasNoProps(body: string): boolean {
+  return !/(?:--[A-Za-z_][\w-]*|[A-Za-z_][\w-]*)\s*:/.test(body);
+}
+
+/**
+ * Drop `:root` / `.class` rules that have no parameters left,
+ * then remove empty `<style>` blocks.
+ */
+function removeEmptyStyleRules(svg: string, stats: OptimizeStats): string {
+  const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let out = svg.replace(styleRe, (full, css: string) => {
+    let nextCss = css;
+    const ruleRe = /([^{}@]+)\{([^}]*)\}/g;
+    nextCss = nextCss.replace(ruleRe, (ruleFull, selector: string, body: string) => {
+      const sel = selector.trim();
+      if (!sel) return ruleFull;
+      const isRoot = /^:root$/i.test(sel);
+      const isClass = /^\.[A-Za-z_][\w-]*$/.test(sel);
+      if (!isRoot && !isClass) return ruleFull;
+      if (!ruleBodyHasNoProps(body)) return ruleFull;
+      stats.removedStyles += 1;
+      return "";
+    });
+    nextCss = nextCss.replace(/[ \t]*\n(?:[ \t]*\n)+/g, "\n");
+    return full.replace(css, nextCss);
+  });
+
+  out = out.replace(/\s*<style\b[^>]*>\s*<\/style>/gi, "\n");
+  return out;
+}
+
+/**
+ * On every element, keep only `class` tokens that still have a `.token { }`
+ * rule in `<style>`. Remove the attribute when nothing remains.
+ */
+function removeInvalidClassAttrs(svg: string, stats: OptimizeStats): string {
+  const defined = new Set(Object.keys(extractClassRules(svg)));
+  const tagRe = /<([A-Za-z_][\w:.-]*)(\s[^>]*?)(\s*\/?\s*)>/g;
+  return svg.replace(tagRe, (full, tag: string, attrs: string, close: string) => {
+    const m = /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    if (!m) return full;
+    const quote = m[1] != null ? '"' : "'";
+    const tokens = (m[1] ?? m[2] ?? "").trim().split(/\s+/).filter(Boolean);
+    const kept = tokens.filter((c) => defined.has(c));
+    // Keep as-is when every token maps to a defined style rule.
+    if (tokens.length > 0 && kept.length === tokens.length) return full;
+
+    stats.removedClassAttrs += 1;
+    const nextAttrs = !kept.length
+      ? attrs.replace(m[0], "")
+      : attrs.replace(m[0], ` class=${quote}${kept.join(" ")}${quote}`);
+    const selfClosing = /\/\s*$/.test(close);
+    if (!nextAttrs.trim()) {
+      return selfClosing ? `<${tag}/>` : `<${tag}>`;
+    }
+    return selfClosing ? `<${tag}${nextAttrs}/>` : `<${tag}${nextAttrs}>`;
+  });
+}
+
+function parseAttrMap(attrs: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(attrs))) {
+    out[m[1]!] = (m[2] ?? m[3] ?? "").trim();
+  }
+  return out;
+}
+
+function serializeAttrMap(map: Record<string, string>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(map)) {
+    if (!v.trim() && k !== "form") continue;
+    parts.push(`${k}="${v}"`);
+  }
+  return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
+function elementHasDirectChild(
+  inner: string,
+  childLocals: readonly string[]
+): boolean {
+  for (const local of childLocals) {
+    const re = new RegExp(`<s3dx:${escapeRegExp(local)}\\b`, "i");
+    if (re.test(inner)) return true;
+  }
+  return false;
+}
+
+function stripDirectChildren(
+  inner: string,
+  childLocals: readonly string[]
+): { inner: string; removed: number } {
+  let next = inner;
+  let removed = 0;
+  for (const local of childLocals) {
+    const tag = `s3dx:${local}`;
+    const spans = findTagSpans(next, tag);
+    for (let i = spans.length - 1; i >= 0; i -= 1) {
+      const span = spans[i]!;
+      // Only strip top-level children of this inner blob (depth 0 relative to inner).
+      // findTagSpans is document-order in `next`; nested same-tag is rare for line/arc/path.
+      next = next.slice(0, span.start) + next.slice(span.end);
+      removed += 1;
+    }
+  }
+  next = next.replace(/[ \t]*\n(?:[ \t]*\n)+/g, "\n");
+  return { inner: next, removed };
+}
+
+/**
+ * Normalize `form` on arc / path / sweep / pipe: write inferred form, strip
+ * inactive attrs, and drop children that conflict with the active form.
+ */
+function normalizePrimitiveForms(svg: string, stats: OptimizeStats): string {
+  const kinds = ["arc", "path", "sweep", "pipe"] as const;
+  let out = svg;
+
+  for (const kind of kinds) {
+    const tag = `s3dx:${kind}`;
+    const openRe = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*)(\\/?)>`, "gi");
+    const matches: Array<{
+      start: number;
+      end: number;
+      attrs: string;
+      selfClosing: boolean;
+    }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = openRe.exec(out))) {
+      matches.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        attrs: m[1] ?? "",
+        selfClosing: /\/\s*$/.test(m[2] ?? "") || /\/\s*>$/.test(m[0]),
+      });
+    }
+
+    for (let i = matches.length - 1; i >= 0; i -= 1) {
+      const hit = matches[i]!;
+      const map = parseAttrMap(hit.attrs);
+      let inner = "";
+      let closeEnd = hit.end;
+      if (!hit.selfClosing) {
+        const spans = findTagSpans(out, tag).filter((s) => s.start === hit.start);
+        const span = spans[0];
+        if (span) {
+          const openEnd = hit.end;
+          inner = out.slice(openEnd, span.end).replace(
+            new RegExp(`</${escapeRegExp(tag)}\\s*>$`, "i"),
+            ""
+          );
+          closeEnd = span.end;
+        }
+      }
+
+      const form = inferPrimitiveForm(kind, map, {
+        hasCurveChildren: elementHasDirectChild(inner, ["line", "arc"]),
+        hasPathChild: elementHasDirectChild(inner, ["path"]),
+      });
+      if (!form || !primitiveFormSpec(kind)) continue;
+
+      let changed = false;
+      if (map.form !== form) {
+        map.form = form;
+        changed = true;
+      }
+      for (const name of inactiveFormAttrNames(kind, form)) {
+        if (name in map && map[name]!.trim()) {
+          delete map[name];
+          stats.removedFormAttrs += 1;
+          changed = true;
+        } else if (name in map) {
+          delete map[name];
+          changed = true;
+        }
+      }
+
+      let nextInner = inner;
+      if (kind === "path" && form === "polyline") {
+        const stripped = stripDirectChildren(nextInner, ["line", "arc"]);
+        if (stripped.removed) {
+          nextInner = stripped.inner;
+          stats.removedFormAttrs += stripped.removed;
+          changed = true;
+        }
+      }
+      if ((kind === "sweep" || kind === "pipe") && form === "inline") {
+        const stripped = stripDirectChildren(nextInner, ["path"]);
+        if (stripped.removed) {
+          nextInner = stripped.inner;
+          stats.removedFormAttrs += stripped.removed;
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+
+      const open =
+        hit.selfClosing && !nextInner.trim()
+          ? `<${tag}${serializeAttrMap(map)}/>`
+          : `<${tag}${serializeAttrMap(map)}>`;
+      const replacement = hit.selfClosing && !nextInner.trim()
+        ? open
+        : `${open}${nextInner}</${tag}>`;
+      out = out.slice(0, hit.start) + replacement + out.slice(closeEnd);
+    }
+  }
+
+  return out;
+}
+
 export function optimizeSvg3dxContent(content: string): OptimizeResult {
   const stats: OptimizeStats = {
     removedUses: 0,
@@ -348,6 +571,9 @@ export function optimizeSvg3dxContent(content: string): OptimizeResult {
     removedContainers: 0,
     removedMaterials: 0,
     removedParams: 0,
+    removedStyles: 0,
+    removedClassAttrs: 0,
+    removedFormAttrs: 0,
   };
   if (!content) {
     return { content, stats, changed: false };
@@ -375,6 +601,15 @@ export function optimizeSvg3dxContent(content: string): OptimizeResult {
   // 4. Materials & params
   svg = removeUnusedMaterials(svg, stats);
   svg = removeUnusedParams(svg, stats);
+
+  // 5. Style rules with no parameters (incl. emptied by step 4)
+  svg = removeEmptyStyleRules(svg, stats);
+
+  // 6. class attrs pointing at styles that no longer exist
+  svg = removeInvalidClassAttrs(svg, stats);
+
+  // 7. form attrs / mismatched geometry parameters
+  svg = normalizePrimitiveForms(svg, stats);
 
   return {
     content: svg,

@@ -14,6 +14,7 @@ const SKIP_DEFAULT_BLANK = new Set([
   "id",
   "class",
   "type",
+  "form",
   "href",
   "xlink:href",
   "fill",

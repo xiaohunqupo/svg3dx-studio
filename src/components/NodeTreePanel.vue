@@ -34,7 +34,8 @@ import {
   extractClassedGroups,
   extractDefsGroups,
   extractRootProps,
-  propsForClasses,
+  firstGroupIdForClass,
+  listStyleCategories,
 } from "@/utils/styleClasses";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import { locale, useI18n } from "@/i18n";
@@ -100,6 +101,7 @@ const emit = defineEmits<{
   addGroup: [];
   addModel: [];
   addMaterial: [];
+  addStyleCategory: [];
   addUse: [payload: { modelId?: string; path: string; href?: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
   deleteNode: [payload: { path: string; groupId: string }];
@@ -107,6 +109,7 @@ const emit = defineEmits<{
   deleteUse: [payload: { path: string }];
   /** Delete any geometry element by tree path (primitive / bool / nested, etc.). */
   deleteElement: [payload: { path: string }];
+  deleteStyleCategory: [payload: { path: string; name: string }];
   optimize: [];
 }>();
 
@@ -140,12 +143,15 @@ type TreeItem = {
       | "add-child"
       | "add-model"
       | "add-material"
+      | "add-style"
       | "model-more"
       | "use-more"
       /** Geometry leaf / non-group: more menu with delete. */
       | "geom-more"
       /** Material row: more menu with delete. */
-      | "material-more";
+      | "material-more"
+      /** Style category row: more menu with delete. */
+      | "style-more";
     /** Own `id` on `<s3dx:use>` when present. */
     useId?: string;
     /** Bare href target group id (no `#`); empty when unset. */
@@ -604,6 +610,16 @@ const materialMoreOptions = computed<DropdownOption[]>(() => [
   },
 ]);
 
+/** Style category row “more” menu: delete. */
+const styleMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
 function shortId(id: string | undefined | null): string {
   if (!id) return "";
   const parts = id.split("/");
@@ -907,7 +923,7 @@ function buildTree(
     {
       value: "style",
       label: tagLabel("styles"),
-      meta: { kind: "section", icon: PaletteIcon },
+      meta: { kind: "section", icon: PaletteIcon, action: "add-style" },
       children: [
         {
           value: "style::root",
@@ -922,24 +938,25 @@ function buildTree(
             styleResolved: {},
           },
         },
-        ...classedGroups.map((g) => {
-          const primary = g.classes[0] ?? "";
-          const className = g.classes.join(" ");
-          const groupNode = findGroupById(result.instructions, g.id);
+        // Categories from `<style>` rules ∪ class attrs on defs/groups.
+        ...listStyleCategories(content).map((className) => {
+          const groupId = firstGroupIdForClass(content, className);
+          const groupNode = groupId
+            ? findGroupById(result.instructions, groupId)
+            : null;
           return {
-            value: `style:${g.id}`,
+            value: `style:.${className}`,
             label: className,
             meta: {
               kind: "style" as const,
               icon: BrushIcon,
               styleName: className,
-              styleGroupId: g.id,
+              styleGroupId: groupId,
               className,
               styleScope: "class" as const,
-              styleProps: classRules[primary]
-                ? { ...classRules[primary] }
-                : propsForClasses(classRules, g.classes),
+              styleProps: { ...(classRules[className] ?? {}) },
               styleResolved: groupNode?.styles ?? {},
+              action: "style-more" as const,
             },
           };
         }),
@@ -948,8 +965,16 @@ function buildTree(
   ];
 }
 
-function styleOnlyKey(svg: string): string {
-  return svg.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "<style/>");
+/** Rebuild style tree when categories appear/disappear (not on prop edits). */
+function styleCategoriesKey(svg: string): string {
+  return listStyleCategories(svg).join("\n");
+}
+
+/** Rebuild when group↔class attachments change (参数定义组 hints). */
+function styleAttachmentKey(svg: string): string {
+  return extractClassedGroups(svg)
+    .map((g) => `${g.id}:${g.classes.join(" ")}`)
+    .join("\n");
 }
 
 function defsStructureKey(content: string): string {
@@ -1040,7 +1065,8 @@ watch(
     if (!props.result || !content || content === prev) return;
     if (
       prev &&
-      styleOnlyKey(prev) === styleOnlyKey(content) &&
+      styleCategoriesKey(prev) === styleCategoriesKey(content) &&
+      styleAttachmentKey(prev) === styleAttachmentKey(content) &&
       defsStructureKey(prev) === defsStructureKey(content) &&
       materialsStructureKey(prev) === materialsStructureKey(content)
     ) {
@@ -1160,6 +1186,12 @@ function onAddMaterial(ev: Event): void {
   emit("addMaterial");
 }
 
+function onAddStyleCategory(ev: Event): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  emit("addStyleCategory");
+}
+
 function onModelMoreClick(
   model: TreeItem,
   item: { value?: string | number | object }
@@ -1213,6 +1245,16 @@ function onMaterialMoreClick(
   if (item?.value === "delete") {
     emit("deleteElement", { path: material.value });
   }
+}
+
+function onStyleMoreClick(
+  styleItem: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  if (item?.value !== "delete") return;
+  const name = styleItem.meta.styleName?.trim() ?? "";
+  if (!name || name === ":root") return;
+  emit("deleteStyleCategory", { path: styleItem.value, name });
 }
 
 function isAddChildKind(v: unknown): v is AddChildKind {
@@ -1422,6 +1464,22 @@ defineExpose({ syncAfterEdit, selectPath });
         >
           <template #icon><AddIcon /></template>
         </t-button>
+        <t-button
+          v-else-if="
+            (node.data as TreeItem | undefined)?.meta?.action === 'add-style'
+          "
+          class="tree-action"
+          theme="default"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.addStyleCategory')"
+          :aria-label="t('app.addStyleCategory')"
+          @click="onAddStyleCategory"
+          @mousedown.stop
+        >
+          <template #icon><AddIcon /></template>
+        </t-button>
         <t-dropdown
           v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'model-more'"
           :options="modelMoreOptions"
@@ -1523,6 +1581,29 @@ defineExpose({ syncAfterEdit, selectPath });
           trigger="click"
           placement="bottom-right"
           @click="(item) => onMaterialMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'style-more'"
+          :options="styleMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onStyleMoreClick(node.data as TreeItem, item)"
         >
           <t-button
             class="tree-action"

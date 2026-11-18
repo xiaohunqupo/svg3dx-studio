@@ -1,10 +1,10 @@
 <template>
   <div class="browse-skeleton" aria-busy="true" aria-live="polite">
     <header class="topbar">
-      <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" />
+      <t-skeleton animation="gradient" :row-col="[{ width: '110px', height: '14px' }]" />
       <div class="right">
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '24px', height: '24px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '24px', height: '24px' }]" />
       </div>
     </header>
 
@@ -41,12 +41,12 @@
 }
 
 .topbar {
-  height: 52px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 0 12px;
   background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-border);
 }
@@ -54,7 +54,7 @@
 .right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
 }

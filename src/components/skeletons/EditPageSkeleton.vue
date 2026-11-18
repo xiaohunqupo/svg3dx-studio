@@ -2,16 +2,16 @@
   <div class="edit-skeleton" aria-busy="true" aria-live="polite">
     <header class="topbar">
       <div class="brand">
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '110px', height: '18px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '22px', height: '22px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '100px', height: '14px' }]" />
       </div>
       <div class="app-menus">
-        <t-skeleton animation="gradient" :row-col="[{ width: '40px', height: '20px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '40px', height: '20px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '36px', height: '16px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '36px', height: '16px' }]" />
       </div>
       <div class="right">
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '24px', height: '24px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '24px', height: '24px' }]" />
       </div>
     </header>
 
@@ -65,12 +65,12 @@
 
 .topbar {
   position: relative;
-  height: 52px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 0 12px;
   background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-border);
 }

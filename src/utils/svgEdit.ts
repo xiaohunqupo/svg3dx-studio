@@ -23,10 +23,10 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
   prism: `<s3dx:prism points="0 0 0  100 0 0  100 100 0  0 100 0" height="100"/>`,
   "sector-cylinder": `<s3dx:sector-cylinder diameter="100" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
   line: `<s3dx:line from="0 0 0" to="100 0 0"/>`,
-  arc: `<s3dx:arc center="0 0 0" normal="0 0 1" radius="100" xDir="1 0 0" startAngle="0" angle="90"/>`,
-  path: `<s3dx:path>
+  arc: `<s3dx:arc form="angles" center="0 0 0" normal="0 0 1" radius="100" xDir="1 0 0" startAngle="0" angle="90"/>`,
+  path: `<s3dx:path form="segments">
         <s3dx:line from="0 0 0" to="100 0 0"/>
-        <s3dx:arc center="100 0 50" normal="0 -1 0" radius="50" from="100 0 0" to="150 0 50"/>
+        <s3dx:arc form="ends" center="100 0 50" normal="0 -1 0" radius="50" from="100 0 0" to="150 0 50"/>
         <s3dx:line from="150 0 50" to="150 0 100"/>
       </s3dx:path>`,
   extrude: `<s3dx:extrude origin="0 0 0" normal="0 0 1" length="100">
@@ -47,14 +47,14 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
           <circle cx="0" cy="0" r="40"/>
         </s3dx:section>
       </s3dx:loft>`,
-  sweep: `<s3dx:sweep orient="frenet" solid="true" corner="arc" cornerRadius="50">
+  sweep: `<s3dx:sweep form="child" orient="frenet" solid="true" corner="arc" cornerRadius="50">
         <s3dx:section>
           <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
         </s3dx:section>
-        <s3dx:path points="0 0 0  100 0 0  100 0 100"/>
+        <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:sweep>`,
-  pipe: `<s3dx:pipe radius="20" innerRadius="16" corner="arc" cornerRadius="50">
-        <s3dx:path points="0 0 0  100 0 0  100 0 100"/>
+  pipe: `<s3dx:pipe form="child" radius="20" innerRadius="16" corner="arc" cornerRadius="50">
+        <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:pipe>`,
 };
 

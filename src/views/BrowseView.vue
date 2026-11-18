@@ -152,7 +152,7 @@ function onMainDrop(e: DragEvent): void {
   <div class="browse-page">
     <header class="topbar">
       <div class="brand">
-        <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
+        <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
         <span class="product">svg3dx Studio</span>
       </div>
       <div class="right">
@@ -236,12 +236,12 @@ function onMainDrop(e: DragEvent): void {
 }
 
 .topbar {
-  height: 52px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 0 12px;
   background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-border);
 }
@@ -249,25 +249,25 @@ function onMainDrop(e: DragEvent): void {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .logo {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
   border-radius: 4px;
 }
 
 .product {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
 }
