@@ -57,6 +57,7 @@ const { t } = useI18n();
 const TREE_W_KEY = "svg3dx.studio.treeWidth";
 const INSPECTOR_W_KEY = "svg3dx.studio.inspectorWidth";
 const SOURCE_W_KEY = "svg3dx.studio.sourceWidth";
+const SOURCE_H_KEY = "svg3dx.studio.sourceHeight";
 const SHOW_MODEL_KEY = "svg3dx.studio.showModel";
 const SHOW_SOURCE_KEY = "svg3dx.studio.showSource";
 const TREE_W_MIN = 180;
@@ -65,6 +66,10 @@ const INSPECTOR_W_MIN = 220;
 const INSPECTOR_W_MAX = 520;
 const SOURCE_W_MIN = 240;
 const SOURCE_W_MAX = 720;
+const SOURCE_H_MIN = 120;
+const SOURCE_H_DEFAULT = 280;
+/** Mid pane (source+viewport) narrower than this → stack vertically. */
+const MID_STACK_BREAKPOINT = 680;
 const TREE_W_DEFAULT = 260;
 const INSPECTOR_W_DEFAULT = 280;
 const SOURCE_W_DEFAULT = 360;
@@ -105,7 +110,13 @@ const inspectorWidth = ref(
 const sourceWidth = ref(
   readStoredWidth(SOURCE_W_KEY, SOURCE_W_DEFAULT, SOURCE_W_MIN, SOURCE_W_MAX)
 );
+const sourceHeight = ref(
+  readStoredWidth(SOURCE_H_KEY, SOURCE_H_DEFAULT, SOURCE_H_MIN, 800)
+);
 const resizing = ref<"tree" | "inspector" | "source" | null>(null);
+const midEl = ref<HTMLElement | null>(null);
+/** Source + model both on; mid pane too narrow → stack source above viewport. */
+const midStacked = ref(false);
 const treePanel = ref<{
   syncAfterEdit: (
     parentPath?: string,
@@ -148,16 +159,43 @@ async function formatDraftContent(content: string): Promise<string> {
 }
 
 const workspaceEl = ref<HTMLElement | null>(null);
-const workspaceStyle = computed(() => {
-  const cols: string[] = [`${treeWidth.value}px`, "0px"];
-  if (showSource.value && showModel.value) {
-    cols.push(`${sourceWidth.value}px`, "0px", "minmax(0, 1fr)", "0px");
-  } else {
-    cols.push("minmax(0, 1fr)", "0px");
+const workspaceStyle = computed(() => ({
+  gridTemplateColumns: [
+    `${treeWidth.value}px`,
+    "0px",
+    "minmax(0, 1fr)",
+    "0px",
+    `${inspectorWidth.value}px`,
+  ].join(" "),
+}));
+
+const midBoth = computed(() => showSource.value && showModel.value);
+
+const midStyle = computed(() => {
+  if (!midBoth.value) return undefined;
+  if (midStacked.value) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      // Cap source row so it cannot shove the viewport (and outer inspector) away.
+      gridTemplateRows: `minmax(0, ${sourceHeight.value}px) 0px minmax(0, 1fr)`,
+    };
   }
-  cols.push(`${inspectorWidth.value}px`);
-  return { gridTemplateColumns: cols.join(" ") };
+  // minmax(0, Npx): source may shrink — fixed Npx was expanding mid and
+  // pushing the inspector off-screen when the window was only moderately wide.
+  return {
+    gridTemplateColumns: `minmax(0, ${sourceWidth.value}px) 0px minmax(0, 1fr)`,
+    gridTemplateRows: "minmax(0, 1fr)",
+  };
 });
+
+function updateMidStack(): void {
+  const el = midEl.value;
+  if (!el || !midBoth.value) {
+    midStacked.value = false;
+    return;
+  }
+  midStacked.value = el.clientWidth < MID_STACK_BREAKPOINT;
+}
 
 function persistViewFlags(): void {
   try {
@@ -593,6 +631,7 @@ function persistWidths(): void {
     localStorage.setItem(TREE_W_KEY, String(treeWidth.value));
     localStorage.setItem(INSPECTOR_W_KEY, String(inspectorWidth.value));
     localStorage.setItem(SOURCE_W_KEY, String(sourceWidth.value));
+    localStorage.setItem(SOURCE_H_KEY, String(sourceHeight.value));
   } catch {
     /* ignore */
   }
@@ -609,11 +648,21 @@ function onResizeMove(ev: PointerEvent): void {
       Math.max(TREE_W_MIN, ev.clientX - rect.left)
     );
   } else if (side === "source") {
-    const sourceLeft = rect.left + treeWidth.value;
-    sourceWidth.value = Math.min(
-      SOURCE_W_MAX,
-      Math.max(SOURCE_W_MIN, ev.clientX - sourceLeft)
-    );
+    const mid = midEl.value;
+    if (midStacked.value && mid) {
+      const midRect = mid.getBoundingClientRect();
+      const maxH = Math.max(SOURCE_H_MIN, midRect.height - SOURCE_H_MIN);
+      sourceHeight.value = Math.min(
+        maxH,
+        Math.max(SOURCE_H_MIN, ev.clientY - midRect.top)
+      );
+    } else {
+      const midLeft = mid?.getBoundingClientRect().left ?? rect.left + treeWidth.value;
+      sourceWidth.value = Math.min(
+        SOURCE_W_MAX,
+        Math.max(SOURCE_W_MIN, ev.clientX - midLeft)
+      );
+    }
   } else {
     inspectorWidth.value = Math.min(
       INSPECTOR_W_MAX,
@@ -622,20 +671,36 @@ function onResizeMove(ev: PointerEvent): void {
   }
 }
 
+function startResize(side: "tree" | "inspector" | "source", ev: PointerEvent): void {
+  ev.preventDefault();
+  resizing.value = side;
+  const row = side === "source" && midStacked.value;
+  document.body.style.cursor = row ? "row-resize" : "col-resize";
+  document.body.style.userSelect = "none";
+  workspaceEl.value?.classList.toggle("row-resize", row);
+}
+
 function stopResize(): void {
   if (!resizing.value) return;
   resizing.value = null;
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
+  workspaceEl.value?.classList.remove("row-resize");
   persistWidths();
 }
 
-function startResize(side: "tree" | "inspector" | "source", ev: PointerEvent): void {
-  ev.preventDefault();
-  resizing.value = side;
-  document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
-}
+watch(midEl, (el, _prev, onCleanup) => {
+  if (!el || typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => updateMidStack());
+  ro.observe(el);
+  updateMidStack();
+  onCleanup(() => ro.disconnect());
+});
+
+watch(midBoth, async () => {
+  await nextTick();
+  updateMidStack();
+});
 
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onResizeMove);
@@ -751,39 +816,55 @@ onBeforeUnmount(() => {
         @pointerdown="(e) => startResize('tree', e)"
       />
 
-      <SourceEditorPanel
-        v-if="showSource"
-        ref="sourcePanel"
-        class="source"
-        :heading="t('app.sourceCode')"
-        :model-value="draftContent"
-        :format-mode="sourceFormatMode"
-        @update:model-value="onSourceContent"
-        @update:format-mode="onSourceFormatModeChange"
-        @cursor-path="onSourceCursorPath"
-      />
       <div
-        v-if="showSource && showModel"
-        class="resize-handle resize-handle--source"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-valuenow="sourceWidth"
-        :title="t('app.resizePanel')"
-        @pointerdown="(e) => startResize('source', e)"
-      />
-
-      <main v-if="showModel" class="viewport">
-        <ViewportSkeleton v-if="contentLoading" />
-        <InteractHost
-          ref="interactHost"
-          :key="file.id"
-          :content="draftContent"
-          :model="activeModelId || undefined"
-          @result="onResult"
-          @error="(m) => (status = m)"
-          @pick="onViewportPick"
+        ref="midEl"
+        class="mid"
+        :class="{
+          'mid--both': midBoth,
+          'mid--stacked': midBoth && midStacked,
+          'mid--source-only': showSource && !showModel,
+          'mid--model-only': showModel && !showSource,
+        }"
+        :style="midStyle"
+      >
+        <SourceEditorPanel
+          v-if="showSource"
+          ref="sourcePanel"
+          class="source"
+          :heading="t('app.sourceCode')"
+          :model-value="draftContent"
+          :format-mode="sourceFormatMode"
+          @update:model-value="onSourceContent"
+          @update:format-mode="onSourceFormatModeChange"
+          @cursor-path="onSourceCursorPath"
         />
-      </main>
+        <div
+          v-if="midBoth"
+          class="resize-handle"
+          :class="
+            midStacked
+              ? 'resize-handle--source-row'
+              : 'resize-handle--source'
+          "
+          role="separator"
+          :aria-orientation="midStacked ? 'horizontal' : 'vertical'"
+          :aria-valuenow="midStacked ? sourceHeight : sourceWidth"
+          :title="t('app.resizePanel')"
+          @pointerdown="(e) => startResize('source', e)"
+        />
+        <main v-if="showModel" class="viewport">
+          <ViewportSkeleton v-if="contentLoading" />
+          <InteractHost
+            ref="interactHost"
+            :key="file.id"
+            :content="draftContent"
+            :model="activeModelId || undefined"
+            @result="onResult"
+            @error="(m) => (status = m)"
+            @pick="onViewportPick"
+          />
+        </main>
+      </div>
 
       <div
         class="resize-handle resize-handle--inspector"
@@ -902,11 +983,31 @@ onBeforeUnmount(() => {
   flex: 1;
   display: grid;
   grid-template-columns: 260px 0px minmax(0, 1fr) 0px 280px;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .workspace.resizing {
   cursor: col-resize;
+}
+
+.workspace.resizing:has(.resize-handle--source-row:hover),
+.workspace.resizing.row-resize {
+  cursor: row-resize;
+}
+
+.mid {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mid--source-only,
+.mid--model-only {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .tree,
@@ -925,6 +1026,7 @@ onBeforeUnmount(() => {
   position: relative;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--td-bg-color-page);
 }
 
@@ -937,6 +1039,13 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 
+.resize-handle--source-row {
+  width: auto;
+  height: 0;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+
 .resize-handle::after {
   content: "";
   position: absolute;
@@ -946,6 +1055,15 @@ onBeforeUnmount(() => {
   width: 6px;
   background: transparent;
   transition: background 0.12s ease;
+}
+
+.resize-handle--source-row::after {
+  top: -3px;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 6px;
 }
 
 .resize-handle:hover::after,
@@ -969,10 +1087,15 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-@media (max-width: 960px) {
+/* Keep inspector visible; narrow mid panes stack via midStacked instead.
+ * Old max-width:960 rule hid the inspector and left users thinking it was
+ * “pushed off screen”. */
+@media (max-width: 720px) {
   .workspace {
-    grid-template-columns: 220px 0px minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr) !important;
   }
+  .tree,
+  .resize-handle--tree,
   .resize-handle--inspector,
   .inspector {
     display: none;
