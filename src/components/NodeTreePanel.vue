@@ -89,6 +89,10 @@ const props = defineProps<{
   content?: string;
   /** Show panel skeleton while document is evaluating. */
   loading?: boolean;
+  /** Current document file name shown in the panel head. */
+  fileName?: string;
+  /** Whether the document has unsaved changes. */
+  dirty?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -101,6 +105,8 @@ const emit = defineEmits<{
   deleteNode: [payload: { path: string; groupId: string }];
   deleteModel: [payload: { path: string; modelId: string }];
   deleteUse: [payload: { path: string }];
+  /** Delete any geometry element by tree path (primitive / bool / nested, etc.). */
+  deleteElement: [payload: { path: string }];
   optimize: [];
 }>();
 
@@ -135,7 +141,11 @@ type TreeItem = {
       | "add-model"
       | "add-material"
       | "model-more"
-      | "use-more";
+      | "use-more"
+      /** Geometry leaf / non-group: more menu with delete. */
+      | "geom-more"
+      /** Material row: more menu with delete. */
+      | "material-more";
     /** Own `id` on `<s3dx:use>` when present. */
     useId?: string;
     /** Bare href target group id (no `#`); empty when unset. */
@@ -252,6 +262,7 @@ function childrenFromGroupMarkup(
             kind: "geometry",
             icon: kindIcon(kind),
             node: syntheticPrimitive(kind, parentPath),
+            action: "geom-more",
           },
         });
       } else {
@@ -263,6 +274,7 @@ function childrenFromGroupMarkup(
             kind: "geometry",
             icon: kindIcon(kind),
             node: null,
+            action: "geom-more",
           },
         });
       }
@@ -572,6 +584,26 @@ function useMoreOptions(item: TreeItem): DropdownOption[] {
   ];
 }
 
+/** Primitive / bool / other geometry “more” menu: delete. */
+const geomMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+/** Material row “more” menu: delete. */
+const materialMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
 function shortId(id: string | undefined | null): string {
   if (!id) return "";
   const parts = id.split("/");
@@ -694,7 +726,7 @@ function mapGeometry(
           ? ("use-more" as const)
           : inst.type === "group" && inst.id
             ? ("add-child" as const)
-            : undefined,
+            : ("geom-more" as const),
     },
     children: childrenOf(inst).map((c, i) =>
       mapGeometry(c, `${path}.${i}`, classById)
@@ -796,22 +828,22 @@ function buildTree(
   );
   const classRules = extractClassRules(content);
 
-  const docMaterials = (() => {
-    const fromXml = extractDocumentMaterials(content);
-    if (fromXml.length) return fromXml;
-    return (result.materials ?? []).map((m) => ({
-      id: m.id,
-      color: Array.isArray(m.color) ? m.color.join(" ") : undefined,
-      metalness:
-        m.metalness !== undefined && m.metalness !== null
-          ? String(m.metalness)
-          : undefined,
-      roughness:
-        m.roughness !== undefined && m.roughness !== null
-          ? String(m.roughness)
-          : undefined,
-    }));
-  })();
+  // XML is source of truth. Do not fall back to eval materials when XML is
+  // empty — that resurrects deleted material nodes in the tree.
+  const docMaterials = content
+    ? extractDocumentMaterials(content)
+    : (result.materials ?? []).map((m) => ({
+        id: m.id,
+        color: Array.isArray(m.color) ? m.color.join(" ") : undefined,
+        metalness:
+          m.metalness !== undefined && m.metalness !== null
+            ? String(m.metalness)
+            : undefined,
+        roughness:
+          m.roughness !== undefined && m.roughness !== null
+            ? String(m.roughness)
+            : undefined,
+      }));
 
   return [
     {
@@ -868,6 +900,7 @@ function buildTree(
           materialColor: m.color,
           materialMetalness: m.metalness,
           materialRoughness: m.roughness,
+          action: "material-more" as const,
         },
       })),
     },
@@ -953,6 +986,12 @@ function syncAfterEdit(
   });
 }
 
+function materialsStructureKey(content: string): string {
+  return extractDocumentMaterials(content)
+    .map((m) => m.id)
+    .join("\n");
+}
+
 function resultStructureKey(r: EvaluationResult): string {
   const walk = (inst: GeometryInstruction): string => {
     const kids = childrenOf(inst).map(walk).join(",");
@@ -966,6 +1005,7 @@ function resultStructureKey(r: EvaluationResult): string {
       )
       .join("|"),
     r.instructions.map(walk).join("|"),
+    (r.materials ?? []).map((m) => m.id).join(","),
   ].join("||");
 }
 
@@ -998,8 +1038,14 @@ watch(
   () => props.content,
   (content, prev) => {
     if (!props.result || !content || content === prev) return;
-    if (prev && styleOnlyKey(prev) === styleOnlyKey(content)) return;
-    if (prev && defsStructureKey(prev) === defsStructureKey(content)) return;
+    if (
+      prev &&
+      styleOnlyKey(prev) === styleOnlyKey(content) &&
+      defsStructureKey(prev) === defsStructureKey(content) &&
+      materialsStructureKey(prev) === materialsStructureKey(content)
+    ) {
+      return;
+    }
     rebuildTree();
   }
 );
@@ -1151,6 +1197,24 @@ function onUseMoreClick(
   }
 }
 
+function onGeomMoreClick(
+  geom: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  if (item?.value === "delete") {
+    emit("deleteElement", { path: geom.value });
+  }
+}
+
+function onMaterialMoreClick(
+  material: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  if (item?.value === "delete") {
+    emit("deleteElement", { path: material.value });
+  }
+}
+
 function isAddChildKind(v: unknown): v is AddChildKind {
   if (v === "group") return true;
   return ADD_CHILD_MENU.some((p) => p.kind === v);
@@ -1243,7 +1307,18 @@ defineExpose({ syncAfterEdit, selectPath });
 <template>
   <aside class="node-tree-panel">
     <div class="panel-head">
-      <span class="panel-head-title">{{ t("app.nodes") }}</span>
+      <div class="file-name" :title="fileName || undefined">
+        <span class="file-name-text">{{ fileName }}</span>
+        <t-tag
+          v-if="dirty"
+          class="dirty-tag"
+          size="small"
+          theme="warning"
+          variant="light"
+        >
+          {{ t("app.unsaved") }}
+        </t-tag>
+      </div>
       <t-dropdown
         :options="panelMoreOptions"
         :max-column-width="160"
@@ -1417,6 +1492,52 @@ defineExpose({ syncAfterEdit, selectPath });
             <template #icon><MoreIcon /></template>
           </t-button>
         </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'geom-more'"
+          :options="geomMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onGeomMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'material-more'"
+          :options="materialMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onMaterialMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
         <span v-else class="tree-action-spacer" aria-hidden="true" />
       </template>
     </t-tree>
@@ -1443,11 +1564,25 @@ defineExpose({ syncAfterEdit, selectPath });
   padding: 4px 0 10px 8px;
 }
 
-.panel-head-title {
+.file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.file-name-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dirty-tag {
+  flex-shrink: 0;
 }
 
 .panel-more {

@@ -1,14 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import {
-  ChevronLeftIcon,
-  DownloadIcon,
-  SaveIcon,
-  ViewListIcon,
-} from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import type { EvaluationResult } from "svg3dx-viewer";
+import AppMenus from "@/components/AppMenus.vue";
+import ReposMenu from "@/components/ReposMenu.vue";
 import SettingsMenu from "@/components/SettingsMenu.vue";
 import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
 import NodeTreePanel, {
@@ -97,8 +93,16 @@ function readStoredBool(key: string, fallback: boolean): boolean {
 
 const result = ref<EvaluationResult | null>(null);
 const selected = ref<TreeSelectPayload | null>(null);
-const status = ref("");
 const draftContent = ref("");
+/** Document-level undo / redo stacks (snapshots of draftContent). */
+const undoStack = ref<string[]>([]);
+const redoStack = ref<string[]>([]);
+const canUndo = computed(() => undoStack.value.length > 0);
+const canRedo = computed(() => redoStack.value.length > 0);
+const HISTORY_MAX = 100;
+/** Skip recording while applying undo/redo or hydrating from store. */
+let applyingHistory = false;
+let historyReady = false;
 /** Currently displayed `s3dx:model` id. */
 const activeModelId = ref("");
 const showModel = ref(readStoredBool(SHOW_MODEL_KEY, true));
@@ -218,14 +222,6 @@ function setShowSource(next: boolean): void {
   persistViewFlags();
 }
 
-function onViewModelChange(value: boolean | string | number): void {
-  setShowModel(Boolean(value));
-}
-
-function onViewSourceChange(value: boolean | string | number): void {
-  setShowSource(Boolean(value));
-}
-
 function revealSelectedInSource(): void {
   if (syncingFromSource) return;
   if (!showSource.value || !sourcePanel.value) return;
@@ -268,6 +264,7 @@ onMounted(async () => {
   window.addEventListener("pointermove", onResizeMove);
   window.addEventListener("pointerup", stopResize);
   window.addEventListener("pointercancel", stopResize);
+  window.addEventListener("keydown", onEditKeydown);
   bootstrapping.value = true;
   if (!store.ready) await store.hydrate();
   syncFromStore();
@@ -294,6 +291,77 @@ watch(showSource, async (visible) => {
   revealSelectedInSource();
 });
 
+function resetHistory(): void {
+  undoStack.value = [];
+  redoStack.value = [];
+}
+
+function recordHistory(prev: string): void {
+  if (!historyReady || applyingHistory) return;
+  const last = undoStack.value[undoStack.value.length - 1];
+  if (last === prev) return;
+  undoStack.value.push(prev);
+  if (undoStack.value.length > HISTORY_MAX) undoStack.value.shift();
+  redoStack.value = [];
+}
+
+watch(draftContent, (next, prev) => {
+  if (prev === undefined || next === prev) return;
+  recordHistory(prev);
+});
+
+async function applyHistoryContent(next: string): Promise<void> {
+  if (!file.value) return;
+  applyingHistory = true;
+  draftContent.value = next;
+  await store.updateContent(file.value.id, next, true);
+  applyingHistory = false;
+  await nextTick();
+  treePanel.value?.syncAfterEdit();
+}
+
+async function onUndo(): Promise<void> {
+  if (!undoStack.value.length || !file.value) return;
+  const prev = undoStack.value.pop()!;
+  redoStack.value.push(draftContent.value);
+  await applyHistoryContent(prev);
+}
+
+async function onRedo(): Promise<void> {
+  if (!redoStack.value.length || !file.value) return;
+  const next = redoStack.value.pop()!;
+  undoStack.value.push(draftContent.value);
+  await applyHistoryContent(next);
+}
+
+async function onFormatMenu(): Promise<void> {
+  if (!file.value) return;
+  const formatted = await formatDraftContent(draftContent.value);
+  if (formatted === draftContent.value) {
+    MessagePlugin.info(t("app.formatCodeNoChange"));
+    return;
+  }
+  draftContent.value = formatted;
+  await store.updateContent(file.value.id, formatted, true);
+  MessagePlugin.success(t("app.formatCodeDone"));
+}
+
+function onEditKeydown(e: KeyboardEvent): void {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) return;
+  const target = e.target as HTMLElement | null;
+  // Let CodeMirror keep its own undo/redo while the source editor is focused.
+  if (target?.closest?.(".cm-editor")) return;
+  const key = e.key.toLowerCase();
+  if (key === "z" && !e.shiftKey) {
+    e.preventDefault();
+    void onUndo();
+  } else if (key === "y" || (key === "z" && e.shiftKey)) {
+    e.preventDefault();
+    void onRedo();
+  }
+}
+
 function syncFromStore(): void {
   const f = store.getById(props.id);
   if (!f) {
@@ -302,11 +370,18 @@ function syncFromStore(): void {
     return;
   }
   store.select(f.id);
+  historyReady = false;
+  applyingHistory = true;
   // Keep LF so source offsets match CodeMirror (which always normalizes CRLF).
   draftContent.value = normalizeXmlNewlines(f.content);
+  applyingHistory = false;
+  resetHistory();
   selected.value = null;
   result.value = null;
   activeModelId.value = "";
+  void nextTick(() => {
+    historyReady = true;
+  });
 }
 
 function goBrowse(): void {
@@ -341,7 +416,6 @@ async function onAddGroup(): Promise<void> {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit("defs");
-  status.value = `${t("app.addedGroup")} ${id}`;
   MessagePlugin.success(`${t("app.addedGroup")} ${id}`);
 }
 
@@ -352,7 +426,6 @@ async function onAddModel(): Promise<void> {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit("models");
-  status.value = `${t("app.addedModel")} ${id}`;
   MessagePlugin.success(`${t("app.addedModel")} ${id}`);
 }
 
@@ -363,7 +436,6 @@ async function onAddMaterial(): Promise<void> {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit("materials");
-  status.value = `${t("app.addedMaterial")} ${id}`;
   MessagePlugin.success(`${t("app.addedMaterial")} ${id}`);
 }
 
@@ -388,7 +460,6 @@ async function onAddUse(payload: {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit(modelPath);
-  status.value = t("app.addedUse");
   MessagePlugin.success(t("app.addedUse"));
 }
 
@@ -408,7 +479,6 @@ async function onAddChild(payload: {
   await nextTick();
   treePanel.value?.syncAfterEdit(payload.parentPath);
   const name = childId ?? kind;
-  status.value = `${t("app.addedChild")} ${name}`;
   MessagePlugin.success(`${t("app.addedChild")} ${name}`);
 }
 
@@ -434,7 +504,6 @@ async function onDeleteNode(payload: {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
-  status.value = `${t("app.deletedNode")} ${payload.groupId}`;
   MessagePlugin.success(`${t("app.deletedNode")} ${payload.groupId}`);
 }
 
@@ -461,7 +530,6 @@ async function onDeleteModel(payload: {
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit("models", { select: "self" });
-  status.value = `${t("app.deletedNode")} ${payload.modelId}`;
   MessagePlugin.success(`${t("app.deletedNode")} ${payload.modelId}`);
 }
 
@@ -469,16 +537,21 @@ async function onDeleteUse(payload: { path: string }): Promise<void> {
   if (!file.value) return;
   const content = removeElementAtPath(draftContent.value, payload.path);
   if (!content || content === draftContent.value) return;
-  const selectPath = treeParentPath(payload.path);
+  const selectPath = payload.path.startsWith("material:")
+    ? "materials"
+    : treeParentPath(payload.path);
   draftContent.value = content;
-  if (selected.value?.kind === "geometry" && selected.value.path === payload.path) {
+  if (
+    (selected.value?.kind === "geometry" ||
+      selected.value?.kind === "material") &&
+    selected.value.path === payload.path
+  ) {
     selected.value = null;
     interactHost.value?.setHighlight(null);
   }
   await store.updateContent(file.value.id, content, true);
   await nextTick();
   treePanel.value?.syncAfterEdit(selectPath, { select: "self" });
-  status.value = t("app.deletedNode");
   MessagePlugin.success(t("app.deletedNode"));
 }
 
@@ -487,7 +560,6 @@ async function onOptimize(): Promise<void> {
   const { content, changed, stats } = optimizeSvg3dxContent(draftContent.value);
   if (!changed) {
     MessagePlugin.info(t("app.optimizeNoChange"));
-    status.value = t("app.optimizeNoChange");
     return;
   }
   draftContent.value = content;
@@ -503,7 +575,6 @@ async function onOptimize(): Promise<void> {
     stats.removedMaterials +
     stats.removedParams;
   const msg = t("app.optimizeDone", { n: String(n) });
-  status.value = msg;
   MessagePlugin.success(msg);
 }
 
@@ -512,7 +583,6 @@ async function onSave(): Promise<void> {
   await store.updateContent(file.value.id, draftContent.value, false);
   await store.persist(file.value.id);
   MessagePlugin.success(t("app.saved"));
-  status.value = t("app.saved");
 }
 
 function onDownload(): void {
@@ -565,7 +635,6 @@ async function onStyleParamsChange(propsMap: Record<string, string>): Promise<vo
   draftContent.value = next;
   selected.value = { ...sel, props: propsMap };
   await store.updateContent(file.value.id, next, true);
-  status.value = `${t("app.updatedStyle")} ${isRoot ? ":root" : `.${className}`}`;
   await nextTick();
   revealSelectedInSource();
 }
@@ -606,7 +675,6 @@ async function onNodeAttrsChange(payload: {
     };
     draftContent.value = next;
     await store.updateContent(file.value.id, next, true);
-    status.value = t("app.updatedNode");
     if (newPath !== payload.path) {
       treePanel.value?.syncAfterEdit("materials");
       await nextTick();
@@ -621,7 +689,6 @@ async function onNodeAttrsChange(payload: {
   next = await formatDraftContent(next);
   draftContent.value = next;
   await store.updateContent(file.value.id, next, true);
-  status.value = t("app.updatedNode");
   await nextTick();
   revealSelectedInSource();
 }
@@ -706,6 +773,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onResizeMove);
   window.removeEventListener("pointerup", stopResize);
   window.removeEventListener("pointercancel", stopResize);
+  window.removeEventListener("keydown", onEditKeydown);
   stopResize();
 });
 </script>
@@ -719,68 +787,24 @@ onBeforeUnmount(() => {
         <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
         <span class="product">svg3dx Studio</span>
       </div>
-      <div class="actions">
-        <SettingsMenu />
-        <t-button variant="text" @click="goBrowse">
-          <template #icon><ChevronLeftIcon /></template>
-          {{ t("app.backBrowse") }}
-        </t-button>
-      </div>
-      <div class="file-name">
-        {{ file.name }}
-        <t-tag
-          v-if="dirty"
-          class="dirty-tag"
-          size="small"
-          theme="warning"
-          variant="light"
-        >
-          {{ t("app.unsaved") }}
-        </t-tag>
-      </div>
-      <div class="view-menu">
-        <t-popup
-          trigger="click"
-          placement="bottom"
-          :overlay-inner-style="{ padding: 0 }"
-        >
-          <t-button variant="text">
-            <template #icon><ViewListIcon /></template>
-            {{ t("app.view") }}
-          </t-button>
-          <template #content>
-            <t-space
-              class="view-menu-panel"
-              direction="vertical"
-              size="small"
-              role="menu"
-            >
-              <t-checkbox
-                :checked="showModel"
-                @change="onViewModelChange"
-              >
-                {{ t("app.viewModel") }}
-              </t-checkbox>
-              <t-checkbox
-                :checked="showSource"
-                @change="onViewSourceChange"
-              >
-                {{ t("app.viewSource") }}
-              </t-checkbox>
-            </t-space>
-          </template>
-        </t-popup>
-      </div>
+      <AppMenus
+        :show-model="showModel"
+        :show-source="showSource"
+        :can-undo="canUndo"
+        :can-redo="canRedo"
+        @save="onSave"
+        @export="onDownload"
+        @back="goBrowse"
+        @undo="onUndo"
+        @redo="onRedo"
+        @format="onFormatMenu"
+        @optimize="onOptimize"
+        @toggle-model="setShowModel(!showModel)"
+        @toggle-source="setShowSource(!showSource)"
+      />
       <div class="right">
-        <span class="status">{{ status }}</span>
-        <t-button variant="outline" @click="onDownload">
-          <template #icon><DownloadIcon /></template>
-          {{ t("app.export") }}
-        </t-button>
-        <t-button theme="primary" @click="onSave">
-          <template #icon><SaveIcon /></template>
-          {{ t("app.save") }}
-        </t-button>
+        <ReposMenu />
+        <SettingsMenu />
       </div>
     </header>
 
@@ -796,6 +820,8 @@ onBeforeUnmount(() => {
         :result="result"
         :content="draftContent"
         :loading="contentLoading"
+        :file-name="file.name"
+        :dirty="dirty"
         @select="onSelect"
         @add-group="onAddGroup"
         @add-model="onAddModel"
@@ -805,6 +831,7 @@ onBeforeUnmount(() => {
         @delete-node="onDeleteNode"
         @delete-model="onDeleteModel"
         @delete-use="onDeleteUse"
+        @delete-element="onDeleteUse"
         @optimize="onOptimize"
       />
       <div
@@ -860,7 +887,7 @@ onBeforeUnmount(() => {
             :content="draftContent"
             :model="activeModelId || undefined"
             @result="onResult"
-            @error="(m) => (status = m)"
+            @error="(m) => MessagePlugin.error(m)"
             @pick="onViewportPick"
           />
         </main>
@@ -930,54 +957,14 @@ onBeforeUnmount(() => {
   font-size: 15px;
 }
 
-.actions,
 .right {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.file-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.dirty-tag {
-  flex-shrink: 0;
-}
-
-.view-menu {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1;
-}
-
-.view-menu-panel {
-  min-width: 140px;
-  padding: 10px 12px;
-}
-
-.right {
   margin-left: auto;
 }
 
-.status {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .workspace {
   flex: 1;

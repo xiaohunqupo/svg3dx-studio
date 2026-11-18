@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
-import { Edit1Icon, FolderOpenIcon } from "tdesign-icons-vue-next";
+import { FolderOpenIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
+import ReposMenu from "@/components/ReposMenu.vue";
 import SettingsMenu from "@/components/SettingsMenu.vue";
 import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
@@ -37,9 +37,7 @@ function readStoredWidth(
 }
 
 const store = useFilesStore();
-const router = useRouter();
 const { t } = useI18n();
-const status = ref("");
 const dragOverMain = ref(false);
 const previewReady = ref(false);
 const loadingSamples = ref(false);
@@ -118,9 +116,7 @@ async function onFiles(list: FileList | File[]): Promise<void> {
       MessagePlugin.warning(t("browse.noSvgFiles"));
       return;
     }
-    const msg = t("browse.filesAdded", { n: created.length });
-    status.value = msg;
-    MessagePlugin.success(msg);
+    MessagePlugin.success(t("browse.filesAdded", { n: created.length }));
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
   }
@@ -130,7 +126,6 @@ async function loadSample(): Promise<void> {
   if (loadingSamples.value) return;
   loadingSamples.value = true;
   try {
-    status.value = t("browse.fetchingSamplesStatus");
     const samples = await fetchOfficialSamples();
     for (const sample of samples) {
       await store.upsertFromText(sample.name, sample.content, { select: false });
@@ -138,24 +133,12 @@ async function loadSample(): Promise<void> {
     const preferred = preferredSampleName(samples);
     const active = store.files.find((f) => f.name === preferred);
     if (active) store.select(active.id);
-    const msg = t("browse.samplesLoaded", { n: samples.length });
-    status.value = msg;
-    MessagePlugin.success(msg);
+    MessagePlugin.success(t("browse.samplesLoaded", { n: samples.length }));
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
-    status.value = String(e);
   } finally {
     loadingSamples.value = false;
   }
-}
-
-async function goEdit(): Promise<void> {
-  const id = store.activeId;
-  if (!id) {
-    MessagePlugin.warning(t("browse.selectFileFirst"));
-    return;
-  }
-  await router.push(`/edit/${id}`);
 }
 
 function onMainDrop(e: DragEvent): void {
@@ -172,19 +155,10 @@ function onMainDrop(e: DragEvent): void {
         <img class="logo" src="/logo.png" alt="svg3dx studio" width="28" height="28" />
         <span class="product">svg3dx Studio</span>
       </div>
-      <div class="actions">
+      <div class="right">
+        <ReposMenu />
         <SettingsMenu />
-        <t-button
-          v-if="!showEmpty"
-          theme="primary"
-          :disabled="!store.activeId"
-          @click="goEdit"
-        >
-          <template #icon><Edit1Icon /></template>
-          {{ t("browse.editCurrent") }}
-        </t-button>
       </div>
-      <div class="status">{{ status || (store.activeFile?.name ?? "") }}</div>
     </header>
 
     <BrowsePageSkeleton v-if="!store.ready" />
@@ -242,13 +216,8 @@ function onMainDrop(e: DragEvent): void {
           v-if="activeContent"
           :key="store.activeId ?? 'preview'"
           :content="activeContent"
-          @error="(m) => (status = m)"
-          @result="
-            (r) => {
-              previewReady = true;
-              status = `${store.activeFile?.name ?? ''} · ${r.instructions.length} groups`;
-            }
-          "
+          @error="(m) => MessagePlugin.error(m)"
+          @result="previewReady = true"
         />
         <div v-else class="viewport-empty">
           <t-empty :title="t('browse.selectToPreview')" />
@@ -295,19 +264,12 @@ function onMainDrop(e: DragEvent): void {
   font-size: 15px;
 }
 
-.actions {
+.right {
   display: flex;
+  align-items: center;
   gap: 8px;
-}
-
-.status {
+  flex-shrink: 0;
   margin-left: auto;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  max-width: 42%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .empty-stage {

@@ -2,11 +2,10 @@
   <div class="browse-skeleton" aria-busy="true" aria-live="polite">
     <header class="topbar">
       <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" />
-      <div class="actions">
-        <t-skeleton animation="gradient" :row-col="[{ width: '88px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '108px', height: '28px' }]" />
+      <div class="right">
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
       </div>
-      <t-skeleton animation="gradient" :row-col="[{ width: '160px', height: '14px' }]" />
     </header>
 
     <div class="workspace">
@@ -52,9 +51,11 @@
   border-bottom: 1px solid var(--td-component-border);
 }
 
-.actions {
+.right {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   margin-left: auto;
 }
 

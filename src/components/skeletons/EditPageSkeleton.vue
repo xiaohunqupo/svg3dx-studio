@@ -5,17 +5,13 @@
         <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
         <t-skeleton animation="gradient" :row-col="[{ width: '110px', height: '18px' }]" />
       </div>
-      <div class="actions">
-        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '88px', height: '28px' }]" />
-      </div>
-      <t-skeleton animation="gradient" :row-col="[{ width: '140px', height: '16px' }]" />
-      <div class="view-menu">
-        <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
+      <div class="app-menus">
+        <t-skeleton animation="gradient" :row-col="[{ width: '40px', height: '20px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '40px', height: '20px' }]" />
       </div>
       <div class="right">
-        <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
-        <t-skeleton animation="gradient" :row-col="[{ width: '72px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '28px', height: '28px' }]" />
       </div>
     </header>
 
@@ -24,7 +20,7 @@
         <t-skeleton
           animation="gradient"
           :row-col="[
-            { width: '30%', height: '14px' },
+            { width: '70%', height: '16px' },
             1,
             1,
             1,
@@ -79,14 +75,8 @@
   border-bottom: 1px solid var(--td-component-border);
 }
 
-.view-menu {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
 .brand,
-.actions,
+.app-menus,
 .right {
   display: flex;
   align-items: center;
