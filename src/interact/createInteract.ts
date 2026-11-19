@@ -113,6 +113,8 @@ export class InteractViewport {
 
   private transform: TransformControls;
   private transformHelper: THREE.Object3D;
+  /** Separate from main scene so OutlinePass does not outline the gizmo. */
+  private overlayScene: THREE.Scene;
   private transformDirty = false;
   /** True while TransformControls owns the current left-button gesture. */
   private gizmoGesture = false;
@@ -146,7 +148,11 @@ export class InteractViewport {
     this.transform.enabled = false;
     this.transformHelper = this.transform.getHelper();
     this.transformHelper.name = "studio-transform-controls";
-    this.viewer.scene.add(this.transformHelper);
+    // Keep gizmo out of the composer scene — OutlinePass would otherwise treat
+    // its depth as part of the selection silhouette ("gizmo gets highlighted").
+    this.overlayScene = new THREE.Scene();
+    this.overlayScene.add(this.transformHelper);
+    this.viewer.addOverlayScene(this.overlayScene);
     this.transform.detach();
 
     this.transform.addEventListener("dragging-changed", (event) => {
@@ -305,7 +311,8 @@ export class InteractViewport {
     window.removeEventListener("keydown", this.onKeyDown);
     this.transform.detach();
     this.transform.dispose();
-    this.viewer.scene.remove(this.transformHelper);
+    this.overlayScene.remove(this.transformHelper);
+    this.viewer.removeOverlayScene(this.overlayScene);
     this.highlight.clear();
     this.viewer.setSelectedObjects([]);
     this.viewer.controls.enabled = true;
@@ -348,13 +355,8 @@ export class InteractViewport {
     this.pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointerNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointerNdc, this.viewer.camera);
-    // Gizmo lives outside svg3dx root — ignore picks that hit its handles.
-    if (
-      this.transform.object &&
-      this.raycaster.intersectObject(this.transformHelper, true).length > 0
-    ) {
-      return;
-    }
+    // Do not raycast TransformControls here: its drag plane fills the view and
+    // would swallow empty-space clicks. Handle hits are gated by gizmoGesture.
     const hits = this.raycaster.intersectObjects(
       this.viewer.viewer.root.children,
       true

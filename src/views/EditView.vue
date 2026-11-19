@@ -237,7 +237,20 @@ function revealSelectedInSource(): void {
 }
 
 async function onSourceCursorPath(path: string | null): Promise<void> {
-  if (!path) return;
+  // Blank / non-node caret → clear selection (same as empty viewport click).
+  if (!path) {
+    if (!selected.value) return;
+    syncingFromSource = true;
+    try {
+      selected.value = null;
+      treePanel.value?.selectPath(null);
+      interactHost.value?.setHighlight(null);
+      await nextTick();
+    } finally {
+      syncingFromSource = false;
+    }
+    return;
+  }
   if (selected.value?.path === path) {
     interactHost.value?.setHighlight(path);
     return;

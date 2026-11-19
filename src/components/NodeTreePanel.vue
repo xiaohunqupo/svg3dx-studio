@@ -352,6 +352,7 @@ function activatePath(path: string): void {
 function selectPath(path: string | null | undefined): void {
   if (!path) {
     actived.value = [];
+    emit("select", null);
     return;
   }
   ensureExpanded(ancestorPaths(path));
