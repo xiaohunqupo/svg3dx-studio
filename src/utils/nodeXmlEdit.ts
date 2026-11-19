@@ -34,6 +34,18 @@ export type PathLocator =
       materialId: string;
     };
 
+/**
+ * Prefix for tree paths of eval instructions that have no defs `<g id>`.
+ * Deliberately not a plausible document id fragment (unlike `i0`).
+ */
+export const SYNTHETIC_TREE_PATH_PREFIX = "_i_";
+
+export function isSyntheticTreePath(path: string): boolean {
+  const raw = path.startsWith("defs:") ? path.slice(5) : path;
+  const head = raw.split(".")[0] ?? "";
+  return head.startsWith(SYNTHETIC_TREE_PATH_PREFIX);
+}
+
 /** Parse `defs:groupId`, `defs:groupId.0.1`, `model:solid-view` / `model:solid-view.0`, or `material:id`. */
 export function parseTreePath(path: string): PathLocator | null {
   if (path.startsWith("model:")) {
@@ -54,12 +66,13 @@ export function parseTreePath(path: string): PathLocator | null {
     return { kind: "material", materialId };
   }
 
+  if (isSyntheticTreePath(path)) return null;
+
   const raw = path.startsWith("defs:") ? path.slice(5) : path;
   if (!raw) return null;
   const parts = raw.split(".");
   const groupId = parts[0];
-  // Reject synthetic eval-only paths (`i0`, `i12`) — not group ids like `intersect`.
-  if (!groupId || /^i\d+$/.test(groupId)) return null;
+  if (!groupId) return null;
   const indices: number[] = [];
   for (let i = 1; i < parts.length; i++) {
     const n = Number(parts[i]);

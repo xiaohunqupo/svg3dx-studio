@@ -76,7 +76,11 @@ import {
   SOLID_MENU,
   type AddChildMenuItem,
 } from "@/utils/svgEdit";
-import { listChildOpensAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import {
+  listChildOpensAtPath,
+  readAttrsAtPath,
+  SYNTHETIC_TREE_PATH_PREFIX,
+} from "@/utils/nodeXmlEdit";
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
@@ -343,7 +347,9 @@ function ancestorPaths(path: string): string[] {
   if (path.startsWith("style:")) return ["style"];
   if (path.startsWith("material:")) return ["materials"];
   const parts: string[] = ["defs"];
-  const m = /^(defs:[^.]+|i\d+)(.*)$/.exec(path);
+  const m = new RegExp(
+    `^(defs:[^.]+|${SYNTHETIC_TREE_PATH_PREFIX}\\d+)(.*)$`
+  ).exec(path);
   if (!m) return path.includes(":") ? [path.split(".")[0]!] : parts;
   const root = m[1]!;
   parts.push(root);
@@ -919,7 +925,9 @@ function buildDefsChildren(
     const key =
       inst.type === "group" ? inst.id ?? inst.node_id : inst.node_id;
     if (key && seen.has(key)) return;
-    children.push(mapGeometry(inst, `i${i}`, classById, content));
+    children.push(
+      mapGeometry(inst, `${SYNTHETIC_TREE_PATH_PREFIX}${i}`, classById, content)
+    );
   });
 
   return children;
