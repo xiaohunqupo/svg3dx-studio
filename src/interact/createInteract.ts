@@ -269,6 +269,8 @@ export class InteractViewport {
 
   setBackground(color: number | string): void {
     this.viewer.setBackground(color);
+    // Outline + curve colors track background luminance — refresh active pick.
+    this.reapplyHighlight();
   }
 
   /** Highlight geometry matching a Studio tree path (or clear with null). */
