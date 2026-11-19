@@ -136,25 +136,37 @@ function chromeTheme(dark: boolean) {
         backgroundColor: "var(--td-bg-color-secondarycontainer)",
         color: "var(--td-text-color-placeholder)",
       },
-      ".cm-activeLineGutter": {
+      // Active line / gutter only while focused — otherwise they linger on the
+      // old caret line after tree selection and look like a second tag mark.
+      "&.cm-focused .cm-activeLineGutter": {
         backgroundColor: "var(--td-bg-color-container-hover)",
       },
-      ".cm-activeLine": {
+      "&.cm-focused .cm-activeLine": {
         backgroundColor: "var(--td-bg-color-container-hover)",
       },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection":
+      "&:not(.cm-focused) .cm-activeLine, &:not(.cm-focused) .cm-activeLineGutter":
         {
-          backgroundColor: dark
-            ? "color-mix(in srgb, var(--td-brand-color) 38%, transparent)"
-            : "var(--td-brand-color-light)",
+          backgroundColor: "transparent",
         },
+      "&.cm-focused .cm-selectionBackground, &.cm-focused ::selection": {
+        backgroundColor: dark
+          ? "color-mix(in srgb, var(--td-brand-color) 38%, transparent)"
+          : "var(--td-brand-color-light)",
+      },
+      "&:not(.cm-focused) .cm-selectionBackground": {
+        backgroundColor: "transparent",
+      },
       ".cm-cursor, .cm-dropCursor": {
         borderLeftColor: "var(--td-text-color-primary)",
       },
-      ".cm-matchingBracket": {
+      "&.cm-focused .cm-matchingBracket": {
         backgroundColor:
           "color-mix(in srgb, var(--td-brand-color) 22%, transparent)",
         outline: "1px solid var(--td-brand-color)",
+      },
+      "&:not(.cm-focused) .cm-matchingBracket": {
+        backgroundColor: "transparent",
+        outline: "none",
       },
       ".cm-svg3dx-reveal": {
         backgroundColor:
@@ -215,19 +227,19 @@ function scheduleEmit(doc: string): void {
   }, 300);
 }
 
+/**
+ * Caret → tree only. Reveal marks are owned exclusively by `revealPath`
+ * (driven from EditView `selected`), so caret and tree never paint two marks.
+ */
 function schedulePathEmit(doc: string, offset: number): void {
   clearPathTimer();
+  if (suppressPathEmit) return;
   pathTimer = setTimeout(() => {
     pathTimer = null;
     if (suppressPathEmit) return;
     const path = findTreePathAtOffset(doc, offset);
     if (path === lastEmittedPath) return;
     lastEmittedPath = path;
-    // Same full-element highlight as tree selection (includes nested children).
-    const block = path ? findRangeForTreePath(doc, path) : null;
-    view?.dispatch({
-      effects: setRevealEffect.of(block ? [block] : null),
-    });
     emit("cursorPath", path);
   }, 80);
 }
@@ -360,12 +372,17 @@ function onMoreClick(item: DropdownOption): void {
 
 function applyRevealRanges(
   ranges: TextRange[],
-  options: { scroll?: boolean; select?: boolean } = {}
+  options: { scroll?: boolean } = {}
 ): void {
   if (!view) return;
-  const { scroll = true, select = false } = options;
+  const { scroll = true } = options;
+  clearPathTimer();
+  suppressPathEmit = true;
   if (!ranges.length) {
     view.dispatch({ effects: setRevealEffect.of(null) });
+    requestAnimationFrame(() => {
+      suppressPathEmit = false;
+    });
     return;
   }
   const len = view.state.doc.length;
@@ -377,10 +394,12 @@ function applyRevealRanges(
     .filter((r) => r.end > r.start);
   if (!clamped.length) {
     view.dispatch({ effects: setRevealEffect.of(null) });
+    requestAnimationFrame(() => {
+      suppressPathEmit = false;
+    });
     return;
   }
   const first = clamped[0]!;
-  suppressPathEmit = true;
   view.dispatch({
     effects: [
       setRevealEffect.of(clamped),
@@ -388,30 +407,31 @@ function applyRevealRanges(
         ? [EditorView.scrollIntoView(first.start, { y: "center" })]
         : []),
     ],
-    ...(select
-      ? { selection: { anchor: first.start, head: clamped[clamped.length - 1]!.end } }
-      : {}),
   });
-  // Allow caret events again after CM finishes selection updates.
   requestAnimationFrame(() => {
     suppressPathEmit = false;
   });
 }
 
 /**
- * Tree / viewport driven reveal: highlight the full element block and scroll.
- * Does not move the caret (avoids fighting source→tree sync).
+ * Sole owner of `.cm-svg3dx-reveal` marks — call from EditView whenever
+ * `selected` changes (tree, viewport, or caret→path).
  */
-function revealPath(path: string | null | undefined): void {
+function revealPath(
+  path: string | null | undefined,
+  options: { scroll?: boolean } = {}
+): void {
   if (!view) return;
+  clearPathTimer();
+  const scroll = options.scroll !== false;
   if (!path) {
-    applyRevealRanges([]);
+    applyRevealRanges([], { scroll: false });
     lastEmittedPath = null;
     return;
   }
   const doc = view.state.doc.toString();
   const block = findRangeForTreePath(doc, path);
-  applyRevealRanges(block ? [block] : [], { scroll: true, select: false });
+  applyRevealRanges(block ? [block] : [], { scroll });
   lastEmittedPath = path;
 }
 

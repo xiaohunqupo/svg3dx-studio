@@ -10,6 +10,7 @@ declare module 'vue' {
     AppMenus: typeof import('./components/AppMenus.vue')['default']
     BlendAttrSelect: typeof import('./components/BlendAttrSelect.vue')['default']
     BrowsePageSkeleton: typeof import('./components/skeletons/BrowsePageSkeleton.vue')['default']
+    CornerAttrSelect: typeof import('./components/CornerAttrSelect.vue')['default']
     EditPageSkeleton: typeof import('./components/skeletons/EditPageSkeleton.vue')['default']
     ExprAttrInput: typeof import('./components/ExprAttrInput.vue')['default']
     FileDropZone: typeof import('./components/FileDropZone.vue')['default']

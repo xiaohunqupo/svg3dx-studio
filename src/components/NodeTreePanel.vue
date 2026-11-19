@@ -1,28 +1,52 @@
 <script setup lang="ts">
 import { computed, h, nextTick, ref, watch, type Component } from "vue";
 import {
-  AddAndSubtractIcon,
   AddIcon,
-  AddRectangleIcon,
   BrushIcon,
-  Chart3DIcon,
-  Chart3DFilledIcon,
   ChartBubbleIcon,
-  CircleIcon,
   DeleteIcon,
   FilterClearIcon,
-  FolderIcon,
-  FrameIcon,
-  GitBranchIcon,
-  LayersIcon,
   JumpIcon,
+  LayersIcon,
   Link1Icon,
   MoreIcon,
   PaletteIcon,
-  RootListIcon,
-  ViewListIcon,
   WidgetIcon,
 } from "tdesign-icons-vue-next";
+import {
+  ArcIcon,
+  BoolCategoryIcon,
+  BoolIntersectIcon,
+  BoolSubtractIcon,
+  BoolUnionIcon,
+  BoxIcon,
+  ConeIcon,
+  CurveCategoryIcon,
+  CylinderIcon,
+  DefsSectionIcon,
+  ExtrudeIcon,
+  GroupIcon,
+  IfIcon,
+  IfNotIcon,
+  LineIcon,
+  LogicCategoryIcon,
+  LoftIcon,
+  LoopIcon,
+  ModelIcon,
+  ModelingCategoryIcon,
+  PathIcon,
+  PipeIcon,
+  PrismIcon,
+  PyramidIcon,
+  RevolveIcon,
+  RootParamsIcon,
+  SectorCylinderIcon,
+  SolidCategoryIcon,
+  SphereIcon,
+  SweepIcon,
+  TorusIcon,
+  WedgeIcon,
+} from "@/components/icons/lucideIcons";
 import { DialogPlugin, MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import {
   type EvaluationResult,
@@ -52,7 +76,7 @@ import {
   SOLID_MENU,
   type AddChildMenuItem,
 } from "@/utils/svgEdit";
-import { readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import { listChildOpensAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
@@ -207,96 +231,89 @@ function groupInnerXml(svg: string, groupId: string): string | null {
 }
 
 /**
- * Build tree children from a group's markup when evaluation has no group
- * (unused / not yet referenced defs). Paths match mapGeometry: parent.0, …
+ * Build tree children from XML at `parentPath`.
+ * Prefer this over evaluation children: core inlines `<s3dx:use>` as groups
+ * for bool/CSG, which must still appear as use rows in the editor tree.
  */
-function childrenFromGroupMarkup(
+function childrenFromPathMarkup(
   content: string,
-  groupId: string,
   parentPath: string,
   classById: Map<string, string>
 ): TreeItem[] {
-  const inner = groupInnerXml(content, groupId);
-  if (!inner) return [];
-  const items: TreeItem[] = [];
-  let depth = 0;
-  const re = /<\/?([A-Za-z_][\w:.-]*)\b([^>]*?)\/?>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(inner))) {
-    const full = m[0];
-    const rawName = m[1];
-    const attrs = m[2] ?? "";
-    const selfClosing = /\/\s*>$/.test(full);
-    const isClose = /^<\//.test(full);
-    if (isClose) {
-      depth = Math.max(0, depth - 1);
-      continue;
+  return listChildOpensAtPath(content, parentPath).map((open, idx) => {
+    const path = `${parentPath}.${idx}`;
+    const local = open.local.toLowerCase();
+    const attrs = open.attrs;
+    if (local === "g") {
+      const id = attrOf(attrs, "id") ?? `g-${idx}`;
+      const classAttr = attrOf(attrs, "class");
+      return {
+        value: path,
+        label: id,
+        children: childrenFromPathMarkup(content, path, classById),
+        meta: {
+          kind: "geometry" as const,
+          icon: GroupIcon,
+          node: syntheticGroup(id),
+          className:
+            classAttr?.split(/\s+/).filter(Boolean).join(" ") ||
+            classById.get(id),
+          action: "add-child" as const,
+        },
+      };
     }
-    if (depth === 0) {
-      const local = rawName.includes(":")
-        ? rawName.slice(rawName.lastIndexOf(":") + 1)
-        : rawName;
-      const idx = items.length;
-      const path = `${parentPath}.${idx}`;
-      if (local.toLowerCase() === "g") {
-        const id = attrOf(attrs, "id") ?? `g-${idx}`;
-        const classAttr = attrOf(attrs, "class");
-        items.push({
-          value: path,
-          label: id,
-          children: childrenFromGroupMarkup(content, id, path, classById),
-          meta: {
-            kind: "geometry",
-            icon: FolderIcon,
-            node: syntheticGroup(id),
-            className:
-              classAttr?.split(/\s+/).filter(Boolean).join(" ") ||
-              classById.get(id),
-            action: "add-child",
-          },
-        });
-      } else if (local.toLowerCase() === "use") {
-        const href = attrOf(attrs, "href") ?? "";
-        const groupId = href.replace(/^#/, "");
-        items.push(
-          makeUseTreeItem(path, groupId, attrOf(attrs, "id"))
-        );
-      } else if (PRIMITIVE_KIND_SET.has(local.toLowerCase())) {
-        const kind = local.toLowerCase() as GeometryKind;
-        const elemId = attrOf(attrs, "id") ?? undefined;
-        const classAttr = attrOf(attrs, "class");
-        items.push({
-          value: path,
-          // No id → empty label (icon only); class stays as small hint.
-          label: elemId ?? "",
-          meta: {
-            kind: "geometry",
-            icon: kindIcon(kind),
-            node: syntheticPrimitive(kind, parentPath),
-            className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
-            action: "geom-more",
-          },
-        });
-      } else {
-        const kind = local.toLowerCase();
-        const elemId = attrOf(attrs, "id") ?? undefined;
-        const classAttr = attrOf(attrs, "class");
-        items.push({
-          value: path,
-          label: elemId ?? "",
-          meta: {
-            kind: "geometry",
-            icon: kindIcon(kind),
-            node: null,
-            className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
-            action: "geom-more",
-          },
-        });
-      }
+    if (local === "use") {
+      const href = attrOf(attrs, "href") ?? "";
+      return makeUseTreeItem(
+        path,
+        href.replace(/^#/, ""),
+        attrOf(attrs, "id")
+      );
     }
-    if (!selfClosing) depth += 1;
-  }
-  return items;
+    if (PRIMITIVE_KIND_SET.has(local)) {
+      const kind = local as GeometryKind;
+      const elemId = attrOf(attrs, "id") ?? undefined;
+      const classAttr = attrOf(attrs, "class");
+      return {
+        value: path,
+        label: elemId ?? "",
+        meta: {
+          kind: "geometry" as const,
+          icon: kindIcon(kind),
+          node: syntheticPrimitive(kind, parentPath),
+          className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
+          action: "geom-more" as const,
+        },
+      };
+    }
+    const elemId = attrOf(attrs, "id") ?? undefined;
+    const classAttr = attrOf(attrs, "class");
+    const children = open.selfClosing
+      ? undefined
+      : childrenFromPathMarkup(content, path, classById);
+    return {
+      value: path,
+      label: elemId ?? "",
+      children: children?.length ? children : undefined,
+      meta: {
+        kind: "geometry" as const,
+        icon: kindIcon(local),
+        node: null,
+        className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
+        action: "geom-more" as const,
+      },
+    };
+  });
+}
+
+/** @deprecated Prefer childrenFromPathMarkup — kept as thin alias for defs groups. */
+function childrenFromGroupMarkup(
+  content: string,
+  _groupId: string,
+  parentPath: string,
+  classById: Map<string, string>
+): TreeItem[] {
+  return childrenFromPathMarkup(content, parentPath, classById);
 }
 
 function ensureExpanded(paths: string[]): void {
@@ -393,69 +410,71 @@ function childrenOf(inst: GeometryInstruction): GeometryInstruction[] {
   return [];
 }
 
-function modelModeIcon(mode: string): Component {
-  switch (mode) {
-    case "solid":
-      return Chart3DIcon;
-    case "wireframe":
-    case "hidden-line":
-      return FrameIcon;
-    case "lite-solid":
-      return Chart3DFilledIcon;
-    default:
-      return WidgetIcon;
-  }
-}
-
 function kindIcon(kind: string): Component {
   switch (kind) {
     case "box":
-    case "wedge":
-    case "prism":
-    case "pyramid":
-      return AddRectangleIcon;
-    case "sphere":
-      return ChartBubbleIcon;
+      return BoxIcon;
     case "cylinder":
+      return CylinderIcon;
+    case "sphere":
+      return SphereIcon;
     case "cone":
+      return ConeIcon;
     case "torus":
+      return TorusIcon;
+    case "wedge":
+      return WedgeIcon;
+    case "prism":
+      return PrismIcon;
     case "sector-cylinder":
+      return SectorCylinderIcon;
+    case "pyramid":
+      return PyramidIcon;
     case "pipe":
-      return CircleIcon;
+      return PipeIcon;
     case "line":
+      return LineIcon;
     case "arc":
+      return ArcIcon;
     case "path":
-      return Chart3DIcon;
+      return PathIcon;
     case "extrude":
+      return ExtrudeIcon;
     case "revolve":
+      return RevolveIcon;
     case "loft":
+      return LoftIcon;
     case "sweep":
-      return Chart3DIcon;
+      return SweepIcon;
     case "mesh":
     case "triangles":
       return LayersIcon;
     case "group":
-      return FolderIcon;
+      return GroupIcon;
     case "bool-union":
-    case "bool-intersect":
-      return GitBranchIcon;
+      return BoolUnionIcon;
     case "bool-subtract":
-      return AddAndSubtractIcon;
+      return BoolSubtractIcon;
+    case "bool-intersect":
+      return BoolIntersectIcon;
     case "if":
+      return IfIcon;
     case "if-not":
-      return GitBranchIcon;
+      return IfNotIcon;
     case "loop-points":
     case "loop-range":
-      return ViewListIcon;
+      return LoopIcon;
     default:
       return WidgetIcon;
   }
 }
 
 function geometryIcon(inst: GeometryInstruction): Component {
-  if (inst.type === "group") return FolderIcon;
+  if (inst.type === "group") return GroupIcon;
   if (inst.type === "bool_op") {
-    return inst.op === "subtract" ? AddAndSubtractIcon : GitBranchIcon;
+    if (inst.op === "union") return BoolUnionIcon;
+    if (inst.op === "subtract") return BoolSubtractIcon;
+    return BoolIntersectIcon;
   }
   if (inst.type === "instance") return Link1Icon;
   return kindIcon(inst.kind);
@@ -551,7 +570,7 @@ function modelUseTargetOptions(): DropdownOption[] {
   return models.map((m) => ({
     content: m.id,
     value: `use-in-model:${m.id}`,
-    prefixIcon: () => h(modelModeIcon(m.mode)),
+    prefixIcon: () => h(ModelIcon),
   }));
 }
 
@@ -560,14 +579,14 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
   {
     content: t("app.addGroup"),
     value: "group",
-    prefixIcon: () => h(FolderIcon),
+    prefixIcon: () => h(GroupIcon),
   },
-  categoryOption("app.addCurve", "__add-curve", Chart3DIcon, CURVE_MENU),
-  categoryOption("app.addSolid", "__add-solid", AddRectangleIcon, SOLID_MENU),
-  categoryOption("app.addModeling", "__add-modeling", Chart3DFilledIcon, MODELING_MENU),
-  categoryOption("app.addBool", "__add-bool", AddAndSubtractIcon, BOOL_MENU),
-  categoryOption("app.addLogic", "__add-logic", GitBranchIcon, LOGIC_MENU),
-  categoryOption("app.addLoop", "__add-loop", ViewListIcon, LOOP_MENU),
+  categoryOption("app.addCurve", "__add-curve", CurveCategoryIcon, CURVE_MENU),
+  categoryOption("app.addSolid", "__add-solid", SolidCategoryIcon, SOLID_MENU),
+  categoryOption("app.addModeling", "__add-modeling", ModelingCategoryIcon, MODELING_MENU),
+  categoryOption("app.addBool", "__add-bool", BoolCategoryIcon, BOOL_MENU),
+  categoryOption("app.addLogic", "__add-logic", LogicCategoryIcon, LOGIC_MENU),
+  categoryOption("app.addLoop", "__add-loop", LoopIcon, LOOP_MENU),
   {
     content: "",
     value: "__divider",
@@ -767,6 +786,41 @@ function mapGeometry(
   if (inst.type === "primitive" || inst.type === "bool_op") {
     label = elemId ?? "";
   }
+  // XML structure wins: evaluation inlines `<s3dx:use>` as groups (needed for
+  // CSG), but the tree must still show use rows without exploding targets.
+  let children: TreeItem[];
+  if (content) {
+    const markupKids = childrenFromPathMarkup(content, path, classById);
+    const evalKids = childrenOf(inst);
+    children = markupKids.map((item, i) => {
+      // Never replace a markup `<s3dx:use>` with the inlined eval group.
+      if (
+        item.meta.action === "use-more" ||
+        item.meta.node?.type === "instance"
+      ) {
+        return item;
+      }
+      const ev = evalKids[i];
+      if (!ev) return item;
+      return {
+        ...item,
+        meta: {
+          ...item.meta,
+          icon: geometryIcon(ev),
+          node: ev,
+          action:
+            ev.type === "group" && ev.id
+              ? ("add-child" as const)
+              : item.meta.action,
+        },
+        // Keep markup children (already on item) — do not expand eval kids.
+      };
+    });
+  } else {
+    children = childrenOf(inst).map((c, i) =>
+      mapGeometry(c, `${path}.${i}`, classById, content)
+    );
+  }
   return {
     value: path,
     label,
@@ -783,9 +837,7 @@ function mapGeometry(
             ? ("add-child" as const)
             : ("geom-more" as const),
     },
-    children: childrenOf(inst).map((c, i) =>
-      mapGeometry(c, `${path}.${i}`, classById, content)
-    ),
+    children: children.length ? children : undefined,
   };
 }
 
@@ -830,7 +882,7 @@ function makeDefsGroupItem(
     children: contentKids,
     meta: {
       kind: "geometry",
-      icon: FolderIcon,
+      icon: GroupIcon,
       node: evaluated ?? syntheticGroup(id),
       className,
       action: "add-child",
@@ -904,13 +956,13 @@ function buildTree(
     {
       value: "models",
       label: tagLabel("models"),
-      meta: { kind: "section", icon: ViewListIcon, action: "add-model" },
+      meta: { kind: "section", icon: ModelIcon, action: "add-model" },
       children: result.models.map((m) => ({
         value: `model:${m.id}`,
         label: m.id,
         meta: {
           kind: "model",
-          icon: modelModeIcon(m.mode),
+          icon: ModelIcon,
           modelId: m.id,
           modelMode: m.mode,
           action: "model-more" as const,
@@ -938,7 +990,7 @@ function buildTree(
     {
       value: "defs",
       label: tagLabel("defs"),
-      meta: { kind: "section", icon: LayersIcon, action: "add-group" },
+      meta: { kind: "section", icon: DefsSectionIcon, action: "add-group" },
       children: buildDefsChildren(result, content, classById),
     },
     {
@@ -969,7 +1021,7 @@ function buildTree(
           label: tagLabel("root"),
           meta: {
             kind: "style" as const,
-            icon: RootListIcon,
+            icon: RootParamsIcon,
             styleName: ":root",
             styleGroupId: "",
             styleScope: "root" as const,
@@ -1466,9 +1518,8 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
       <template #label="{ node }">
         <span class="tree-label">
           <component
-            :is="(node.data as TreeItem | undefined)?.meta?.icon || RootListIcon"
+            :is="(node.data as TreeItem | undefined)?.meta?.icon || WidgetIcon"
             class="tree-type-icon"
-            size="16px"
           />
           <span
             v-if="node.label"
@@ -1745,6 +1796,8 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
 :deep(.tree-type-icon) {
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
 }
 
 :deep(.tree-label) {

@@ -10,7 +10,11 @@ import {
 import { useI18n } from "@/i18n";
 import { useTheme } from "@/theme";
 import { readViewportBackground } from "@/utils/viewportTheme";
-import { MoveIcon, RotateIcon, Measurement1Icon } from "tdesign-icons-vue-next";
+import {
+  TransformMoveIcon,
+  TransformRotateIcon,
+  TransformScaleIcon,
+} from "@/components/icons/lucideIcons";
 
 const props = withDefaults(
   defineProps<{
@@ -239,30 +243,35 @@ defineExpose({
 <template>
   <div class="interact-host">
     <div ref="host" class="interact-canvas" />
-    <div v-if="gizmoActive" class="xform-toolbar" role="toolbar" :aria-label="t('app.transform')">
-      <t-radio-group
-        :value="transformMode"
-        variant="default-filled"
-        size="small"
-        @change="onTransformModeRadio"
+    <t-radio-group
+      v-if="gizmoActive"
+      class="xform-toolbar"
+      role="toolbar"
+      :aria-label="t('app.transform')"
+      :value="transformMode"
+      variant="default-filled"
+      size="large"
+      @change="onTransformModeRadio"
+    >
+      <t-radio-button
+        value="translate"
+        :title="`${t('app.transformTranslate')} (${t('app.transformTranslateHint')})`"
       >
-        <t-radio-button value="translate" :title="`${t('app.transformTranslate')} (${t('app.transformTranslateHint')})`">
-          <MoveIcon size="16px" />
-          <span class="xform-label">{{ t("app.transformTranslate") }}</span>
-          <kbd>{{ t("app.transformTranslateHint") }}</kbd>
-        </t-radio-button>
-        <t-radio-button value="rotate" :title="`${t('app.transformRotate')} (${t('app.transformRotateHint')})`">
-          <RotateIcon size="16px" />
-          <span class="xform-label">{{ t("app.transformRotate") }}</span>
-          <kbd>{{ t("app.transformRotateHint") }}</kbd>
-        </t-radio-button>
-        <t-radio-button value="scale" :title="`${t('app.transformScale')} (${t('app.transformScaleHint')})`">
-          <Measurement1Icon size="16px" />
-          <span class="xform-label">{{ t("app.transformScale") }}</span>
-          <kbd>{{ t("app.transformScaleHint") }}</kbd>
-        </t-radio-button>
-      </t-radio-group>
-    </div>
+        <TransformMoveIcon />
+      </t-radio-button>
+      <t-radio-button
+        value="rotate"
+        :title="`${t('app.transformRotate')} (${t('app.transformRotateHint')})`"
+      >
+        <TransformRotateIcon />
+      </t-radio-button>
+      <t-radio-button
+        value="scale"
+        :title="`${t('app.transformScale')} (${t('app.transformScaleHint')})`"
+      >
+        <TransformScaleIcon />
+      </t-radio-button>
+    </t-radio-group>
   </div>
 </template>
 
@@ -285,36 +294,24 @@ defineExpose({
   left: 12px;
   bottom: 12px;
   z-index: 2;
-  padding: 4px;
-  border-radius: var(--td-radius-default);
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border);
-  box-shadow: var(--td-shadow-1);
 }
 
+/* Icon-only: square-ish large slots; 1em is too small to notice size=large. */
 .xform-toolbar :deep(.t-radio-button) {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  justify-content: center;
+  min-width: var(--td-comp-size-xl);
+  padding-left: var(--td-comp-paddingLR-s);
+  padding-right: var(--td-comp-paddingLR-s);
 }
 
-.xform-label {
-  font-size: 12px;
+.xform-toolbar :deep(.t-radio-button svg) {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
-.xform-toolbar kbd {
-  font-size: 10px;
-  line-height: 1;
-  padding: 1px 4px;
-  border-radius: 3px;
-  border: 1px solid var(--td-component-border);
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-@media (max-width: 720px) {
-  .xform-label {
-    display: none;
-  }
+/* Hide filled-segment dividers between icon-only buttons. */
+.xform-toolbar :deep(.t-radio-button::before) {
+  display: none;
 }
 </style>

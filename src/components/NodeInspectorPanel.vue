@@ -6,6 +6,7 @@ import { MessagePlugin, type SelectOption } from "tdesign-vue-next";
 import type { TreeSelectPayload } from "@/components/NodeTreePanel.vue";
 import StyleParamEditor from "@/components/StyleParamEditor.vue";
 import BlendAttrSelect from "@/components/BlendAttrSelect.vue";
+import CornerAttrSelect from "@/components/CornerAttrSelect.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
 import ExprAttrInput from "@/components/ExprAttrInput.vue";
 import HrefRefInput from "@/components/HrefRefInput.vue";
@@ -1684,6 +1685,18 @@ function commitStyleCategoryName(): void {
                     "
                     @change="(v: string) => onEnumAttrChange('blend', v)"
                     @clear="() => onEnumAttrChange('blend', '')"
+                  />
+                  <CornerAttrSelect
+                    v-else-if="row.field.name === 'corner'"
+                    :model-value="draft[row.field.name]"
+                    clearable
+                    :placeholder="
+                      row.field.placeholder
+                        ? attrValueLabel('corner', row.field.placeholder)
+                        : t('app.unsetHint')
+                    "
+                    @change="(v: string) => onEnumAttrChange('corner', v)"
+                    @clear="() => onEnumAttrChange('corner', '')"
                   />
                   <t-select
                     v-else-if="

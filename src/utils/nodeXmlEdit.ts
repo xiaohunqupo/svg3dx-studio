@@ -55,10 +55,11 @@ export function parseTreePath(path: string): PathLocator | null {
   }
 
   const raw = path.startsWith("defs:") ? path.slice(5) : path;
-  if (!raw || raw.startsWith("i")) return null;
+  if (!raw) return null;
   const parts = raw.split(".");
   const groupId = parts[0];
-  if (!groupId) return null;
+  // Reject synthetic eval-only paths (`i0`, `i12`) — not group ids like `intersect`.
+  if (!groupId || /^i\d+$/.test(groupId)) return null;
   const indices: number[] = [];
   for (let i = 1; i < parts.length; i++) {
     const n = Number(parts[i]);
@@ -528,6 +529,31 @@ export function findTreePathAtOffset(
   }
 
   return null;
+}
+
+/** Direct child open tags under a tree path (document order). */
+export type ChildOpenInfo = {
+  local: string;
+  attrs: string;
+  selfClosing: boolean;
+};
+
+/**
+ * List element children at a Studio tree path.
+ * Used by the node tree so structure follows XML (e.g. `<s3dx:use>` under
+ * bool), not evaluation which may inline uses as groups.
+ */
+export function listChildOpensAtPath(
+  content: string,
+  path: string
+): ChildOpenInfo[] {
+  const open = findOpenTagAtPath(content, path);
+  if (!open) return [];
+  return childOpens(content, open).map((c) => ({
+    local: c.local,
+    attrs: c.attrs,
+    selfClosing: c.selfClosing,
+  }));
 }
 
 /** Resolve open tag for a tree path. */

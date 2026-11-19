@@ -139,7 +139,10 @@ const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
 } | null>(null);
 const sourcePanel = ref<{
-  revealPath: (path: string | null | undefined) => void;
+  revealPath: (
+    path: string | null | undefined,
+    options?: { scroll?: boolean }
+  ) => void;
   applyFormat: (text: string, mode?: FormatXmlMode) => Promise<string>;
   measureEditorPrintWidth: () => number;
   focus: () => void;
@@ -230,16 +233,22 @@ function setShowSource(next: boolean): void {
   persistViewFlags();
 }
 
-function revealSelectedInSource(): void {
-  if (syncingFromSource) return;
+/**
+ * Keep source reveal marks in sync with `selected`.
+ * Caret-driven updates pass `scroll: false` so the view does not jump.
+ */
+function revealSelectedInSource(options: { scroll?: boolean } = {}): void {
   if (!showSource.value || !sourcePanel.value) return;
-  sourcePanel.value.revealPath(selected.value?.path);
+  sourcePanel.value.revealPath(selected.value?.path, options);
 }
 
 async function onSourceCursorPath(path: string | null): Promise<void> {
   // Blank / non-node caret → clear selection (same as empty viewport click).
   if (!path) {
-    if (!selected.value) return;
+    if (!selected.value) {
+      revealSelectedInSource({ scroll: false });
+      return;
+    }
     syncingFromSource = true;
     try {
       selected.value = null;
@@ -249,14 +258,16 @@ async function onSourceCursorPath(path: string | null): Promise<void> {
     } finally {
       syncingFromSource = false;
     }
+    revealSelectedInSource({ scroll: false });
     return;
   }
   if (selected.value?.path === path) {
     interactHost.value?.setHighlight(path);
+    revealSelectedInSource({ scroll: false });
     return;
   }
   // selectPath emits select on a nested nextTick — keep the guard until then
-  // so watch(selected) does not scroll/re-reveal the source caret.
+  // so watch(selected) does not scroll the source under the caret.
   syncingFromSource = true;
   try {
     treePanel.value?.selectPath(path);
@@ -266,6 +277,7 @@ async function onSourceCursorPath(path: string | null): Promise<void> {
   } finally {
     syncingFromSource = false;
   }
+  revealSelectedInSource({ scroll: false });
 }
 
 const bootstrapping = ref(true);
@@ -303,13 +315,16 @@ watch(
 );
 
 watch(selected, () => {
-  revealSelectedInSource();
+  // Tree / viewport selection: scroll source to the node.
+  // Caret→path sets syncingFromSource and reveals itself without scroll.
+  if (syncingFromSource) return;
+  revealSelectedInSource({ scroll: true });
 });
 
 watch(showSource, async (visible) => {
   if (!visible) return;
   await nextTick();
-  revealSelectedInSource();
+  revealSelectedInSource({ scroll: true });
 });
 
 function resetHistory(): void {
