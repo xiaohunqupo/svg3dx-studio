@@ -634,6 +634,25 @@ function serializeAttrs(map: Record<string, string>, original: string): string {
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
+/**
+ * Element kind + id at a tree path.
+ * `<g>` is reported as `group`. `id` is empty when the element has none.
+ */
+export function nodeKindAtPath(
+  content: string,
+  path: string
+): { kind: string; id: string } | null {
+  const locator = parseTreePath(path);
+  if (locator?.kind === "model" && locator.useIndex === undefined) {
+    return { kind: "model", id: locator.modelId };
+  }
+  const open = findOpenTagAtPath(content, path);
+  if (!open) return null;
+  const id = (parseAttrMap(open.attrs).id ?? "").trim();
+  const kind = open.local === "g" ? "group" : open.local;
+  return { kind, id };
+}
+
 /** Read all attributes of the element at path into a flat string map. */
 export function readAttrsAtPath(
   content: string,

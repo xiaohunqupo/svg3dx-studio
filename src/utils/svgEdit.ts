@@ -34,7 +34,7 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
           <path d="M 0 0 L 100 0 L 100 100 L 0 100 Z"/>
         </s3dx:section>
       </s3dx:extrude>`,
-  revolve: `<s3dx:revolve axisOrigin="0 0 0" axisDir="0 1 0" angle="360">
+  revolve: `<s3dx:revolve solid="true" axisOrigin="0 0 0" axisDir="0 1 0" angle="360">
         <s3dx:section>
           <path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>
         </s3dx:section>

@@ -15,6 +15,7 @@ import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
+import type { DrillCrumb } from "@/interact";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
@@ -135,8 +136,10 @@ const treePanel = ref<{
   selectPath: (path: string | null | undefined) => void;
   resyncAfterHistory: (path?: string | null) => boolean;
 } | null>(null);
+const drillMarks = ref<{ path: string; n: number }[]>([]);
 const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
+  exitDrill: (options?: { select?: string | null }) => void;
 } | null>(null);
 const sourcePanel = ref<{
   revealPath: (
@@ -430,6 +433,7 @@ function syncFromStore(): void {
   selected.value = null;
   result.value = null;
   activeModelId.value = "";
+  interactHost.value?.exitDrill({ select: null });
   void nextTick(() => {
     historyReady = true;
   });
@@ -681,6 +685,12 @@ function onDownload(): void {
 function onSelect(payload: TreeSelectPayload | null): void {
   selected.value = payload;
   interactHost.value?.setHighlight(payload?.path ?? null);
+}
+
+function onDrillCrumbs(crumbs: DrillCrumb[]): void {
+  drillMarks.value = crumbs
+    .filter((c) => c.nodePath)
+    .map((c, i) => ({ path: c.nodePath, n: i + 1 }));
 }
 
 function onViewportPick(path: string | null): void {
@@ -977,6 +987,7 @@ onBeforeUnmount(() => {
         :loading="contentLoading"
         :file-name="file.name"
         :dirty="dirty"
+        :drill-marks="drillMarks"
         @select="onSelect"
         @add-group="onAddGroup"
         @add-model="onAddModel"
@@ -1047,6 +1058,7 @@ onBeforeUnmount(() => {
             @error="(m) => MessagePlugin.error(m)"
             @pick="onViewportPick"
             @transform="onViewportTransform"
+            @drill="onDrillCrumbs"
           />
         </main>
       </div>

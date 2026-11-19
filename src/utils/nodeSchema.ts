@@ -492,6 +492,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "axisOrigin", placeholder: "0 0 0" },
     { name: "axisDir", placeholder: "0 1 0" },
     { name: "angle", placeholder: "360" },
+    { name: "solid", placeholder: "true", boolean: true },
   ],
   loft: [
     { name: "solid", placeholder: "true", boolean: true },

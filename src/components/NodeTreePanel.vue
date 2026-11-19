@@ -123,6 +123,10 @@ const props = defineProps<{
   fileName?: string;
   /** Whether the document has unsaved changes. */
   dirty?: boolean;
+  /**
+   * Drill breadcrumb marks. `n` is shown on the right of the matching node.
+   */
+  drillMarks?: { path: string; n: number }[];
 }>();
 
 const emit = defineEmits<{
@@ -363,6 +367,21 @@ function ancestorPaths(path: string): string[] {
   }
   return parts;
 }
+
+function drillMark(data: TreeItem | undefined): number | null {
+  const path = data?.value;
+  if (!path) return null;
+  const hit = props.drillMarks?.find((m) => m.path === path);
+  return hit ? hit.n : null;
+}
+
+watch(
+  () => props.drillMarks,
+  (marks) => {
+    if (!marks?.length) return;
+    ensureExpanded(marks.flatMap((m) => ancestorPaths(m.path)));
+  }
+);
 
 function activatePath(path: string): void {
   onActive([path]);
@@ -1543,6 +1562,10 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
         </span>
       </template>
       <template #operations="{ node }">
+        <span
+          v-if="drillMark(node.data as TreeItem | undefined)"
+          class="tree-drill-index"
+        >{{ drillMark(node.data as TreeItem | undefined) }}</span>
         <t-button
           v-if="(node.data as TreeItem | undefined)?.meta?.action === 'add-group'"
           class="tree-action"
@@ -1861,7 +1884,18 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
 :deep(.t-tree__operations) {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+.tree-drill-index {
+  flex-shrink: 0;
+  min-width: 1.1em;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--td-brand-color);
+  text-align: center;
 }
 
 :deep(.t-tree__operations:empty) {

@@ -3,11 +3,13 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { EvaluationResult } from "svg3dx-viewer";
 import {
   createInteract,
+  type DrillCrumb,
   type InteractViewport,
   type TransformCommitPayload,
   type TransformMode,
 } from "@/interact";
-import { useI18n } from "@/i18n";
+import { elementLabel, useI18n } from "@/i18n";
+import { nodeKindAtPath } from "@/utils/nodeXmlEdit";
 import { useTheme } from "@/theme";
 import { readViewportBackground } from "@/utils/viewportTheme";
 import {
@@ -43,11 +45,14 @@ const emit = defineEmits<{
   pick: [path: string | null];
   /** TransformControls drag finished → write `s3dx:transform`. */
   transform: [payload: TransformCommitPayload];
+  /** Selection breadcrumb. Empty when nothing is selected and not drilled in. */
+  drill: [crumbs: DrillCrumb[]];
 }>();
 
 const host = ref<HTMLElement | null>(null);
 const gizmoActive = ref(false);
 const transformMode = ref<TransformMode>("translate");
+const drillCrumbs = ref<{ path: string; label: string; pending?: boolean }[]>([]);
 let interact: InteractViewport | null = null;
 let loadSeq = 0;
 let lastContent = "";
@@ -104,6 +109,17 @@ function onTransformModeChange(mode: TransformMode): void {
   interact?.setTransformMode(mode);
 }
 
+function crumbLabel(path: string): string {
+  const info = nodeKindAtPath(props.content, path);
+  if (!info) return path;
+  if (info.id) return info.id;
+  return elementLabel(info.kind);
+}
+
+function onDrillCrumb(path: string): void {
+  interact?.focusDrill(path);
+}
+
 function onTransformModeRadio(value: string | number | boolean): void {
   const mode = String(value);
   if (mode === "translate" || mode === "rotate" || mode === "scale") {
@@ -127,6 +143,14 @@ async function ensureInteract(): Promise<InteractViewport | null> {
       syncGizmoUi();
     },
     onTransformCommit: (payload) => emit("transform", payload),
+    onDrillChange: (crumbs: DrillCrumb[]) => {
+      drillCrumbs.value = crumbs.map((c) => ({
+        path: c.path,
+        label: c.pending ? "?" : crumbLabel(c.nodePath),
+        pending: c.pending,
+      }));
+      emit("drill", crumbs);
+    },
   });
   emit("ready", interact);
   syncGizmoUi();
@@ -142,6 +166,7 @@ async function loadContent(
     const v = await ensureInteract();
     if (!v || seq !== loadSeq) return;
     if (!text.trim()) return;
+    v.setDocument(text);
     if (options.skip) {
       lastContent = text;
       return;
@@ -237,12 +262,45 @@ defineExpose({
     }
     syncGizmoUi();
   },
+  exitDrill(options?: { select?: string | null }) {
+    interact?.exitDrill(options);
+    syncGizmoUi();
+  },
 });
 </script>
 
 <template>
   <div class="interact-host">
     <div ref="host" class="interact-canvas" />
+    <nav
+      v-if="drillCrumbs.length"
+      class="drill-crumbs"
+      :aria-label="t('app.drillPath')"
+      :title="t('app.drillExitHint')"
+    >
+      <template v-for="(crumb, index) in drillCrumbs" :key="`${index}:${crumb.path}`">
+        <span v-if="index > 0" class="drill-sep" aria-hidden="true">/</span>
+        <span
+          v-if="crumb.pending"
+          class="drill-crumb current pending"
+          aria-current="page"
+          :title="t('app.drillNoSelection')"
+        >
+          <span class="drill-crumb-label">{{ crumb.label }}</span>
+        </span>
+        <button
+          v-else
+          type="button"
+          class="drill-crumb"
+          :class="{ current: index === drillCrumbs.length - 1 }"
+          :aria-current="index === drillCrumbs.length - 1 ? 'page' : undefined"
+          @click="onDrillCrumb(crumb.path)"
+        >
+          <span class="drill-crumb-label">{{ crumb.label }}</span>
+          <span class="drill-crumb-index">{{ index + 1 }}</span>
+        </button>
+      </template>
+    </nav>
     <t-radio-group
       v-if="gizmoActive"
       class="xform-toolbar"
@@ -287,6 +345,69 @@ defineExpose({
 .interact-canvas {
   width: 100%;
   height: 100%;
+}
+
+.drill-crumbs {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(42rem, calc(100% - 22rem));
+  overflow-x: auto;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: var(--td-font-size-body-small);
+  line-height: var(--td-line-height-body-small);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.drill-sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.drill-crumb {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--td-brand-color);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.drill-crumb-label {
+  line-height: 1.2;
+}
+
+.drill-crumb-index {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--td-text-color-placeholder);
+}
+
+.drill-crumb.current .drill-crumb-index {
+  color: var(--td-text-color-secondary);
+}
+
+.drill-crumb.current {
+  color: var(--td-text-color-primary);
+  cursor: default;
+}
+
+.drill-crumb.pending {
+  cursor: default;
 }
 
 .xform-toolbar {
