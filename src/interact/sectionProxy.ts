@@ -20,8 +20,8 @@ import {
 
 /** Light green fill for section XOY (distinct from selection gold / world blue-gray). */
 const SECTION_PLANE_COLOR = 0x86efac;
-/** Profile wire color for section 2D children (editor overlay). */
-const SECTION_PROFILE_COLOR = 0x0f766e;
+/** Fallback when the parent construct has no sampleable color. */
+const SECTION_PROFILE_FALLBACK = 0xff6b4a;
 
 const SECTION_SHAPE_TAGS = new Set([
   "path",
@@ -95,6 +95,45 @@ function sectionTransformMatrix(
   // Unset transform under revolve → XY→XOZ default orientation.
   if (parentKind === "revolve") return REVOLVE_DEFAULT_XF.clone();
   return new THREE.Matrix4();
+}
+
+/** First mesh/line color on the construct (revolve etc.) for profile contrast. */
+function sampleParentColor(parent: THREE.Object3D): THREE.Color | null {
+  let found: THREE.Color | null = null;
+  parent.traverse((obj) => {
+    if (found || obj.userData?.sectionProxy) return;
+    const mesh = obj as THREE.Mesh;
+    const line = obj as THREE.Line;
+    const mat = (mesh.isMesh ? mesh.material : line.isLine ? line.material : null) as
+      | THREE.Material
+      | THREE.Material[]
+      | null;
+    if (!mat) return;
+    const m = (Array.isArray(mat) ? mat[0] : mat) as THREE.Material & {
+      color?: THREE.Color;
+    };
+    if (m?.color) found = m.color.clone();
+  });
+  return found;
+}
+
+/**
+ * Inverse of the parent solid color, pushed toward a saturated mid-lightness
+ * so section child paths stay readable on both the ghosted solid and dark bg.
+ * Path fill color is meaningless here — contrast is the only job.
+ */
+function profileColorAgainstParent(parent: THREE.Object3D): THREE.Color {
+  const src = sampleParentColor(parent) ?? new THREE.Color(SECTION_PROFILE_FALLBACK);
+  const inv = new THREE.Color(1 - src.r, 1 - src.g, 1 - src.b);
+  const hsl = { h: 0, s: 0, l: 0 };
+  inv.getHSL(hsl);
+  // Near-gray solids → warm accent; otherwise keep inverted hue.
+  if (hsl.s < 0.12) {
+    inv.setHSL(0.03, 0.85, 0.58);
+  } else {
+    inv.setHSL(hsl.h, Math.max(0.7, hsl.s), Math.min(0.62, Math.max(0.48, hsl.l)));
+  }
+  return inv;
 }
 
 function planeSizeFor(parent: THREE.Object3D): number {
@@ -177,6 +216,14 @@ export class SectionProxy {
   private plane: PlaneHelper;
   private readonly profiles = new THREE.Group();
   private readonly profileByPath = new Map<string, THREE.Object3D>();
+
+  /**
+   * XOY pose frame (origin / normal / xDir) in world space via parent construct.
+   * Used for viewer AxesHelper + PlaneHelper while inside the section.
+   */
+  get helperFrame(): THREE.Object3D {
+    return this.planeHost;
+  }
 
   constructor(path: string, size: number) {
     this.path = path;
@@ -271,7 +318,7 @@ export class SectionProxy {
     T.decompose(this.root.position, this.root.quaternion, this.root.scale);
     this.root.updateMatrix();
     this.planeHost.matrix.copy(F);
-    this.syncProfiles(content);
+    this.syncProfiles(content, parent);
     this.planeHost.updateMatrixWorld(true);
     this.root.updateMatrixWorld(true);
 
@@ -283,9 +330,11 @@ export class SectionProxy {
   /**
    * Editor-only wires for SVG shape children (core folds them into the solid —
    * they never become scene instructions on their own).
+   * Color = inverse of the parent construct so paths read against the solid.
    */
-  private syncProfiles(content: string): void {
+  private syncProfiles(content: string, parent: THREE.Object3D): void {
     this.clearProfiles();
+    const profileColor = profileColorAgainstParent(parent);
     const children = listChildOpensAtPath(content, this.path);
     for (let i = 0; i < children.length; i++) {
       const open = children[i]!;
@@ -304,14 +353,17 @@ export class SectionProxy {
       }
       const geom = new THREE.BufferGeometry().setFromPoints(pts);
       const mat = new THREE.LineBasicMaterial({
-        color: SECTION_PROFILE_COLOR,
+        color: profileColor,
         toneMapped: false,
-        depthTest: true,
+        // Editor overlay: always on top of the construct solid / section fill.
+        depthTest: false,
         depthWrite: false,
       });
       const line = new THREE.Line(geom, mat);
       line.name = `section-profile:${shapePath}`;
-      line.renderOrder = 2;
+      line.renderOrder = 10;
+      // Nudge off the XOY fill to avoid coplanar fighting when depthTest is on elsewhere.
+      line.position.z = 1e-3;
       tagSectionProxy(line, shapePath, { sectionProfile: true });
       this.profiles.add(line);
       this.profileByPath.set(shapePath, line);

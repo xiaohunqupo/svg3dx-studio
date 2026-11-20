@@ -777,7 +777,11 @@ export class InteractViewport {
     return parent;
   }
 
-  private ensureSectionProxy(path: string): THREE.Object3D | null {
+  /**
+   * @param refresh when true (default), rebuild pose/profiles from the document.
+   *   Pass false after highlight — rebuilding would dispose the highlighted lines.
+   */
+  private ensureSectionProxy(path: string, refresh = true): THREE.Object3D | null {
     if (!this.document || !isSectionPath(this.document, path)) return null;
     const parentPath = parentTreePath(path);
     if (!parentPath) return null;
@@ -785,9 +789,11 @@ export class InteractViewport {
     if (!parent) return null;
     let proxy = this.sectionProxies.get(path);
     if (proxy && proxy.root.parent === parent) {
-      // Profiles are rebuilt — drop ghost backups first or restore hits disposed lines.
-      this.restoreGhostsUnder(proxy.root);
-      proxy.syncFromDocument(this.document, parent);
+      if (refresh) {
+        // Profiles are rebuilt — drop ghost backups first or restore hits disposed lines.
+        this.restoreGhostsUnder(proxy.root);
+        proxy.syncFromDocument(this.document, parent);
+      }
     } else {
       if (proxy) {
         this.restoreGhostsUnder(proxy.root);
@@ -823,12 +829,13 @@ export class InteractViewport {
         this.sectionProxies.delete(path);
       }
     }
-    for (const path of want) this.ensureSectionProxy(path);
+    for (const path of want) this.ensureSectionProxy(path, true);
   }
 
   private syncTransformTarget(): void {
     const path = this.highlightPath;
-    this.syncSectionProxies();
+    // Do not syncSectionProxies here — that rebuilds profile Lines and clears
+    // SelectionHighlight colors. applyVisibility already refreshed overlays.
     if (!isTransformablePath(path)) {
       this.transform.detach();
       this.transform.enabled = false;
@@ -837,7 +844,9 @@ export class InteractViewport {
 
     // Section has no evaluated mesh — attach gizmo to its XOY plane proxy.
     if (isSectionPath(this.document, path)) {
-      const proxy = this.sectionProxies.get(path!)?.root ?? this.ensureSectionProxy(path!);
+      const proxy =
+        this.sectionProxies.get(path!)?.root ??
+        this.ensureSectionProxy(path!, false);
       if (!proxy) {
         this.transform.detach();
         this.transform.enabled = false;
@@ -1251,33 +1260,15 @@ export class InteractViewport {
         if (obj === root) return;
         // Section XOY proxy / profile wires: keep under the current branch.
         if (obj.userData?.sectionProxy) {
-          const sp = pickPathFromObject(obj);
-          const keep =
-            !!sp &&
-            (sp === scope ||
-              sp.startsWith(`${scope}.`) ||
-              scope.startsWith(`${sp}.`) ||
-              parentTreePath(sp) === scope ||
-              parentTreePath(scope) === sp);
-          obj.visible = keep;
-          if (!keep || !sp) return;
-
-          if (obj.userData.sectionProfile) {
-            // Entered a profile (or deeper): ghost that profile wire.
-            if (this.scopePath && (scope === sp || scope.startsWith(`${sp}.`))) {
-              const depth =
-                scope === sp
-                  ? 1
-                  : scope.slice(sp.length).split(".").filter(Boolean).length;
-              this.ghostOne(obj, this.ancestorGhostOpacity(Math.max(1, depth)));
-            }
-          }
-          // Section plane dim is applied via SectionProxy.setDrillDim below.
+          // Visibility for overlays is finalized in `revealSectionOverlays`
+          // (empty-chain parents must not stay hidden or profiles disappear).
           return;
         }
         const chain = this.chainFor(obj);
         if (!chain.length) {
-          obj.visible = false;
+          // Keep structural groups visible so section overlays parented under
+          // them still render; only hide empty-chain leaves.
+          if (obj.children.length === 0) obj.visible = false;
           return;
         }
         const role = this.drillRole(chain, scope);
@@ -1293,11 +1284,47 @@ export class InteractViewport {
       // Other loop iterations stay on screen (faded) once that loop is entered,
       // including after a child of the loop body is edited and the view refreshes.
       if (this.scopePath) this.ghostIterations(this.scopePath);
-      this.viewer.setHelperFrame(this.frameFor(scope));
     }
+    this.revealSectionOverlays(scope);
     this.applySectionProxyDims(scope);
+    // After overlays exist: section / path levels use the section XOY frame,
+    // not the parent construct (revolve) solid matrix.
+    this.viewer.setHelperFrame(scope ? this.frameFor(scope) : null);
     this.applyDefView();
     this.maybeFrameDef();
+  }
+
+  /**
+   * Section plane + profile wires are editor overlays (not eval meshes).
+   * While the section overlay is shown, the plane and **all** profile paths stay
+   * opaque together — never ghost profiles with the construct solid. Selection
+   * / highlight picks which path is active; visibility stays shared.
+   */
+  private revealSectionOverlays(scope: string | null): void {
+    if (!scope) return;
+    for (const [path, proxy] of this.sectionProxies) {
+      const sectionKeep =
+        path === scope ||
+        path.startsWith(`${scope}.`) ||
+        scope.startsWith(`${path}.`) ||
+        parentTreePath(path) === scope ||
+        parentTreePath(scope) === path;
+      if (!sectionKeep) {
+        proxy.root.visible = false;
+        continue;
+      }
+      for (
+        let p: THREE.Object3D | null = proxy.root;
+        p && p !== this.viewer.viewer.root;
+        p = p.parent
+      ) {
+        p.visible = true;
+      }
+      // Whole overlay subtree on — paths share display with the section.
+      proxy.root.traverse((obj) => {
+        obj.visible = true;
+      });
+    }
   }
 
   /**
@@ -1361,6 +1388,8 @@ export class InteractViewport {
 
   private ghostIterations(scope: string): void {
     this.viewer.viewer.root.traverse((obj) => {
+      // Section plane / profile overlays must stay opaque editor colors.
+      if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
       if (!this.inCurrentView(chain)) return;
       if (this.iterationVisible(chain, scope)) return;
@@ -1438,6 +1467,8 @@ export class InteractViewport {
   }
 
   private ghostOne(obj: THREE.Object3D, opacity = 0.16): void {
+    // Never fade section overlays — they would pick up the construct ghost look.
+    if (obj.userData?.sectionProxy) return;
     const drawable = obj as THREE.Mesh & THREE.Line;
     // Groups / empties have no drawable — do not invent a silhouette.
     if (!drawable.isMesh && !drawable.isLine) return;
@@ -1493,10 +1524,19 @@ export class InteractViewport {
   }
 
   private frameFor(scope: string): THREE.Object3D | null {
+    // Section and its 2D children have no eval mesh — use the section pose frame.
+    const sectionPath = sectionAncestorPath(this.document, scope);
+    if (sectionPath) {
+      this.ensureSectionProxy(sectionPath, false);
+      const frame = this.sectionProxies.get(sectionPath)?.helperFrame;
+      if (frame) return frame;
+    }
+
     const root = this.viewer.viewer.root;
     let best: THREE.Object3D | null = null;
     let bestDepth = Infinity;
     root.traverse((obj) => {
+      if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
       if (!this.inCurrentView(chain)) return;
       if (!chain.some((step) => step.path === scope)) return;
@@ -1548,7 +1588,8 @@ export class InteractViewport {
     // Section / its 2D children: overlay plane + profile wires (no eval mesh).
     const sectionPath = sectionAncestorPath(this.document, path);
     if (sectionPath) {
-      this.ensureSectionProxy(sectionPath);
+      // refresh=false: keep existing profile Lines so line-color highlight sticks.
+      this.ensureSectionProxy(sectionPath, false);
       const objects =
         this.sectionProxies.get(sectionPath)?.highlightObjects(path) ?? [];
       if (objects.length) {
