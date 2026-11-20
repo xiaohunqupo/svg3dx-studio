@@ -207,7 +207,10 @@ export class SectionProxy {
     });
   }
 
-  /** Drawable objects for a section or one of its 2D children. */
+  /**
+   * Drawable objects for highlight — same as other nodes: selecting the section
+   * includes its children (profile wires); selecting a child is just that wire.
+   */
   highlightObjects(path: string): THREE.Object3D[] {
     if (path === this.path) {
       const objects: THREE.Object3D[] = [];
@@ -217,10 +220,41 @@ export class SectionProxy {
         const line = obj as THREE.Line;
         if (line.isLine) objects.push(line);
       });
+      for (const profile of this.profileByPath.values()) objects.push(profile);
       return objects;
     }
-    const profile = this.profileByPath.get(path);
-    return profile ? [profile] : [];
+    if (path.startsWith(`${this.path}.`)) {
+      const objects: THREE.Object3D[] = [];
+      for (const [p, profile] of this.profileByPath) {
+        if (p === path || p.startsWith(`${path}.`)) objects.push(profile);
+      }
+      return objects;
+    }
+    return [];
+  }
+
+  /**
+   * Dim the XOY plane when drilled into this section or a child.
+   * (Fill is already ~0.2 — generic ghost min() cannot make it fainter.)
+   */
+  setDrillDim(dimmed: boolean): void {
+    this.plane.traverse((obj) => {
+      obj.userData.drillGhost = dimmed;
+      const mesh = obj as THREE.Mesh;
+      if (mesh.isMesh && mesh.material && !Array.isArray(mesh.material)) {
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        mat.transparent = true;
+        mat.opacity = dimmed ? 0.05 : 0.2;
+        mat.needsUpdate = true;
+      }
+      const line = obj as THREE.Line;
+      if (line.isLine && line.material && !Array.isArray(line.material)) {
+        const mat = line.material as THREE.LineBasicMaterial;
+        mat.transparent = true;
+        mat.opacity = dimmed ? 0.28 : 0.95;
+        mat.needsUpdate = true;
+      }
+    });
   }
 
   /** Place under `parent` using section attrs from the document. */
