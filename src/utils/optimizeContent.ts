@@ -620,7 +620,7 @@ function normalizePrimitiveForms(svg: string, stats: OptimizeStats): string {
           changed = true;
         }
       }
-      if ((kind === "sweep" || kind === "pipe") && form === "inline") {
+      if (kind === "pipe" && form === "inline") {
         const stripped = stripDirectChildren(nextInner, ["path"]);
         if (stripped.removed) {
           nextInner = stripped.inner;

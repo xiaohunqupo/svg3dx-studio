@@ -10,7 +10,14 @@ import CornerAttrSelect from "@/components/CornerAttrSelect.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
 import ExprAttrInput from "@/components/ExprAttrInput.vue";
 import HrefRefInput from "@/components/HrefRefInput.vue";
+import ShapeSvgEditorDialog from "@/components/ShapeSvgEditorDialog.vue";
+import { PenToolIcon } from "@/components/icons/lucideIcons";
 import { useI18n } from "@/i18n";
+import {
+  isSectionShapeEditable,
+  readElementXmlAtPath,
+  shapeEditorTriggerAttr,
+} from "@/utils/shapeSvgEditor";
 import {
   APPEARANCE_ATTR_NAMES,
   APPEARANCE_FIELDS,
@@ -73,6 +80,53 @@ const emit = defineEmits<{
   styleCategoryRename: [payload: { from: string; to: string }];
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
 }>();
+
+const shapeEditorOpen = ref(false);
+const shapeEditorXml = ref("");
+const shapeEditorKind = ref("path");
+
+const canEditSectionShape = computed(() => {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry" || !props.content) return false;
+  return isSectionShapeEditable(props.content, sel.path);
+});
+
+const shapeEditorTrigger = computed(() => {
+  if (!canEditSectionShape.value || !props.content || !props.selected) {
+    return null;
+  }
+  if (props.selected.kind !== "geometry") return null;
+  const kind = nodeKindAtPath(props.content, props.selected.path)?.kind;
+  return kind ? shapeEditorTriggerAttr(kind) : null;
+});
+
+function showShapeEditorButton(fieldName: string): boolean {
+  return !!shapeEditorTrigger.value && fieldName === shapeEditorTrigger.value;
+}
+
+function openShapeEditor(): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry" || !props.content) return;
+  const xml = readElementXmlAtPath(props.content, sel.path);
+  const kind = nodeKindAtPath(props.content, sel.path)?.kind;
+  if (!xml || !kind) {
+    MessagePlugin.warning(t("app.shapeEditorLoadFailed"));
+    return;
+  }
+  shapeEditorXml.value = xml;
+  shapeEditorKind.value = kind;
+  shapeEditorOpen.value = true;
+}
+
+function onShapeEditorConfirm(updates: Record<string, string>): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry") return;
+  for (const [name, value] of Object.entries(updates)) {
+    draft[name] = value;
+  }
+  emit("nodeAttrsChange", { path: sel.path, updates });
+  MessagePlugin.success(t("app.updatedNode"));
+}
 
 const {
   t,
@@ -1561,6 +1615,12 @@ function commitStyleCategoryName(): void {
 
     <!-- Geometry / group -->
     <template v-else>
+      <ShapeSvgEditorDialog
+        v-model:visible="shapeEditorOpen"
+        :element-xml="shapeEditorXml"
+        :shape-kind="shapeEditorKind"
+        @confirm="onShapeEditorConfirm"
+      />
       <t-collapse
         v-model="openSections"
         expand-icon-placement="left"
@@ -1841,26 +1901,43 @@ function commitStyleCategoryName(): void {
                       }
                     "
                   />
-                  <ExprAttrInput
+                  <div
                     v-else-if="isExprScalarField(row.field)"
-                    v-model="draft[row.field.name]"
-                    clearable
-                    class="value-input"
-                    :placeholder="
-                      row.field.placeholder || t('app.unsetHint')
-                    "
-                    :param-groups="paramSourceGroups"
-                    :effective-names="effectiveParamNames"
-                    :param-values="effectiveParamValues"
-                    @blur="commitField(row.field.name)"
-                    @enter="commitField(row.field.name)"
-                    @clear="
-                      () => {
-                        draft[row.field.name] = '';
-                        commitField(row.field.name);
-                      }
-                    "
-                  />
+                    class="value-input-row"
+                  >
+                    <ExprAttrInput
+                      v-model="draft[row.field.name]"
+                      clearable
+                      class="value-input"
+                      :placeholder="
+                        row.field.placeholder || t('app.unsetHint')
+                      "
+                      :param-groups="paramSourceGroups"
+                      :effective-names="effectiveParamNames"
+                      :param-values="effectiveParamValues"
+                      @blur="commitField(row.field.name)"
+                      @enter="commitField(row.field.name)"
+                      @clear="
+                        () => {
+                          draft[row.field.name] = '';
+                          commitField(row.field.name);
+                        }
+                      "
+                    />
+                    <t-button
+                      v-if="showShapeEditorButton(row.field.name)"
+                      size="small"
+                      variant="text"
+                      shape="square"
+                      class="value-action"
+                      :title="t('app.shapeEditorOpen')"
+                      @click="openShapeEditor"
+                    >
+                      <template #icon>
+                        <PenToolIcon :size="14" :stroke-width="1.75" />
+                      </template>
+                    </t-button>
+                  </div>
                   <t-input
                     v-else
                     v-model="draft[row.field.name]"
@@ -1965,6 +2042,22 @@ function commitStyleCategoryName(): void {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.value-input-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.value-input-row .value-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.value-action {
+  flex-shrink: 0;
 }
 
 .field-desc {

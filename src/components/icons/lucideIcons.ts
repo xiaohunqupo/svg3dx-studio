@@ -21,6 +21,7 @@ export {
   Minus as LineIcon,
   Move3d as TransformMoveIcon,
   Orbit as SweepIcon,
+  PenTool as PenToolIcon,
   Pyramid as PyramidIcon,
   Radius as ArcIcon,
   Repeat as LoopIcon,
