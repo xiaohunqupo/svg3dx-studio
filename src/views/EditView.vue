@@ -49,6 +49,7 @@ import {
 import {
   applyAttrsAtPath,
   insertXmlAtPath,
+  nodeKindAtPath,
   normalizeXmlNewlines,
   removeElementAtPath,
   replaceChildrenAtPath,
@@ -564,7 +565,8 @@ async function onInsertChildAtPath(payload: {
   kind: string;
 }): Promise<void> {
   if (!file.value) return;
-  const snippet = snippetForPathInsert(payload.kind);
+  const parentKind = nodeKindAtPath(draftContent.value, payload.parentPath)?.kind;
+  const snippet = snippetForPathInsert(payload.kind, parentKind);
   if (!snippet) return;
   const content = insertXmlAtPath(
     draftContent.value,

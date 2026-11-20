@@ -84,8 +84,11 @@ import {
   SYNTHETIC_TREE_PATH_PREFIX,
 } from "@/utils/nodeXmlEdit";
 
-/** Constructed solids that expose a child `<s3dx:section>` in the editor tree. */
-const SECTION_PARENT_KINDS = new Set(["revolve"]);
+/**
+ * Constructed solids that expose structural children in the editor tree
+ * (revolve → section; sweep → section + path).
+ */
+const SECTION_PARENT_KINDS = new Set(["revolve", "sweep"]);
 const SVG_SHAPE_LOCALS = new Set([
   "path",
   "circle",
@@ -201,8 +204,12 @@ type TreeItem = {
       | "geom-more"
       /** Revolve: add section (only) / delete. */
       | "revolve-more"
-      /** Section under revolve: add 2D shapes / delete. */
+      /** Sweep: add section / path / delete. */
+      | "sweep-more"
+      /** Section under revolve/sweep: edit profile / delete. */
       | "section-more"
+      /** Path under sweep: delete. */
+      | "path-more"
       /** Material row: more menu with delete. */
       | "material-more"
       /** Style category row: more menu with delete. */
@@ -264,10 +271,19 @@ function groupInnerXml(svg: string, groupId: string): string | null {
  * Prefer this over evaluation children: core inlines `<s3dx:use>` as groups
  * for bool/CSG, which must still appear as use rows in the editor tree.
  */
+function constructMoreAction(
+  kind: string
+): "revolve-more" | "sweep-more" | "geom-more" {
+  if (kind === "revolve") return "revolve-more";
+  if (kind === "sweep") return "sweep-more";
+  return "geom-more";
+}
+
 function childrenFromPathMarkup(
   content: string,
   parentPath: string,
-  classById: Map<string, string>
+  classById: Map<string, string>,
+  parentKind?: string
 ): TreeItem[] {
   return listChildOpensAtPath(content, parentPath).map((open, idx) => {
     const path = `${parentPath}.${idx}`;
@@ -305,18 +321,23 @@ function childrenFromPathMarkup(
       const classAttr = attrOf(attrs, "class");
       const kids =
         SECTION_PARENT_KINDS.has(kind) && !open.selfClosing
-          ? childrenFromPathMarkup(content, path, classById)
+          ? childrenFromPathMarkup(content, path, classById, kind)
           : undefined;
+      const isSweepPath = parentKind === "sweep" && kind === "path";
       return {
         value: path,
-        label: elemId ?? "",
+        label: elemId ?? (isSweepPath ? elementLabel("path") : ""),
         children: kids?.length ? kids : undefined,
         meta: {
           kind: "geometry" as const,
           icon: kindIcon(kind),
           node: syntheticPrimitive(kind, parentPath),
           className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
-          action: SECTION_PARENT_KINDS.has(kind) ? "revolve-more" : "geom-more",
+          action: SECTION_PARENT_KINDS.has(kind)
+            ? constructMoreAction(kind)
+            : isSweepPath
+              ? ("path-more" as const)
+              : ("geom-more" as const),
         },
       };
     }
@@ -743,6 +764,31 @@ const revolveMoreOptions = computed<DropdownOption[]>(() => [
     content: t("app.addSection"),
     value: "section",
     prefixIcon: () => h(LayersIcon),
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+/** Sweep: single `<s3dx:section>` + single `<s3dx:path>`. */
+const sweepMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.addSection"),
+    value: "section",
+    prefixIcon: () => h(LayersIcon),
+  },
+  {
+    content: t("app.addPath"),
+    value: "path",
+    prefixIcon: () => h(PathIcon),
   },
   {
     content: "",
@@ -1481,6 +1527,42 @@ function onRevolveMoreClick(
   emit("insertChildAtPath", { parentPath: revolve.value, kind: "section" });
 }
 
+function onSweepMoreClick(
+  sweep: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  if (typeof value === "string" && MENU_CATEGORY_VALUES.has(value)) return;
+  if (value === "delete") {
+    emit("deleteElement", { path: sweep.value });
+    return;
+  }
+  if (value !== "section" && value !== "path") return;
+  const kids = listChildOpensAtPath(props.content ?? "", sweep.value);
+  if (value === "section") {
+    if (kids.some((o) => o.local === "section")) {
+      MessagePlugin.warning(t("app.sectionAlreadyExists"));
+      return;
+    }
+    emit("insertChildAtPath", { parentPath: sweep.value, kind: "section" });
+    return;
+  }
+  if (kids.some((o) => o.local === "path")) {
+    MessagePlugin.warning(t("app.pathAlreadyExists"));
+    return;
+  }
+  emit("insertChildAtPath", { parentPath: sweep.value, kind: "path" });
+}
+
+function onPathMoreClick(
+  pathItem: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  if (item?.value === "delete") {
+    emit("deleteElement", { path: pathItem.value });
+  }
+}
+
 function onSectionMoreClick(
   section: TreeItem,
   item: { value?: string | number | object }
@@ -1857,6 +1939,29 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
           </t-button>
         </t-dropdown>
         <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'sweep-more'"
+          :options="sweepMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onSweepMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
           v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'section-more'"
           :options="sectionMoreOptions"
           :max-column-width="200"
@@ -1865,6 +1970,29 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
           trigger="click"
           placement="bottom-right"
           @click="(item) => onSectionMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'path-more'"
+          :options="geomMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onPathMoreClick(node.data as TreeItem, item)"
         >
           <t-button
             class="tree-action"

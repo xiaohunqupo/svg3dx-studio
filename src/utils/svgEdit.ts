@@ -81,9 +81,17 @@ const DEFAULT_SNIPPETS: Record<Exclude<AddChildKind, "group">, string> = {
 };
 
 /** Exactly one section under revolve (XY→XOZ default orientation). */
-export const SECTION_SNIPPET = `<s3dx:section s3dx:transform="matrix(1 0 0 0 0 1 0 -1 0 0 0 0)">
+export const REVOLVE_SECTION_SNIPPET = `<s3dx:section s3dx:transform="matrix(1 0 0 0 0 1 0 -1 0 0 0 0)">
           <path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>
         </s3dx:section>`;
+
+/** Plain section for sweep / extrude / loft (no revolve orientation). */
+export const SECTION_SNIPPET = `<s3dx:section>
+          <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
+        </s3dx:section>`;
+
+/** Trajectory path under sweep (polyline bend). */
+export const SWEEP_PATH_SNIPPET = `<s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>`;
 
 /** 2D SVG leaves allowed inside `<s3dx:section>`. */
 export const SECTION_SHAPE_SNIPPETS: Record<string, string> = {
@@ -114,8 +122,18 @@ export const SECTION_SHAPE_MENU: PathInsertMenuItem[] = [
 ];
 
 /** Resolve insert snippet for tree path inserts (section / svg / containers). */
-export function snippetForPathInsert(kind: string): string | null {
-  if (kind === "section") return SECTION_SNIPPET;
+export function snippetForPathInsert(
+  kind: string,
+  parentKind?: string | null
+): string | null {
+  if (kind === "section") {
+    return parentKind === "revolve"
+      ? REVOLVE_SECTION_SNIPPET
+      : SECTION_SNIPPET;
+  }
+  if (kind === "path" && parentKind === "sweep") {
+    return SWEEP_PATH_SNIPPET;
+  }
   if (kind in SECTION_SHAPE_SNIPPETS) return SECTION_SHAPE_SNIPPETS[kind]!;
   const fromDefault = DEFAULT_SNIPPETS[kind as Exclude<AddChildKind, "group">];
   return fromDefault ?? null;
