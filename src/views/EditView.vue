@@ -1101,6 +1101,7 @@ onBeforeUnmount(() => {
           :heading="t('app.sourceCode')"
           :model-value="draftContent"
           :format-mode="sourceFormatMode"
+          :loading="contentLoading"
           @update:model-value="onSourceContent"
           @update:format-mode="onSourceFormatModeChange"
           @cursor-path="onSourceCursorPath"

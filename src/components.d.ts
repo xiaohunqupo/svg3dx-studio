@@ -28,6 +28,7 @@ declare module 'vue' {
     SettingsMenu: typeof import('./components/SettingsMenu.vue')['default']
     ShapeSvgEditorDialog: typeof import('./components/ShapeSvgEditorDialog.vue')['default']
     SourceEditorPanel: typeof import('./components/SourceEditorPanel.vue')['default']
+    SourceSkeleton: typeof import('./components/skeletons/SourceSkeleton.vue')['default']
     StyleParamEditor: typeof import('./components/StyleParamEditor.vue')['default']
     TButton: typeof import('tdesign-vue-next')['Button']
     TCheckbox: typeof import('tdesign-vue-next')['Checkbox']

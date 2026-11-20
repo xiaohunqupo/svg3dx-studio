@@ -19,6 +19,7 @@ import { xml } from "@codemirror/lang-xml";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { MoreIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin, type DropdownOption } from "tdesign-vue-next";
+import SourceSkeleton from "@/components/skeletons/SourceSkeleton.vue";
 import { useTheme } from "@/theme";
 import { useI18n } from "@/i18n";
 import {
@@ -39,6 +40,8 @@ const props = defineProps<{
   heading?: string;
   /** Active format style (mutually exclusive). */
   formatMode?: FormatXmlMode;
+  /** Show code-line skeleton while the document is evaluating. */
+  loading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -493,7 +496,10 @@ defineExpose({
         </t-button>
       </t-dropdown>
     </div>
-    <div ref="hostEl" class="editor-host" />
+    <div class="editor-body">
+      <SourceSkeleton v-if="loading" />
+      <div ref="hostEl" class="editor-host" />
+    </div>
   </aside>
 </template>
 
@@ -506,6 +512,14 @@ defineExpose({
   overflow: hidden;
   background: var(--td-bg-color-container);
   border-right: 1px solid var(--td-component-border);
+}
+
+.editor-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-head {
