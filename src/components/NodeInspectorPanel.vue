@@ -20,6 +20,7 @@ import {
   MODEL_MODE_VALUES,
   TRANSFORM_FIELDS,
   TRANSFORM_PART_KEYS,
+  REVOLVE_SECTION_TRANSFORM_DISPLAY,
   emptyTransformParts,
   isIdentityTransformDisplay,
   looksLikeVecRgbText,
@@ -43,7 +44,8 @@ import {
   fillToHex8,
   hex8ToFill,
 } from "@/utils/fillColor";
-import { readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import { nodeKindAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import { parentTreePath } from "@/interact/sectionProxy";
 import {
   collectParamSourceGroups,
   effectiveBareParamNames,
@@ -176,6 +178,24 @@ function attrLookup(
     for (const [k, v] of Object.entries(xmlAttrs)) {
       if (k === name || k.endsWith(`:${local}`) || k === local) return v;
     }
+  }
+  return "";
+}
+
+/**
+ * Transform shown for a section: XML value, or revolve's effective XY→XOZ
+ * default when unset (so the inspector matches the section plane / eval).
+ */
+function sectionTransformDisplay(
+  content: string,
+  path: string,
+  xmlAttrs: Record<string, string> | null
+): string {
+  const raw = attrLookup(xmlAttrs, "s3dx:transform");
+  if (raw.trim()) return raw;
+  const parent = parentTreePath(path);
+  if (parent && nodeKindAtPath(content, parent)?.kind === "revolve") {
+    return transformToAttr(REVOLVE_SECTION_TRANSFORM_DISPLAY);
   }
   return "";
 }
@@ -490,7 +510,10 @@ const geometryView = computed(() => {
       ),
     });
 
-    const xformVal = attrLookup(xmlAttrs, "s3dx:transform");
+    const xformVal =
+      node.kind === "section"
+        ? sectionTransformDisplay(props.content ?? "", path, xmlAttrs)
+        : attrLookup(xmlAttrs, "s3dx:transform");
     sections.push({
       id: "transform",
       title: t("app.transform"),

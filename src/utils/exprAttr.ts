@@ -80,7 +80,10 @@ export function classifyExprDisplay(
 
 /** True when `expr` has arithmetic ops outside of `var(...)`. */
 function needsCalcWrapper(expr: string): boolean {
-  const stripped = expr.replace(/var\s*\(\s*--[A-Za-z_][\w-]*\s*\)/gi, "0");
+  const s = expr.trim();
+  // Signed numeric literal (`-1`, `+.5`) is not arithmetic — do not wrap as calc().
+  if (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)) return false;
+  const stripped = s.replace(/var\s*\(\s*--[A-Za-z_][\w-]*\s*\)/gi, "0");
   return /[+\-*/]/.test(stripped);
 }
 

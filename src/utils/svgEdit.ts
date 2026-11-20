@@ -34,8 +34,8 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
           <path d="M 0 0 L 100 0 L 100 100 L 0 100 Z"/>
         </s3dx:section>
       </s3dx:extrude>`,
-  revolve: `<s3dx:revolve solid="true" axisOrigin="0 0 0" axisDir="0 1 0" angle="360">
-        <s3dx:section>
+  revolve: `<s3dx:revolve solid="true" angle="360">
+        <s3dx:section s3dx:transform="matrix(1 0 0 0 0 1 0 -1 0 0 0 0)">
           <path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>
         </s3dx:section>
       </s3dx:revolve>`,
@@ -79,6 +79,47 @@ const DEFAULT_SNIPPETS: Record<Exclude<AddChildKind, "group">, string> = {
   ...GEOMETRY_SNIPPETS,
   ...CONTAINER_SNIPPETS,
 };
+
+/** Exactly one section under revolve (XY→XOZ default orientation). */
+export const SECTION_SNIPPET = `<s3dx:section s3dx:transform="matrix(1 0 0 0 0 1 0 -1 0 0 0 0)">
+          <path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>
+        </s3dx:section>`;
+
+/** 2D SVG leaves allowed inside `<s3dx:section>`. */
+export const SECTION_SHAPE_SNIPPETS: Record<string, string> = {
+  "svg-path": `<path d="M 40 0 L 100 0 L 100 100 L 40 60 Z"/>`,
+  "svg-circle": `<circle cx="0" cy="50" r="40"/>`,
+  "svg-rect": `<rect x="-40" y="0" width="80" height="100"/>`,
+  "svg-ellipse": `<ellipse cx="0" cy="50" rx="40" ry="50"/>`,
+  "svg-polygon": `<polygon points="40,0 100,0 100,100 40,60"/>`,
+};
+
+export type PathInsertKind =
+  | "section"
+  | keyof typeof SECTION_SHAPE_SNIPPETS
+  | Exclude<AddChildKind, "group">;
+
+export type PathInsertMenuItem = {
+  kind: PathInsertKind;
+  labelZh: string;
+  labelEn: string;
+};
+
+export const SECTION_SHAPE_MENU: PathInsertMenuItem[] = [
+  { kind: "svg-path", labelZh: "路径", labelEn: "Path" },
+  { kind: "svg-circle", labelZh: "圆", labelEn: "Circle" },
+  { kind: "svg-rect", labelZh: "矩形", labelEn: "Rect" },
+  { kind: "svg-ellipse", labelZh: "椭圆", labelEn: "Ellipse" },
+  { kind: "svg-polygon", labelZh: "多边形", labelEn: "Polygon" },
+];
+
+/** Resolve insert snippet for tree path inserts (section / svg / containers). */
+export function snippetForPathInsert(kind: string): string | null {
+  if (kind === "section") return SECTION_SNIPPET;
+  if (kind in SECTION_SHAPE_SNIPPETS) return SECTION_SHAPE_SNIPPETS[kind]!;
+  const fromDefault = DEFAULT_SNIPPETS[kind as Exclude<AddChildKind, "group">];
+  return fromDefault ?? null;
+}
 
 function ensureSvgShell(content: string): string {
   const trimmed = content.trim();

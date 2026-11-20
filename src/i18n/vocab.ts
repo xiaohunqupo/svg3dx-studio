@@ -122,8 +122,6 @@ export const ATTR_LABELS = {
   startAngle: { zh: "起始角", en: "startAngle" },
   origin: { zh: "原点", en: "origin" },
   dir: { zh: "方向", en: "dir" },
-  axisOrigin: { zh: "轴原点", en: "axisOrigin" },
-  axisDir: { zh: "轴方向", en: "axisDir" },
   solid: { zh: "实体", en: "solid" },
   blend: { zh: "混合", en: "blend" },
   orient: { zh: "姿态", en: "orient" },

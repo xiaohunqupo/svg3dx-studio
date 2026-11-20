@@ -73,14 +73,28 @@ import {
   LOOP_MENU,
   MODELING_MENU,
   PRIMITIVE_MENU,
+  SECTION_SHAPE_MENU,
   SOLID_MENU,
   type AddChildMenuItem,
+  type PathInsertMenuItem,
 } from "@/utils/svgEdit";
 import {
   listChildOpensAtPath,
   readAttrsAtPath,
   SYNTHETIC_TREE_PATH_PREFIX,
 } from "@/utils/nodeXmlEdit";
+
+/** Constructed solids that expose a child `<s3dx:section>` in the editor tree. */
+const SECTION_PARENT_KINDS = new Set(["revolve"]);
+const SECTION_SHAPE_KIND_SET = new Set(SECTION_SHAPE_MENU.map((p) => p.kind));
+const SVG_SHAPE_LOCALS = new Set([
+  "path",
+  "circle",
+  "ellipse",
+  "polygon",
+  "polyline",
+  "rect",
+]);
 
 const IDENTITY_M = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
@@ -138,6 +152,8 @@ const emit = defineEmits<{
   addStyleCategory: [];
   addUse: [payload: { modelId?: string; path: string; href?: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
+  /** Insert a child by tree path (revolve→section, section→2D shapes). */
+  insertChildAtPath: [payload: { parentPath: string; kind: string }];
   deleteNode: [payload: { path: string; groupId: string }];
   deleteModel: [payload: { path: string; modelId: string }];
   deleteUse: [payload: { path: string }];
@@ -182,6 +198,10 @@ type TreeItem = {
       | "use-more"
       /** Geometry leaf / non-group: more menu with delete. */
       | "geom-more"
+      /** Revolve: add section (only) / delete. */
+      | "revolve-more"
+      /** Section under revolve: add 2D shapes / delete. */
+      | "section-more"
       /** Material row: more menu with delete. */
       | "material-more"
       /** Style category row: more menu with delete. */
@@ -282,15 +302,39 @@ function childrenFromPathMarkup(
       const kind = local as GeometryKind;
       const elemId = attrOf(attrs, "id") ?? undefined;
       const classAttr = attrOf(attrs, "class");
+      const kids =
+        SECTION_PARENT_KINDS.has(kind) && !open.selfClosing
+          ? childrenFromPathMarkup(content, path, classById)
+          : undefined;
       return {
         value: path,
         label: elemId ?? "",
+        children: kids?.length ? kids : undefined,
         meta: {
           kind: "geometry" as const,
           icon: kindIcon(kind),
           node: syntheticPrimitive(kind, parentPath),
           className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
-          action: "geom-more" as const,
+          action: SECTION_PARENT_KINDS.has(kind) ? "revolve-more" : "geom-more",
+        },
+      };
+    }
+    if (local === "section") {
+      const elemId = attrOf(attrs, "id") ?? undefined;
+      const classAttr = attrOf(attrs, "class");
+      const kids = open.selfClosing
+        ? undefined
+        : childrenFromPathMarkup(content, path, classById);
+      return {
+        value: path,
+        label: elemId ?? elementLabel("section"),
+        children: kids?.length ? kids : undefined,
+        meta: {
+          kind: "geometry" as const,
+          icon: LayersIcon,
+          node: syntheticPrimitive("section", parentPath),
+          className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
+          action: "section-more" as const,
         },
       };
     }
@@ -299,14 +343,19 @@ function childrenFromPathMarkup(
     const children = open.selfClosing
       ? undefined
       : childrenFromPathMarkup(content, path, classById);
+    const svgLabel = SVG_SHAPE_LOCALS.has(local)
+      ? elemId || local
+      : elemId ?? "";
     return {
       value: path,
-      label: elemId ?? "",
+      label: svgLabel,
       children: children?.length ? children : undefined,
       meta: {
         kind: "geometry" as const,
-        icon: kindIcon(local),
-        node: null,
+        icon: SVG_SHAPE_LOCALS.has(local) ? PathIcon : kindIcon(local),
+        node: SVG_SHAPE_LOCALS.has(local)
+          ? syntheticPrimitive(`svg-${local}`, parentPath)
+          : null,
         className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
         action: "geom-more" as const,
       },
@@ -467,6 +516,8 @@ function kindIcon(kind: string): Component {
       return ExtrudeIcon;
     case "revolve":
       return RevolveIcon;
+    case "section":
+      return LayersIcon;
     case "loft":
       return LoftIcon;
     case "sweep":
@@ -671,6 +722,55 @@ function useMoreOptions(item: TreeItem): DropdownOption[] {
 
 /** Primitive / bool / other geometry “more” menu: delete. */
 const geomMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+function pathInsertMenuOptions(items: PathInsertMenuItem[]): DropdownOption[] {
+  return items.map((p) => ({
+    content: locale.value === "zh" ? p.labelZh : p.labelEn,
+    value: p.kind,
+    prefixIcon: () => h(kindIcon(String(p.kind).replace(/^svg-/, ""))),
+  }));
+}
+
+/** Revolve: only a single `<s3dx:section>` child. */
+const revolveMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.addSection"),
+    value: "section",
+    prefixIcon: () => h(LayersIcon),
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+/** Section: 2D shapes only (bool / logic / loop not supported yet). */
+const sectionMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.addSectionShape"),
+    value: "__add-section-shape",
+    prefixIcon: () => h(PathIcon),
+    children: pathInsertMenuOptions(SECTION_SHAPE_MENU),
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
   {
     content: t("app.deleteNode"),
     value: "delete",
@@ -1361,6 +1461,44 @@ function onGeomMoreClick(
   }
 }
 
+function onRevolveMoreClick(
+  revolve: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  if (typeof value === "string" && MENU_CATEGORY_VALUES.has(value)) return;
+  if (value === "delete") {
+    emit("deleteElement", { path: revolve.value });
+    return;
+  }
+  if (value !== "section") return;
+  const hasSection = listChildOpensAtPath(
+    props.content ?? "",
+    revolve.value
+  ).some((o) => o.local === "section");
+  if (hasSection) {
+    MessagePlugin.warning(t("app.sectionAlreadyExists"));
+    return;
+  }
+  emit("insertChildAtPath", { parentPath: revolve.value, kind: "section" });
+}
+
+function onSectionMoreClick(
+  section: TreeItem,
+  item: { value?: string | number | object }
+): void {
+  const value = item?.value;
+  if (typeof value === "string" && MENU_CATEGORY_VALUES.has(value)) return;
+  if (value === "delete") {
+    emit("deleteElement", { path: section.value });
+    return;
+  }
+  if (typeof value !== "string") return;
+  if (SECTION_SHAPE_KIND_SET.has(value as never)) {
+    emit("insertChildAtPath", { parentPath: section.value, kind: value });
+  }
+}
+
 function onMaterialMoreClick(
   material: TreeItem,
   item: { value?: string | number | object }
@@ -1396,6 +1534,7 @@ const MENU_CATEGORY_VALUES = new Set([
   "__add-curve",
   "__add-solid",
   "__add-modeling",
+  "__add-section-shape",
   "__add-bool",
   "__add-logic",
   "__add-loop",
@@ -1434,7 +1573,7 @@ function onGroupMoreClick(
   });
 }
 
-function syntheticPrimitive(kind: GeometryKind, parentPath: string): GeometryInstruction {
+function syntheticPrimitive(kind: string, parentPath: string): GeometryInstruction {
   return {
     type: "primitive",
     node_id: `${parentPath}/${kind}:new`,
@@ -1683,6 +1822,53 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
           trigger="click"
           placement="bottom-right"
           @click="(item) => onGroupMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'revolve-more'"
+          :options="revolveMoreOptions"
+          :max-column-width="160"
+          :min-column-width="120"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onRevolveMoreClick(node.data as TreeItem, item)"
+        >
+          <t-button
+            class="tree-action"
+            theme="default"
+            shape="square"
+            variant="text"
+            size="small"
+            :title="t('app.moreActions')"
+            :aria-label="t('app.moreActions')"
+            @mousedown.stop
+            @click.stop
+          >
+            <template #icon><MoreIcon /></template>
+          </t-button>
+        </t-dropdown>
+        <t-dropdown
+          v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'section-more'"
+          :options="sectionMoreOptions"
+          :max-column-width="200"
+          :min-column-width="120"
+          :max-height="420"
+          trigger="click"
+          placement="bottom-right"
+          @click="(item) => onSectionMoreClick(node.data as TreeItem, item)"
         >
           <t-button
             class="tree-action"

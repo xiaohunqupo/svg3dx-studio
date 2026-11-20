@@ -32,6 +32,13 @@ export const TRANSFORM_FIELDS: AttrField[] = [
   { name: "s3dx:transform", placeholder: "1 0 0 0 1 0 0 0 1 0 0 0" },
 ];
 
+/**
+ * Effective default `s3dx:transform` for a section under `revolve`
+ * (XY → body XOZ). Keep in sync with viewer `REVOLVE_DEFAULT_SECTION_XF`.
+ */
+export const REVOLVE_SECTION_TRANSFORM_DISPLAY =
+  "1 0 0 0 0 1 0 -1 0 0 0 0";
+
 const MATRIX_WRAP_RE = /^matrix\s*\(\s*([\s\S]*?)\s*\)\s*$/i;
 
 /** Inspector display: bare 12 numbers (strip `matrix(...)`). */
@@ -486,13 +493,13 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "length", placeholder: "100" },
   ],
   revolve: [
+    { name: "angle", placeholder: "360" },
+    { name: "solid", placeholder: "true", boolean: true },
+  ],
+  section: [
     { name: "origin", placeholder: "0 0 0" },
     { name: "normal", placeholder: "0 0 1" },
     { name: "xDir", placeholder: "1 0 0" },
-    { name: "axisOrigin", placeholder: "0 0 0" },
-    { name: "axisDir", placeholder: "0 1 0" },
-    { name: "angle", placeholder: "360" },
-    { name: "solid", placeholder: "true", boolean: true },
   ],
   loft: [
     { name: "solid", placeholder: "true", boolean: true },

@@ -22,6 +22,14 @@ import {
   withModelCrumb,
   type DocStep,
 } from "./documentChain";
+import {
+  createSectionProxy,
+  isSectionPath,
+  listSectionChildPaths,
+  parentTreePath,
+  sectionAncestorPath,
+  SectionProxy,
+} from "./sectionProxy";
 
 // Match viewer: Z-up before any studio Object3D / raycast helpers.
 applyWorldUp();
@@ -129,6 +137,9 @@ function isShown(obj: THREE.Object3D): boolean {
 
 /** Loop copies drawn faded are marked so picks pass through them. */
 function isGhost(obj: THREE.Object3D): boolean {
+  // Section plane / profile overlays live under the construct solid. That solid
+  // is often drill-ghosted — still allow picking the overlays themselves.
+  if (obj.userData?.sectionProxy) return false;
   let cur: THREE.Object3D | null = obj;
   while (cur) {
     if (cur.userData?.drillGhost) return true;
@@ -205,6 +216,9 @@ export class InteractViewport {
   private lastClickAt = 0;
   private lastClickX = 0;
   private lastClickY = 0;
+  private lastRightClickAt = 0;
+  private lastRightClickX = 0;
+  private lastRightClickY = 0;
   private highlight: SelectionHighlight;
   private highlightPath: string | null = null;
   private raycaster = new THREE.Raycaster();
@@ -212,6 +226,7 @@ export class InteractViewport {
   private pointerDown: { x: number; y: number; button: number } | null = null;
   private onPointerDown: (event: PointerEvent) => void;
   private onPointerUp: (event: PointerEvent) => void;
+  private onContextMenu: (event: Event) => void;
   private onKeyDown: (event: KeyboardEvent) => void;
 
   private transform: TransformControls;
@@ -222,6 +237,8 @@ export class InteractViewport {
   /** True while TransformControls owns the current left-button gesture. */
   private gizmoGesture = false;
   private transformMode: TransformMode = "translate";
+  /** Light-green XOY plane proxies for visible `<s3dx:section>` nodes. */
+  private sectionProxies = new Map<string, SectionProxy>();
 
   constructor(
     viewer: EmbedViewer,
@@ -284,7 +301,7 @@ export class InteractViewport {
     });
 
     this.onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 && event.button !== 2) return;
       this.pointerDown = {
         x: event.clientX,
         y: event.clientY,
@@ -294,11 +311,32 @@ export class InteractViewport {
     this.onPointerUp = (event: PointerEvent) => {
       const down = this.pointerDown;
       this.pointerDown = null;
-      if (!down || down.button !== 0 || event.button !== 0) return;
+      if (!down || down.button !== event.button) return;
       if (this.gizmoGesture || this.transform.dragging) return;
       const dx = event.clientX - down.x;
       const dy = event.clientY - down.y;
       if (dx * dx + dy * dy > PICK_DRAG_PX * PICK_DRAG_PX) return;
+
+      // Right double-click → go up one drill / selection level.
+      if (event.button === 2) {
+        const now = performance.now();
+        const ddx = event.clientX - this.lastRightClickX;
+        const ddy = event.clientY - this.lastRightClickY;
+        const isDouble =
+          this.lastRightClickAt > 0 &&
+          now - this.lastRightClickAt <= DBLCLICK_MS &&
+          ddx * ddx + ddy * ddy <= DBLCLICK_PX * DBLCLICK_PX;
+        this.lastRightClickAt = now;
+        this.lastRightClickX = event.clientX;
+        this.lastRightClickY = event.clientY;
+        if (isDouble) {
+          this.lastRightClickAt = 0;
+          this.exitOneLevel();
+        }
+        return;
+      }
+
+      if (event.button !== 0) return;
       if (
         this.viewer.viewHelperVisible &&
         this.viewer.viewHelper.handleClick(event)
@@ -323,24 +361,35 @@ export class InteractViewport {
         this.handlePick(event);
       }
     };
+    this.onContextMenu = (event: Event) => {
+      event.preventDefault();
+    };
     this.onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && this.scopePath) {
-        const target = event.target as HTMLElement | null;
-        if (
-          target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.tagName === "SELECT" ||
-            target.isContentEditable)
-        ) {
+      if (event.key === "Escape") {
+        const hasDrill =
+          !!this.scopePath ||
+          !!this.selection ||
+          !!this.highlightPath ||
+          this.locationChain.length > 0;
+        if (hasDrill) {
+          const target = event.target as HTMLElement | null;
+          if (
+            target &&
+            (target.tagName === "INPUT" ||
+              target.tagName === "TEXTAREA" ||
+              target.tagName === "SELECT" ||
+              target.isContentEditable)
+          ) {
+            return;
+          }
+          const dialog = document.querySelector<HTMLElement>(".t-dialog");
+          if (dialog && dialog.getClientRects().length > 0) return;
+          if (this.transform.dragging) return;
+          event.preventDefault();
+          // Esc always leaves every drill level and clears the pick.
+          this.exitDrill({ select: null });
           return;
         }
-        const dialog = document.querySelector<HTMLElement>(".t-dialog");
-        if (dialog && dialog.getClientRects().length > 0) return;
-        if (this.transform.dragging) return;
-        event.preventDefault();
-        this.exitDrill();
-        return;
       }
       if (!this.transform.object) return;
       const target = event.target as HTMLElement | null;
@@ -369,6 +418,7 @@ export class InteractViewport {
     const el = this.viewer.renderer.domElement;
     el.addEventListener("pointerdown", this.onPointerDown);
     el.addEventListener("pointerup", this.onPointerUp);
+    el.addEventListener("contextmenu", this.onContextMenu);
     window.addEventListener("keydown", this.onKeyDown);
   }
 
@@ -383,6 +433,8 @@ export class InteractViewport {
     svgText: string,
     options: { fitCamera?: boolean } = {}
   ): Promise<EvaluationResult> {
+    this.transform.detach();
+    this.clearSectionProxies();
     this.restoreGhosts();
     this.setDocument(svgText);
     this.viewer.setHelperFrame(null);
@@ -396,6 +448,8 @@ export class InteractViewport {
     svgText: string,
     options: { fitCamera?: boolean } = {}
   ): Promise<EvaluationResult> {
+    this.transform.detach();
+    this.clearSectionProxies();
     this.restoreGhosts();
     this.setDocument(svgText);
     this.viewer.setHelperFrame(null);
@@ -406,6 +460,8 @@ export class InteractViewport {
   }
 
   async setParams(params: ParamMap): Promise<EvaluationResult | null> {
+    this.transform.detach();
+    this.clearSectionProxies();
     this.restoreGhosts();
     this.viewer.setHelperFrame(null);
     const result = await this.viewer.setParams(params);
@@ -422,6 +478,7 @@ export class InteractViewport {
     model: string | undefined,
     options: { fitCamera?: boolean } = {}
   ): Promise<EvaluationResult | null> {
+    this.clearSectionProxies();
     this.restoreGhosts();
     this.scopePath = null;
     this.entryPath = null;
@@ -532,6 +589,95 @@ export class InteractViewport {
     this.enterLevel(path, this.locationChain);
   }
 
+  /**
+   * Clear the current entity pick but keep the entered level.
+   * Soft selection without a formal drill stays on the parent level.
+   */
+  private clearCurrentSelection(): void {
+    if (!this.selection && !this.highlightPath) {
+      this.applyHighlight();
+      this.syncTransformTarget();
+      this.emitDrill();
+      this.onPick?.(null);
+      return;
+    }
+
+    if (this.scopePath) {
+      this.selection = null;
+      this.highlightPath = null;
+      this.echoSelection = null;
+      this.applyVisibility();
+      this.applyHighlight();
+      this.syncTransformTarget();
+      this.emitDrill();
+      this.onPick?.(null);
+      return;
+    }
+
+    // Soft pick (no formal enter): remain at the parent level instead of dumping out.
+    const cur = this.selection ?? this.highlightPath!;
+    const parent = parentTreePath(cur);
+    const chain = this.locationChain.length
+      ? this.locationChain
+      : ancestorChain(cur);
+    if (parent) {
+      if (!this.entryPath) this.entryPath = cur;
+      this.enterLevel(parent, chain);
+      return;
+    }
+
+    this.selection = null;
+    this.highlightPath = null;
+    this.echoSelection = null;
+    this.locationChain = [];
+    this.applyVisibility();
+    this.applyHighlight();
+    this.syncTransformTarget();
+    this.emitDrill();
+    this.onPick?.(null);
+  }
+
+  /**
+   * Go up one level (right double-click):
+   * - child selected under a formal drill → stay at the entered level, clear pick
+   * - otherwise focus the parent crumb (top crumb leaves isolation)
+   */
+  exitOneLevel(): void {
+    if (this.transform.dragging) return;
+    const crumbs = this.visibleCrumbs().filter((c) => !c.pending && c.path);
+    if (
+      this.scopePath &&
+      this.selection &&
+      this.selection !== this.scopePath
+    ) {
+      this.enterLevel(this.scopePath, this.locationChain);
+      return;
+    }
+    const current =
+      this.scopePath ?? this.selection ?? this.highlightPath ?? null;
+    if (!current) return;
+    const idx = crumbs.findIndex((c) => c.path === current);
+    if (idx > 0) {
+      this.focusDrill(crumbs[idx - 1]!.path);
+      return;
+    }
+    if (this.scopePath) {
+      // Top crumb while drilled, or current missing from crumbs — leave isolation.
+      this.exitDrill({ select: crumbs[0]?.path ?? this.entryPath ?? null });
+      return;
+    }
+    // Soft selection at / near the top — clear pick.
+    this.highlightPath = null;
+    this.selection = null;
+    this.echoSelection = null;
+    this.locationChain = [];
+    this.applyVisibility();
+    this.applyHighlight();
+    this.syncTransformTarget();
+    this.emitDrill();
+    this.onPick?.(null);
+  }
+
   getHighlight(): string | null {
     return this.highlightPath;
   }
@@ -554,7 +700,9 @@ export class InteractViewport {
     const el = this.viewer.renderer.domElement;
     el.removeEventListener("pointerdown", this.onPointerDown);
     el.removeEventListener("pointerup", this.onPointerUp);
+    el.removeEventListener("contextmenu", this.onContextMenu);
     window.removeEventListener("keydown", this.onKeyDown);
+    this.clearSectionProxies();
     this.transform.detach();
     this.transform.dispose();
     this.overlayScene.remove(this.transformHelper);
@@ -566,13 +714,132 @@ export class InteractViewport {
     this.viewer.dispose();
   }
 
+  private clearSectionProxies(): void {
+    for (const proxy of this.sectionProxies.values()) {
+      if (this.transform.object === proxy.root) this.transform.detach();
+      proxy.dispose();
+    }
+    this.sectionProxies.clear();
+  }
+
+  private resolveSectionParent(parentPath: string): THREE.Object3D | null {
+    let parent = this.objectFor(parentPath);
+    if (!parent) {
+      parent = findTransformTarget(this.viewer.viewer.root, parentPath);
+    }
+    return parent;
+  }
+
+  private ensureSectionProxy(path: string): THREE.Object3D | null {
+    if (!this.document || !isSectionPath(this.document, path)) return null;
+    const parentPath = parentTreePath(path);
+    if (!parentPath) return null;
+    const parent = this.resolveSectionParent(parentPath);
+    if (!parent) return null;
+    let proxy = this.sectionProxies.get(path);
+    if (proxy && proxy.root.parent === parent) {
+      proxy.syncFromDocument(this.document, parent);
+    } else {
+      proxy?.dispose();
+      proxy = createSectionProxy(this.document, path, parent);
+      this.sectionProxies.set(path, proxy);
+    }
+    return proxy.root;
+  }
+
+  /**
+   * Sections to show as pickable XOY planes — only when:
+   * - formally entered a revolve (next level = its sections), or
+   * - a section node is selected / entered, or
+   * - working under a section (its 2D children)
+   * Soft-selecting a revolve alone does not show sections.
+   */
+  private sectionPathsToShow(): string[] {
+    if (!this.document) return [];
+    const out = new Set<string>();
+
+    // Double-click into revolve → show child sections so they can be picked.
+    if (
+      this.scopePath &&
+      nodeKindAtPath(this.document, this.scopePath)?.kind === "revolve"
+    ) {
+      for (const p of listSectionChildPaths(this.document, this.scopePath)) {
+        out.add(p);
+      }
+    }
+
+    // Entered the section itself.
+    if (this.scopePath && isSectionPath(this.document, this.scopePath)) {
+      out.add(this.scopePath);
+    }
+
+    const sel = this.highlightPath ?? this.selection;
+    if (sel) {
+      if (isSectionPath(this.document, sel)) {
+        out.add(sel);
+      } else {
+        // 2D under section, or deeper under a section ancestor.
+        let p: string | null = sel;
+        while (p) {
+          if (isSectionPath(this.document, p)) {
+            out.add(p);
+            break;
+          }
+          p = parentTreePath(p);
+        }
+      }
+    }
+    return [...out];
+  }
+
+  /** Create / refresh / prune section planes for the current drill or selection. */
+  private syncSectionProxies(): void {
+    if (!this.document) {
+      this.clearSectionProxies();
+      return;
+    }
+    const want = new Set(this.sectionPathsToShow());
+    for (const [path, proxy] of [...this.sectionProxies]) {
+      if (!want.has(path)) {
+        if (this.transform.object === proxy.root) this.transform.detach();
+        proxy.dispose();
+        this.sectionProxies.delete(path);
+      }
+    }
+    for (const path of want) this.ensureSectionProxy(path);
+  }
+
   private syncTransformTarget(): void {
     const path = this.highlightPath;
+    this.syncSectionProxies();
     if (!isTransformablePath(path)) {
       this.transform.detach();
       this.transform.enabled = false;
       return;
     }
+
+    // Section has no evaluated mesh — attach gizmo to its XOY plane proxy.
+    if (isSectionPath(this.document, path)) {
+      const proxy = this.sectionProxies.get(path!)?.root ?? this.ensureSectionProxy(path!);
+      if (!proxy) {
+        this.transform.detach();
+        this.transform.enabled = false;
+        return;
+      }
+      // Local space so gizmo axes match inspector xdir/ydir/zdir (section frame).
+      this.transform.setSpace("local");
+      this.transform.enabled = true;
+      this.transform.attach(proxy);
+      return;
+    }
+
+    // Section 2D children are attr-driven overlays — no Object3D transform gizmo.
+    if (sectionAncestorPath(this.document, path)) {
+      this.transform.detach();
+      this.transform.enabled = false;
+      return;
+    }
+
     let target = this.objectFor(path!);
     if (
       !target &&
@@ -585,6 +852,7 @@ export class InteractViewport {
       this.transform.enabled = false;
       return;
     }
+    this.transform.setSpace("world");
     this.transform.enabled = true;
     this.transform.attach(target);
   }
@@ -593,6 +861,14 @@ export class InteractViewport {
     const path = this.highlightPath;
     const obj = this.transform.object;
     if (!path || !obj || !this.onTransformCommit) return;
+    const section = this.sectionProxies.get(path);
+    if (section && obj === section.root) {
+      this.onTransformCommit({
+        path,
+        transform: section.commitTransformAttr(),
+      });
+      return;
+    }
     obj.updateMatrix();
     const m = matrix4ToMat4x3(obj.matrix);
     this.onTransformCommit({
@@ -604,16 +880,17 @@ export class InteractViewport {
   private handlePick(event: PointerEvent): void {
     const hit = this.pickHit(event);
     if (!hit) {
-      this.highlightPath = null;
-      this.selection = null;
-      this.echoSelection = null;
-      if (!this.scopePath) this.locationChain = [];
-      this.applyVisibility();
-      this.applyHighlight();
-      this.syncTransformTarget();
-      this.emitDrill();
-      this.onPick?.(null);
+      // Empty click: deselect only — never unwind the drill stack (Esc / right-dbl).
+      this.clearCurrentSelection();
       return;
+    }
+    // Section proxy is not an evaluated mesh — pick its tagged path directly.
+    if (hit.userData?.sectionProxy) {
+      const path = pickPathFromObject(hit);
+      if (path) {
+        this.selectLevel(path, ancestorChain(path));
+        return;
+      }
     }
     const chain = this.chainFor(hit);
     const node = this.stepUnder(chain);
@@ -632,6 +909,13 @@ export class InteractViewport {
   private handleDrill(event: PointerEvent): void {
     const hit = this.pickHit(event);
     if (!hit) return;
+    if (hit.userData?.sectionProxy) {
+      const path = pickPathFromObject(hit);
+      if (!path || path === this.scopePath) return;
+      if (!this.entryPath) this.entryPath = path;
+      this.enterLevel(path, ancestorChain(path));
+      return;
+    }
     const chain = this.chainFor(hit);
     const node = this.stepUnder(chain);
     if (!node || node.path === this.scopePath) return;
@@ -652,11 +936,14 @@ export class InteractViewport {
       this.viewer.viewer.root.children,
       true
     );
+    let fallback: THREE.Object3D | null = null;
     for (const hit of hits) {
       if (!isShown(hit.object) || isGhost(hit.object)) continue;
-      return hit.object;
+      // Prefer section plane / profile overlays over the parent solid.
+      if (hit.object.userData?.sectionProxy) return hit.object;
+      if (!fallback) fallback = hit.object;
     }
-    return null;
+    return fallback;
   }
 
   private showAll(): void {
@@ -823,18 +1110,27 @@ export class InteractViewport {
     return true;
   }
 
-  private isAncestorChain(chain: DocStep[], scope: string): boolean {
-    const scopeIdx = this.locationChain.findIndex((step) => step.path === scope);
-    if (scopeIdx < 0 || chain.length === 0 || chain.length > scopeIdx) return false;
-    for (let i = 0; i < chain.length; i++) {
-      if (chain[i]!.path !== this.locationChain[i]?.path) return false;
-    }
-    return true;
+  /**
+   * Formal drill scope, or soft isolation from a nested **defs** selection
+   * (e.g. section / 2D under revolve). Never soft-isolate `model:id.N` uses —
+   * those paths are not prefixes of child defs paths and would hide everything.
+   */
+  private isolationScope(): string | null {
+    if (this.scopePath) return this.scopePath;
+    const sel = this.highlightPath ?? this.selection;
+    if (!sel?.startsWith("defs:")) return null;
+    // `defs:groupId.child…` only — bare `defs:groupId` stays unisolated.
+    const rest = sel.slice("defs:".length);
+    if (!rest.includes(".")) return null;
+    return sel;
   }
 
   private applyVisibility(): void {
     this.restoreGhosts();
     this.showAll();
+    // Rebuild section planes before the visibility pass so they can be picked
+    // while drilled into / soft-selecting a revolve.
+    this.syncSectionProxies();
     if (
       this.scopePath &&
       this.document &&
@@ -843,27 +1139,44 @@ export class InteractViewport {
       this.scopePath = null;
       this.entryPath = null;
     }
-    const scope = this.scopePath;
+    const scope = this.isolationScope();
     if (!scope) {
       this.viewer.setHelperFrame(null);
     } else {
       const root = this.viewer.viewer.root;
       root.traverse((obj) => {
         if (obj === root) return;
+        // Section XOY proxy: keep under the current revolve / section branch.
+        if (obj.userData?.sectionProxy) {
+          const sp = pickPathFromObject(obj);
+          const keep =
+            !!sp &&
+            (sp === scope ||
+              sp.startsWith(`${scope}.`) ||
+              scope.startsWith(`${sp}.`) ||
+              parentTreePath(sp) === scope ||
+              parentTreePath(scope) === sp);
+          obj.visible = keep;
+          return;
+        }
         const chain = this.chainFor(obj);
-        if (!chain.length) return;
-        if (!this.inCurrentView(chain)) {
+        if (!chain.length) {
           obj.visible = false;
           return;
         }
-        const inside = chain.some((step) => step.path === scope);
-        if (!inside && !this.isAncestorChain(chain, scope)) {
+        const role = this.drillRole(chain, scope);
+        if (role.kind === "hidden") {
           obj.visible = false;
+          return;
+        }
+        obj.visible = true;
+        if (role.kind === "ghost") {
+          this.ghostOne(obj, this.ancestorGhostOpacity(role.depth));
         }
       });
       // Other loop iterations stay on screen (faded) once that loop is entered,
       // including after a child of the loop body is edited and the view refreshes.
-      this.ghostIterations(scope);
+      if (this.scopePath) this.ghostIterations(this.scopePath);
       this.viewer.setHelperFrame(this.frameFor(scope));
     }
     this.applyDefView();
@@ -924,10 +1237,86 @@ export class InteractViewport {
     });
   }
 
-  private ghostOne(obj: THREE.Object3D): void {
+  /**
+   * Opacity for an ancestor ghost by distance above the entered level.
+   * depth 1 = entered node / parent of current children; higher = farther up.
+   */
+  private ancestorGhostOpacity(depth: number): number {
+    const d = Math.max(1, depth);
+    return Math.max(0.1, 0.36 * Math.pow(0.62, d - 1));
+  }
+
+  /**
+   * Classify a scene object while drilled into `scope`:
+   * - solid: current-level content (or everything under a model use)
+   * - ghost: the entered node itself or a proper ancestor that has real mesh/line
+   * - hidden: everything else
+   * Shapeless groups never produce a mesh here — no invented outline.
+   */
+  private drillRole(
+    chain: DocStep[],
+    scope: string
+  ): { kind: "solid" } | { kind: "ghost"; depth: number } | { kind: "hidden" } {
+    if (!chain.length || !this.inCurrentView(chain)) return { kind: "hidden" };
+    const last = chain[chain.length - 1]?.path;
+    if (!last) return { kind: "hidden" };
+
+    const scopeIdx = chain.findIndex((step) => step.path === scope);
+    if (scopeIdx >= 0) {
+      // Object lies on / under the entered node in the document chain.
+      if (scopeIdx === chain.length - 1) {
+        // Soft tree selection of that same node stays solid; formal drill ghosts it.
+        if (
+          !this.scopePath &&
+          (this.highlightPath === scope || this.selection === scope)
+        ) {
+          return { kind: "solid" };
+        }
+        return { kind: "ghost", depth: 1 };
+      }
+      // Model `<s3dx:use>`: child geometry is tagged with defs paths, not
+      // `model:id.N.*` — keep the whole referenced body solid.
+      if (scope.startsWith("model:") && scope.includes(".")) {
+        return { kind: "solid" };
+      }
+      // defs drill: only direct children of scope are the current level.
+      if (parentTreePath(last) === scope) return { kind: "solid" };
+      return { kind: "hidden" };
+    }
+
+    // Current-level child by path prefix (scope not present on mesh chains,
+    // e.g. section / 2D under revolve).
+    if (parentTreePath(last) === scope) return { kind: "solid" };
+
+    // Deeper than current level under a defs path scope.
+    if (last.startsWith(`${scope}.`)) return { kind: "hidden" };
+
+    // Entered node’s own drawable when chains use matching defs paths.
+    if (last === scope) {
+      if (
+        !this.scopePath &&
+        (this.highlightPath === scope || this.selection === scope)
+      ) {
+        return { kind: "solid" };
+      }
+      return { kind: "ghost", depth: 1 };
+    }
+
+    // Proper ancestor of scope (revolve while inside section / 2D shape).
+    if (scope.startsWith(`${last}.`)) {
+      const depth = scope.slice(last.length).split(".").filter(Boolean).length;
+      return { kind: "ghost", depth: Math.max(1, depth) };
+    }
+
+    return { kind: "hidden" };
+  }
+
+  private ghostOne(obj: THREE.Object3D, opacity = 0.16): void {
     const drawable = obj as THREE.Mesh & THREE.Line;
+    // Groups / empties have no drawable — do not invent a silhouette.
     if (!drawable.isMesh && !drawable.isLine) return;
     if (obj.userData.drillGhost) return;
+    if (obj.userData.sectionProxy) return;
     const source = drawable.material;
     const list = Array.isArray(source) ? source : [source];
     const clones = list.map((mat) => {
@@ -937,8 +1326,12 @@ export class InteractViewport {
         transparent?: boolean;
         depthWrite?: boolean;
       };
+      const base =
+        typeof faded.opacity === "number" && Number.isFinite(faded.opacity)
+          ? faded.opacity
+          : 1;
       faded.transparent = true;
-      faded.opacity = 0.16;
+      faded.opacity = Math.min(base, opacity);
       faded.depthWrite = false;
       faded.needsUpdate = true;
       return clone;
@@ -1010,8 +1403,20 @@ export class InteractViewport {
       this.highlight.clear();
       return;
     }
+    // Section / its 2D children: overlay plane + profile wires (no eval mesh).
+    const sectionPath = sectionAncestorPath(this.document, path);
+    if (sectionPath) {
+      this.ensureSectionProxy(sectionPath);
+      const objects =
+        this.sectionProxies.get(sectionPath)?.highlightObjects(path) ?? [];
+      if (objects.length) {
+        this.highlight.setObjects(objects, path);
+        return;
+      }
+    }
     const objects: THREE.Object3D[] = [];
     this.viewer.viewer.root.traverse((obj) => {
+      if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
       if (!this.includeInHighlight(chain, path)) return;
       const mesh = obj as THREE.Mesh;

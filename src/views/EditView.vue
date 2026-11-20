@@ -28,6 +28,7 @@ import {
   insertUseIntoModel,
   removeGroupById,
   removeModelById,
+  snippetForPathInsert,
 } from "@/utils/svgEdit";
 import { optimizeSvg3dxContent } from "@/utils/optimizeContent";
 import {
@@ -46,6 +47,7 @@ import {
 } from "@/utils/formatXml";
 import {
   applyAttrsAtPath,
+  insertXmlAtPath,
   normalizeXmlNewlines,
   removeElementAtPath,
 } from "@/utils/nodeXmlEdit";
@@ -548,6 +550,29 @@ async function onAddChild(payload: {
   MessagePlugin.success(`${t("app.addedChild")} ${name}`);
 }
 
+async function onInsertChildAtPath(payload: {
+  parentPath: string;
+  kind: string;
+}): Promise<void> {
+  if (!file.value) return;
+  const snippet = snippetForPathInsert(payload.kind);
+  if (!snippet) return;
+  const content = insertXmlAtPath(
+    draftContent.value,
+    payload.parentPath,
+    `      ${snippet}`
+  );
+  if (!content) {
+    MessagePlugin.warning(t("app.fileMissing"));
+    return;
+  }
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(payload.parentPath);
+  MessagePlugin.success(`${t("app.addedChild")} ${payload.kind}`);
+}
+
 function treeParentPath(path: string): string {
   if (path.includes(".")) return path.replace(/\.[^.]+$/, "");
   if (path.startsWith("defs:")) return "defs";
@@ -695,9 +720,9 @@ function onDrillCrumbs(crumbs: DrillCrumb[]): void {
 
 function onViewportPick(path: string | null): void {
   if (!path) {
+    // Viewport already cleared the entity pick and kept the drill level.
     selected.value = null;
     treePanel.value?.selectPath(null);
-    interactHost.value?.setHighlight(null);
     return;
   }
   treePanel.value?.selectPath(path);
@@ -995,6 +1020,7 @@ onBeforeUnmount(() => {
         @add-style-category="onAddStyleCategory"
         @add-use="onAddUse"
         @add-child="onAddChild"
+        @insert-child-at-path="onInsertChildAtPath"
         @delete-node="onDeleteNode"
         @delete-model="onDeleteModel"
         @delete-use="onDeleteUse"

@@ -718,6 +718,47 @@ export function removeElementAtPath(
   return content.slice(0, start) + content.slice(end);
 }
 
+/**
+ * Insert `childXml` as the last child of the element at `path`.
+ * Expands a self-closing open tag into a pair when needed.
+ */
+export function insertXmlAtPath(
+  content: string,
+  path: string,
+  childXml: string
+): string | null {
+  const open = findOpenTagAtPath(content, path);
+  if (!open) return null;
+  const nl = content.includes("\r\n") ? "\r\n" : "\n";
+  const padded = childXml.endsWith("\n") || childXml.endsWith("\r\n")
+    ? childXml
+    : `${childXml}${nl}`;
+
+  if (open.selfClosing) {
+    const tagNameMatch = /^<\/?([\w:.-]+)/.exec(content.slice(open.start, open.end));
+    const rawName = tagNameMatch?.[1] ?? open.local;
+    const attrs = open.attrs;
+    const indentMatch = /(?:^|\n)([ \t]*)$/.exec(content.slice(0, open.start));
+    const indent = indentMatch?.[1] ?? "";
+    const innerIndent = `${indent}  `;
+    const body = padded
+      .split(/\r?\n/)
+      .filter((line, i, arr) => !(i === arr.length - 1 && line === ""))
+      .map((line) => (line.trim() ? `${innerIndent}${line.trimStart()}` : line))
+      .join(nl);
+    const replacement = `<${rawName}${attrs}>${nl}${body}${indent}</${rawName}>`;
+    return content.slice(0, open.start) + replacement + content.slice(open.end);
+  }
+
+  const end = elementEnd(content, open);
+  const closeRe = new RegExp(`<\\/(?:[\\w.-]+:)?${open.local}\\s*>`, "i");
+  const closeSlice = content.slice(open.end, end);
+  const cm = closeRe.exec(closeSlice);
+  if (!cm) return null;
+  const insertAt = open.end + cm.index;
+  return content.slice(0, insertAt) + padded + content.slice(insertAt);
+}
+
 /** Local tag without namespace prefix, lowercased. */
 export function localTagName(tag: string): string {
   return localOfTag(tag);
