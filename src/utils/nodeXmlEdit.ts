@@ -719,6 +719,42 @@ export function removeElementAtPath(
 }
 
 /**
+ * Replace all element children of the node at `path` with `childrenXml`.
+ * Preserves the open-tag attributes; expands self-closing tags when needed.
+ */
+export function replaceChildrenAtPath(
+  content: string,
+  path: string,
+  childrenXml: string
+): string | null {
+  const open = findOpenTagAtPath(content, path);
+  if (!open) return null;
+  const nl = content.includes("\r\n") ? "\r\n" : "\n";
+  const tagNameMatch = /^<\/?([\w:.-]+)/.exec(
+    content.slice(open.start, open.end)
+  );
+  const rawName = tagNameMatch?.[1] ?? open.local;
+  const indentMatch = /(?:^|\n)([ \t]*)$/.exec(content.slice(0, open.start));
+  const indent = indentMatch?.[1] ?? "";
+  const innerIndent = `${indent}  `;
+  const bodyLines = childrenXml
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line, i, arr) => !(i === arr.length - 1 && line === ""));
+  const body =
+    bodyLines.length === 0
+      ? ""
+      : `${nl}${bodyLines
+          .map((line) =>
+            line.trim() ? `${innerIndent}${line.trimStart()}` : ""
+          )
+          .join(nl)}${nl}${indent}`;
+  const replacement = `<${rawName}${open.attrs}>${body}</${rawName}>`;
+  const end = elementEnd(content, open);
+  return content.slice(0, open.start) + replacement + content.slice(end);
+}
+
+/**
  * Insert `childXml` as the last child of the element at `path`.
  * Expands a self-closing open tag into a pair when needed.
  */

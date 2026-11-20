@@ -10,14 +10,9 @@ import CornerAttrSelect from "@/components/CornerAttrSelect.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
 import ExprAttrInput from "@/components/ExprAttrInput.vue";
 import HrefRefInput from "@/components/HrefRefInput.vue";
-import ShapeSvgEditorDialog from "@/components/ShapeSvgEditorDialog.vue";
 import { PenToolIcon } from "@/components/icons/lucideIcons";
 import { useI18n } from "@/i18n";
-import {
-  isSectionShapeEditable,
-  readElementXmlAtPath,
-  shapeEditorTriggerAttr,
-} from "@/utils/shapeSvgEditor";
+import { isSectionEditable } from "@/utils/shapeSvgEditor";
 import {
   APPEARANCE_ATTR_NAMES,
   APPEARANCE_FIELDS,
@@ -79,53 +74,19 @@ const emit = defineEmits<{
   styleParamsChange: [propsMap: Record<string, string>];
   styleCategoryRename: [payload: { from: string; to: string }];
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
+  editSection: [payload: { path: string }];
 }>();
 
-const shapeEditorOpen = ref(false);
-const shapeEditorXml = ref("");
-const shapeEditorKind = ref("path");
-
-const canEditSectionShape = computed(() => {
+const canEditSectionProfile = computed(() => {
   const sel = props.selected;
   if (!sel || sel.kind !== "geometry" || !props.content) return false;
-  return isSectionShapeEditable(props.content, sel.path);
+  return isSectionEditable(props.content, sel.path);
 });
 
-const shapeEditorTrigger = computed(() => {
-  if (!canEditSectionShape.value || !props.content || !props.selected) {
-    return null;
-  }
-  if (props.selected.kind !== "geometry") return null;
-  const kind = nodeKindAtPath(props.content, props.selected.path)?.kind;
-  return kind ? shapeEditorTriggerAttr(kind) : null;
-});
-
-function showShapeEditorButton(fieldName: string): boolean {
-  return !!shapeEditorTrigger.value && fieldName === shapeEditorTrigger.value;
-}
-
-function openShapeEditor(): void {
-  const sel = props.selected;
-  if (!sel || sel.kind !== "geometry" || !props.content) return;
-  const xml = readElementXmlAtPath(props.content, sel.path);
-  const kind = nodeKindAtPath(props.content, sel.path)?.kind;
-  if (!xml || !kind) {
-    MessagePlugin.warning(t("app.shapeEditorLoadFailed"));
-    return;
-  }
-  shapeEditorXml.value = xml;
-  shapeEditorKind.value = kind;
-  shapeEditorOpen.value = true;
-}
-
-function onShapeEditorConfirm(updates: Record<string, string>): void {
+function openSectionProfile(): void {
   const sel = props.selected;
   if (!sel || sel.kind !== "geometry") return;
-  for (const [name, value] of Object.entries(updates)) {
-    draft[name] = value;
-  }
-  emit("nodeAttrsChange", { path: sel.path, updates });
-  MessagePlugin.success(t("app.updatedNode"));
+  emit("editSection", { path: sel.path });
 }
 
 const {
@@ -1132,7 +1093,8 @@ const EXPR_ATTR_SKIP = new Set([
   "s3dx:transform",
   "blend",
   "orient",
-  "corner",
+  "outerCorner",
+  "innerCorner",
   "solid",
   "path",
 ]);
@@ -1615,12 +1577,18 @@ function commitStyleCategoryName(): void {
 
     <!-- Geometry / group -->
     <template v-else>
-      <ShapeSvgEditorDialog
-        v-model:visible="shapeEditorOpen"
-        :element-xml="shapeEditorXml"
-        :shape-kind="shapeEditorKind"
-        @confirm="onShapeEditorConfirm"
-      />
+      <div v-if="canEditSectionProfile" class="section-profile-action">
+        <t-button
+          size="small"
+          variant="outline"
+          @click="openSectionProfile"
+        >
+          <template #icon>
+            <PenToolIcon :size="14" :stroke-width="1.75" />
+          </template>
+          {{ t("app.editSectionProfile") }}
+        </t-button>
+      </div>
       <t-collapse
         v-model="openSections"
         expand-icon-placement="left"
@@ -1770,16 +1738,19 @@ function commitStyleCategoryName(): void {
                     @clear="() => onEnumAttrChange('blend', '')"
                   />
                   <CornerAttrSelect
-                    v-else-if="row.field.name === 'corner'"
+                    v-else-if="
+                      row.field.name === 'outerCorner' ||
+                      row.field.name === 'innerCorner'
+                    "
                     :model-value="draft[row.field.name]"
                     clearable
                     :placeholder="
                       row.field.placeholder
-                        ? attrValueLabel('corner', row.field.placeholder)
+                        ? attrValueLabel(row.field.name, row.field.placeholder)
                         : t('app.unsetHint')
                     "
-                    @change="(v: string) => onEnumAttrChange('corner', v)"
-                    @clear="() => onEnumAttrChange('corner', '')"
+                    @change="(v: string) => onEnumAttrChange(row.field.name, v)"
+                    @clear="() => onEnumAttrChange(row.field.name, '')"
                   />
                   <t-select
                     v-else-if="
@@ -1924,19 +1895,6 @@ function commitStyleCategoryName(): void {
                         }
                       "
                     />
-                    <t-button
-                      v-if="showShapeEditorButton(row.field.name)"
-                      size="small"
-                      variant="text"
-                      shape="square"
-                      class="value-action"
-                      :title="t('app.shapeEditorOpen')"
-                      @click="openShapeEditor"
-                    >
-                      <template #icon>
-                        <PenToolIcon :size="14" :stroke-width="1.75" />
-                      </template>
-                    </t-button>
                   </div>
                   <t-input
                     v-else
@@ -2005,6 +1963,10 @@ function commitStyleCategoryName(): void {
 .param-fields {
   display: flex;
   flex-direction: column;
+}
+
+.section-profile-action {
+  padding: 8px 10px 4px;
 }
 
 .param-fields .param-row {

@@ -526,19 +526,34 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     },
     { name: "solid", placeholder: "true", boolean: true },
     {
-      name: "corner",
-      placeholder: "arc",
-      enumValues: ["arc", "chamfer", "sharp", "miter"],
+      name: "outerCorner",
+      placeholder: "round",
+      enumValues: ["round", "bevel", "miter"],
     },
     {
-      name: "cornerRadius",
+      name: "outerCornerRadius",
       placeholder: "50",
       visibleWhen: {
-        name: "corner",
-        values: ["arc", "chamfer"],
-        whenEmpty: "arc",
+        name: "outerCorner",
+        values: ["round"],
+        whenEmpty: "round",
       },
     },
+    {
+      name: "innerCorner",
+      placeholder: "round",
+      enumValues: ["round", "bevel", "miter"],
+    },
+    {
+      name: "innerCornerRadius",
+      placeholder: "50",
+      visibleWhen: {
+        name: "innerCorner",
+        values: ["round"],
+        whenEmpty: "round",
+      },
+    },
+    { name: "miterLimit", placeholder: "4" },
   ],
   pipe: [
     {
@@ -549,19 +564,34 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "radius", placeholder: "20" },
     { name: "innerRadius", placeholder: "16" },
     {
-      name: "corner",
-      placeholder: "arc",
-      enumValues: ["arc", "chamfer", "sharp", "miter"],
+      name: "outerCorner",
+      placeholder: "round",
+      enumValues: ["round", "bevel", "miter"],
     },
     {
-      name: "cornerRadius",
+      name: "outerCornerRadius",
       placeholder: "50",
       visibleWhen: {
-        name: "corner",
-        values: ["arc", "chamfer"],
-        whenEmpty: "arc",
+        name: "outerCorner",
+        values: ["round"],
+        whenEmpty: "round",
       },
     },
+    {
+      name: "innerCorner",
+      placeholder: "round",
+      enumValues: ["round", "bevel", "miter"],
+    },
+    {
+      name: "innerCornerRadius",
+      placeholder: "50",
+      visibleWhen: {
+        name: "innerCorner",
+        values: ["round"],
+        whenEmpty: "round",
+      },
+    },
+    { name: "miterLimit", placeholder: "4" },
     {
       name: "path",
       placeholder: "0 0 0  100 0 0  100 0 100",

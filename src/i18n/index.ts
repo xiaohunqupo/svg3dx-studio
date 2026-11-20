@@ -133,7 +133,7 @@ export function materialLabel(id: string): string {
   return hit ? hit[locale.value] : id;
 }
 
-/** Enum attr value display name (`orient` / `corner` / `form` / `blend`, …). */
+/** Enum attr value display name (`orient` / `outerCorner` / `form` / `blend`, …). */
 export function attrValueLabel(attr: string, value: string): string {
   const v = value.trim();
   if (!v) return v;
@@ -141,7 +141,7 @@ export function attrValueLabel(attr: string, value: string): string {
     const hit = ORIENT_VALUE_LABELS[v as OrientValueKey];
     return hit ? hit[locale.value] : v;
   }
-  if (attr === "corner") {
+  if (attr === "outerCorner" || attr === "innerCorner") {
     const hit = CORNER_VALUE_LABELS[v as CornerValueKey];
     return hit ? hit[locale.value] : v;
   }

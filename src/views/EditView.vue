@@ -10,6 +10,7 @@ import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
 import NodeTreePanel, {
   type TreeSelectPayload,
 } from "@/components/NodeTreePanel.vue";
+import SectionProfileEditorDialog from "@/components/SectionProfileEditorDialog.vue";
 import SourceEditorPanel from "@/components/SourceEditorPanel.vue";
 import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
@@ -50,7 +51,12 @@ import {
   insertXmlAtPath,
   normalizeXmlNewlines,
   removeElementAtPath,
+  replaceChildrenAtPath,
 } from "@/utils/nodeXmlEdit";
+import {
+  isSectionEditable,
+  readSectionElementXml,
+} from "@/utils/shapeSvgEditor";
 
 const props = defineProps<{ id: string }>();
 
@@ -139,6 +145,9 @@ const treePanel = ref<{
   resyncAfterHistory: (path?: string | null) => boolean;
 } | null>(null);
 const drillMarks = ref<{ path: string; n: number }[]>([]);
+const sectionEditorOpen = ref(false);
+const sectionEditorPath = ref("");
+const sectionEditorXml = ref("");
 const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
   exitDrill: (options?: { select?: string | null }) => void;
@@ -712,6 +721,40 @@ function onSelect(payload: TreeSelectPayload | null): void {
   interactHost.value?.setHighlight(payload?.path ?? null);
 }
 
+function openSectionProfileEditor(path: string): void {
+  const xml = readSectionElementXml(draftContent.value, path);
+  if (!xml || !isSectionEditable(draftContent.value, path)) {
+    MessagePlugin.warning(t("app.shapeEditorLoadFailed"));
+    return;
+  }
+  sectionEditorPath.value = path;
+  sectionEditorXml.value = xml;
+  sectionEditorOpen.value = true;
+}
+
+function onEditSection(payload: { path: string }): void {
+  openSectionProfileEditor(payload.path);
+}
+
+async function onSectionProfileConfirm(childrenXml: string): Promise<void> {
+  if (!file.value || !sectionEditorPath.value) return;
+  const next = replaceChildrenAtPath(
+    draftContent.value,
+    sectionEditorPath.value,
+    childrenXml
+  );
+  if (!next) {
+    MessagePlugin.warning(t("app.shapeEditorSaveFailed"));
+    return;
+  }
+  const formatted = await formatDraftContent(next);
+  draftContent.value = formatted;
+  await store.updateContent(file.value.id, formatted, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit(sectionEditorPath.value, { select: "self" });
+  MessagePlugin.success(t("app.updatedNode"));
+}
+
 function onDrillCrumbs(crumbs: DrillCrumb[]): void {
   drillMarks.value = crumbs
     .filter((c) => c.nodePath)
@@ -1021,6 +1064,7 @@ onBeforeUnmount(() => {
         @add-use="onAddUse"
         @add-child="onAddChild"
         @insert-child-at-path="onInsertChildAtPath"
+        @edit-section="onEditSection"
         @delete-node="onDeleteNode"
         @delete-model="onDeleteModel"
         @delete-use="onDeleteUse"
@@ -1109,9 +1153,16 @@ onBeforeUnmount(() => {
           @style-params-change="onStyleParamsChange"
           @style-category-rename="onStyleCategoryRename"
           @node-attrs-change="onNodeAttrsChange"
+          @edit-section="onEditSection"
         />
       </aside>
     </div>
+
+    <SectionProfileEditorDialog
+      v-model:visible="sectionEditorOpen"
+      :section-xml="sectionEditorXml"
+      @confirm="onSectionProfileConfirm"
+    />
   </div>
 </template>
 

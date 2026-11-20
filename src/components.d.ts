@@ -24,6 +24,7 @@ declare module 'vue' {
     ReposMenu: typeof import('./components/ReposMenu.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SectionProfileEditorDialog: typeof import('./components/SectionProfileEditorDialog.vue')['default']
     SettingsMenu: typeof import('./components/SettingsMenu.vue')['default']
     ShapeSvgEditorDialog: typeof import('./components/ShapeSvgEditorDialog.vue')['default']
     SourceEditorPanel: typeof import('./components/SourceEditorPanel.vue')['default']

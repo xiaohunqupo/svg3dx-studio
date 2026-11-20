@@ -47,13 +47,13 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
           <circle cx="0" cy="0" r="40"/>
         </s3dx:section>
       </s3dx:loft>`,
-  sweep: `<s3dx:sweep orient="frenet" solid="true" corner="arc" cornerRadius="50">
-        <s3dx:section>
-          <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
-        </s3dx:section>
-        <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
+  sweep: `<s3dx:sweep orient="frenet" solid="true" outerCorner="round" innerCorner="round" outerCornerRadius="50" innerCornerRadius="50">
+      <s3dx:section>
+        <path d="M -20 -10 L 20 -10 L 20 10 L -20 10 Z"/>
+      </s3dx:section>
+      <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:sweep>`,
-  pipe: `<s3dx:pipe form="child" radius="20" innerRadius="16" corner="arc" cornerRadius="50">
+  pipe: `<s3dx:pipe form="child" radius="20" innerRadius="16" outerCorner="round" innerCorner="round" outerCornerRadius="50" innerCornerRadius="50">
         <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:pipe>`,
 };

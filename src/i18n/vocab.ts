@@ -126,8 +126,11 @@ export const ATTR_LABELS = {
   blend: { zh: "混合", en: "blend" },
   orient: { zh: "姿态", en: "orient" },
   refDir: { zh: "参考方向", en: "refDir" },
-  corner: { zh: "转角", en: "corner" },
-  cornerRadius: { zh: "转角半径", en: "cornerRadius" },
+  outerCorner: { zh: "外角", en: "outerCorner" },
+  innerCorner: { zh: "内角", en: "innerCorner" },
+  outerCornerRadius: { zh: "外角半径", en: "outerCornerRadius" },
+  innerCornerRadius: { zh: "内角半径", en: "innerCornerRadius" },
+  miterLimit: { zh: "斜接极限", en: "miterLimit" },
   path: { zh: "路径", en: "path" },
   innerRadius: { zh: "内半径", en: "innerRadius" },
   start: { zh: "起点值", en: "start" },
@@ -146,11 +149,10 @@ export const ORIENT_VALUE_LABELS = {
 
 export type OrientValueKey = keyof typeof ORIENT_VALUE_LABELS;
 
-/** `corner` enum values (§3.2 sweep / pipe). */
+/** `outerCorner` / `innerCorner` enum values (§3.2 sweep / pipe; SVG linejoin). */
 export const CORNER_VALUE_LABELS = {
-  arc: { zh: "圆弧弯", en: "Arc" },
-  chamfer: { zh: "倒角弯", en: "Chamfer" },
-  sharp: { zh: "尖角", en: "Sharp" },
+  round: { zh: "圆角", en: "Round" },
+  bevel: { zh: "斜切", en: "Bevel" },
   miter: { zh: "斜接", en: "Miter" },
 } as const satisfies Record<string, LocalePair>;
 

@@ -5,6 +5,7 @@ import {
   BrushIcon,
   ChartBubbleIcon,
   DeleteIcon,
+  EditIcon,
   FilterClearIcon,
   JumpIcon,
   LayersIcon,
@@ -73,7 +74,6 @@ import {
   LOOP_MENU,
   MODELING_MENU,
   PRIMITIVE_MENU,
-  SECTION_SHAPE_MENU,
   SOLID_MENU,
   type AddChildMenuItem,
   type PathInsertMenuItem,
@@ -86,7 +86,6 @@ import {
 
 /** Constructed solids that expose a child `<s3dx:section>` in the editor tree. */
 const SECTION_PARENT_KINDS = new Set(["revolve"]);
-const SECTION_SHAPE_KIND_SET = new Set(SECTION_SHAPE_MENU.map((p) => p.kind));
 const SVG_SHAPE_LOCALS = new Set([
   "path",
   "circle",
@@ -152,8 +151,10 @@ const emit = defineEmits<{
   addStyleCategory: [];
   addUse: [payload: { modelId?: string; path: string; href?: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
-  /** Insert a child by tree path (revolve→section, section→2D shapes). */
+  /** Insert a child by tree path (revolve→section). */
   insertChildAtPath: [payload: { parentPath: string; kind: string }];
+  /** Open the section profile editor for a collapsed section leaf. */
+  editSection: [payload: { path: string }];
   deleteNode: [payload: { path: string; groupId: string }];
   deleteModel: [payload: { path: string; modelId: string }];
   deleteUse: [payload: { path: string }];
@@ -322,13 +323,11 @@ function childrenFromPathMarkup(
     if (local === "section") {
       const elemId = attrOf(attrs, "id") ?? undefined;
       const classAttr = attrOf(attrs, "class");
-      const kids = open.selfClosing
-        ? undefined
-        : childrenFromPathMarkup(content, path, classById);
+      // Profile shapes live in the section editor dialog — keep the main tree leaf.
       return {
         value: path,
         label: elemId ?? elementLabel("section"),
-        children: kids?.length ? kids : undefined,
+        children: undefined,
         meta: {
           kind: "geometry" as const,
           icon: LayersIcon,
@@ -758,13 +757,12 @@ const revolveMoreOptions = computed<DropdownOption[]>(() => [
   },
 ]);
 
-/** Section: 2D shapes only (bool / logic / loop not supported yet). */
+/** Section leaf: edit profile in dialog / delete. */
 const sectionMoreOptions = computed<DropdownOption[]>(() => [
   {
-    content: t("app.addSectionShape"),
-    value: "__add-section-shape",
-    prefixIcon: () => h(PathIcon),
-    children: pathInsertMenuOptions(SECTION_SHAPE_MENU),
+    content: t("app.editSectionProfile"),
+    value: "edit-profile",
+    prefixIcon: () => h(EditIcon),
   },
   {
     content: "",
@@ -1493,9 +1491,8 @@ function onSectionMoreClick(
     emit("deleteElement", { path: section.value });
     return;
   }
-  if (typeof value !== "string") return;
-  if (SECTION_SHAPE_KIND_SET.has(value as never)) {
-    emit("insertChildAtPath", { parentPath: section.value, kind: value });
+  if (value === "edit-profile") {
+    emit("editSection", { path: section.value });
   }
 }
 
@@ -1534,7 +1531,6 @@ const MENU_CATEGORY_VALUES = new Set([
   "__add-curve",
   "__add-solid",
   "__add-modeling",
-  "__add-section-shape",
   "__add-bool",
   "__add-logic",
   "__add-loop",

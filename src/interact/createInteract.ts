@@ -989,8 +989,15 @@ export class InteractViewport {
 
   private chainFromHit(hit: THREE.Object3D): DocStep[] {
     if (hit.userData?.sectionProxy) {
-      const path = pickPathFromObject(hit);
+      let path = pickPathFromObject(hit);
       if (!path) return [];
+      // Profile wires are not main-tree leaves — select the owning section.
+      if (hit.userData?.sectionProfile && this.document) {
+        path =
+          sectionAncestorPath(this.document, path) ??
+          parentTreePath(path) ??
+          path;
+      }
       return mergeLocationChain(path, this.locationChain, []);
     }
     return this.chainFor(hit);

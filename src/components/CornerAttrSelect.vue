@@ -12,12 +12,11 @@ import { CORNER_VALUE_LABELS, type CornerValueKey } from "@/i18n/vocab";
 
 const CORNER_VALUES = Object.keys(CORNER_VALUE_LABELS) as CornerValueKey[];
 
-/** Lucide stroke-line-join icons for sweep/pipe `corner`. */
+/** Lucide stroke-line-join icons for sweep/pipe outerCorner / innerCorner. */
 const CORNER_ICONS: Record<CornerValueKey, LucideIcon> = {
-  arc: StrokeLineJoinRound,
-  sharp: StrokeLineJoinMiter,
-  miter: StrokeLineJoinBevel,
-  chamfer: StrokeLineJoinBevel,
+  round: StrokeLineJoinRound,
+  bevel: StrokeLineJoinBevel,
+  miter: StrokeLineJoinMiter,
 };
 
 const props = defineProps<{
@@ -50,14 +49,14 @@ function iconVNode(kind: CornerValueKey, className = "corner-icon") {
 const options = computed<SelectOption[]>(() =>
   CORNER_VALUES.map((value) => ({
     value,
-    label: attrValueLabel("corner", value),
+    label: attrValueLabel("outerCorner", value),
     content: () =>
       h("div", { class: "corner-option" }, [
         iconVNode(value),
         h(
           "span",
           { class: "corner-option__label" },
-          attrValueLabel("corner", value)
+          attrValueLabel("outerCorner", value)
         ),
       ]),
   }))
@@ -74,7 +73,7 @@ const effective = computed((): CornerValueKey => {
   if (current.value) return current.value;
   const ph = (props.placeholder ?? "").trim();
   if (isCornerValue(ph)) return ph;
-  return "arc";
+  return "round";
 });
 
 function onChange(v: unknown): void {
@@ -117,7 +116,7 @@ function onClear(): void {
           aria-hidden="true"
         />
         <span class="corner-value__label">{{
-          attrValueLabel("corner", effective)
+          attrValueLabel("outerCorner", effective)
         }}</span>
       </div>
     </template>
