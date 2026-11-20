@@ -2,7 +2,11 @@
 import { computed, h, reactive, ref, watch } from "vue";
 import { ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { BUILTIN_MATERIALS, type GeometryInstruction } from "svg3dx-viewer";
-import { MessagePlugin, type SelectOption } from "tdesign-vue-next";
+import {
+  DialogPlugin,
+  MessagePlugin,
+  type SelectOption,
+} from "tdesign-vue-next";
 import type { TreeSelectPayload } from "@/components/NodeTreePanel.vue";
 import StyleParamEditor from "@/components/StyleParamEditor.vue";
 import BlendAttrSelect from "@/components/BlendAttrSelect.vue";
@@ -22,20 +26,33 @@ import {
   MODEL_MODE_VALUES,
   TRANSFORM_FIELDS,
   TRANSFORM_PART_KEYS,
+  TRANSFORM_TRS_KEYS,
   REVOLVE_SECTION_TRANSFORM_DISPLAY,
+  convertTransformForm,
+  detectTransformForm,
   emptyTransformParts,
+  emptyTransformTrs,
+  evaluateTransformToMatrix12,
   isIdentityTransformDisplay,
+  transformFormSwitchNeedsConfirm,
   looksLikeVecRgbText,
   primitiveAttrFields,
   syncTransformPartsFromDisplay,
+  syncTransformTrsFromDisplay,
   transformDisplayFromParts,
+  transformDisplayFromTrs,
   transformPartPlaceholder,
   transformToAttr,
   transformToDisplay,
+  transformTrsPlaceholder,
   type AttrField,
+  type TransformForm,
   type TransformPartKey,
   type TransformParts,
+  type TransformTrs,
+  type TransformTrsKey,
 } from "@/utils/nodeSchema";
+import { previewExprResult } from "@/utils/exprEval";
 import {
   extractDocumentMaterials,
   normalizeMaterialAttr,
@@ -218,9 +235,11 @@ function sectionTransformDisplay(
 /** HEX8 string shown in the fill text input / swatch (not the XML form). */
 const fillHexUi = ref("");
 
-/** Expanded xdir / ydir / zdir / translation editors for s3dx:transform. */
+/** Expanded editors for s3dx:transform (axes or TRS). */
 const transformExpanded = ref(false);
+const transformForm = ref<TransformForm>("matrix");
 const transformParts = reactive<TransformParts>(emptyTransformParts());
+const transformTrs = reactive<TransformTrs>(emptyTransformTrs());
 
 function seedDraft(fields: FieldRow[], path: string): void {
   const pathChanged = draftPath !== path;
@@ -236,12 +255,15 @@ function seedDraft(fields: FieldRow[], path: string): void {
     transformExpanded.value = false;
   }
   Object.assign(transformParts, emptyTransformParts());
+  Object.assign(transformTrs, emptyTransformTrs());
   for (const f of fields) {
     if (f.name === "material") {
       draft[f.name] = normalizeMaterialAttr(f.value, docIds);
     } else if (f.name === "s3dx:transform") {
       draft[f.name] = transformToDisplay(f.value);
+      transformForm.value = detectTransformForm(f.value || draft[f.name]);
       Object.assign(transformParts, syncTransformPartsFromDisplay(draft[f.name]));
+      Object.assign(transformTrs, syncTransformTrsFromDisplay(draft[f.name]));
     } else if (f.name === "fill" || f.name === "color") {
       draft[f.name] = f.value;
       fillHexUi.value = fillToHex8(f.value);
@@ -894,16 +916,21 @@ function onFillClear(): void {
   commitColorAttr();
 }
 
-function syncPartsFromCompact(): void {
-  Object.assign(
-    transformParts,
-    syncTransformPartsFromDisplay(draft["s3dx:transform"] ?? "")
-  );
+function syncExpandedFromCompact(): void {
+  const raw = draft["s3dx:transform"] ?? "";
+  transformForm.value = detectTransformForm(raw);
+  Object.assign(transformParts, syncTransformPartsFromDisplay(raw));
+  Object.assign(transformTrs, syncTransformTrsFromDisplay(raw));
 }
 
-/** Compact row: when expanded, mirror split parts; identity stays empty (placeholder). */
+/** Compact row: when expanded, mirror split editors; identity stays empty. */
 const transformCompactShown = computed(() => {
   if (transformExpanded.value) {
+    if (transformForm.value === "trs") {
+      const next = transformDisplayFromTrs(transformTrs);
+      if (!next || isIdentityTransformDisplay(next)) return "";
+      return next;
+    }
     const next = transformDisplayFromParts(transformParts);
     if (!next || isIdentityTransformDisplay(next)) return "";
     return next;
@@ -913,17 +940,81 @@ const transformCompactShown = computed(() => {
 
 function toggleTransformExpand(): void {
   if (!transformExpanded.value) {
-    syncPartsFromCompact();
+    syncExpandedFromCompact();
     transformExpanded.value = true;
     return;
   }
-  const next = transformDisplayFromParts(transformParts);
-  if (next == null) {
-    syncPartsFromCompact();
+  if (transformForm.value === "trs") {
+    const next = transformDisplayFromTrs(transformTrs);
+    if (next == null) syncExpandedFromCompact();
+    else draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
   } else {
-    draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+    const next = transformDisplayFromParts(transformParts);
+    if (next == null) syncExpandedFromCompact();
+    else draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
   }
   transformExpanded.value = false;
+}
+
+function evalTransformToken(tok: string): number | null {
+  const preview = previewExprResult(tok, effectiveParamValues.value);
+  if (preview == null) return null;
+  const n = Number(preview);
+  return Number.isFinite(n) ? n : null;
+}
+
+function applyTransformDraft(attr: string, commit: "field" | "model"): void {
+  draft["s3dx:transform"] = attr;
+  transformForm.value = detectTransformForm(attr);
+  Object.assign(transformParts, syncTransformPartsFromDisplay(attr));
+  Object.assign(transformTrs, syncTransformTrsFromDisplay(attr));
+  if (commit === "model") commitModelAttrs("s3dx:transform");
+  else commitField("s3dx:transform");
+}
+
+function onTransformFormRadio(value: unknown): void {
+  const next: TransformForm = value === "trs" ? "trs" : "matrix";
+  requestSwitchTransformForm(next);
+}
+
+function performTransformFormSwitch(
+  next: TransformForm,
+  raw: string,
+  evaluated: number[]
+): void {
+  const attr = convertTransformForm(raw, next, evaluated);
+  const isModel = props.selected?.kind === "model";
+  applyTransformDraft(
+    attr === "" ? "" : transformToDisplay(attr),
+    isModel ? "model" : "field"
+  );
+  transformForm.value = next;
+  transformExpanded.value = true;
+}
+
+function requestSwitchTransformForm(next: TransformForm): void {
+  if (next === transformForm.value) return;
+  const raw = (draft["s3dx:transform"] ?? "").trim();
+  const evaluated = evaluateTransformToMatrix12(raw, evalTransformToken);
+  if (!evaluated) {
+    MessagePlugin.warning(t("app.switchTransformFormFailed"));
+    return;
+  }
+  const run = () => performTransformFormSwitch(next, raw, evaluated);
+  // Only warn when conversion would drop expressions or shear / non-TRS linear part.
+  if (!transformFormSwitchNeedsConfirm(raw, evaluated)) {
+    run();
+    return;
+  }
+  const dialog = DialogPlugin.confirm({
+    header: t("app.switchTransformFormTitle"),
+    body: t("app.switchTransformFormBody"),
+    confirmBtn: t("app.switchTransformFormConfirm"),
+    onConfirm: () => {
+      dialog.destroy();
+      run();
+    },
+  });
 }
 
 function commitTransformCompact(): void {
@@ -932,25 +1023,28 @@ function commitTransformCompact(): void {
   if (raw && isIdentityTransformDisplay(raw)) {
     draft["s3dx:transform"] = "";
   }
-  syncPartsFromCompact();
+  transformForm.value = detectTransformForm(draft["s3dx:transform"] ?? "");
+  syncExpandedFromCompact();
   commitField("s3dx:transform");
 }
 
 function clearTransform(): void {
   if (transformExpanded.value) return;
   draft["s3dx:transform"] = "";
+  transformForm.value = "matrix";
   Object.assign(transformParts, emptyTransformParts());
+  Object.assign(transformTrs, emptyTransformTrs());
   commitField("s3dx:transform");
 }
 
 function commitTransformParts(): void {
   const next = transformDisplayFromParts(transformParts);
   if (next == null) {
-    syncPartsFromCompact();
+    syncExpandedFromCompact();
     return;
   }
-  // Identity ≡ unset (unit transform). Keep part editors empty for identity axes.
   draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+  transformForm.value = "matrix";
   Object.assign(
     transformParts,
     syncTransformPartsFromDisplay(draft["s3dx:transform"])
@@ -963,30 +1057,51 @@ function clearTransformPart(key: TransformPartKey): void {
   commitTransformParts();
 }
 
+function commitTransformTrs(): void {
+  const next = transformDisplayFromTrs(transformTrs);
+  if (next == null) {
+    syncExpandedFromCompact();
+    return;
+  }
+  draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+  transformForm.value = "trs";
+  Object.assign(transformTrs, syncTransformTrsFromDisplay(draft["s3dx:transform"]));
+  commitField("s3dx:transform");
+}
+
+function clearTransformTrsChannel(key: TransformTrsKey): void {
+  transformTrs[key] = "";
+  commitTransformTrs();
+}
+
 function commitModelTransformCompact(): void {
   if (transformExpanded.value) return;
   const raw = (draft["s3dx:transform"] ?? "").trim();
   if (raw && isIdentityTransformDisplay(raw)) {
     draft["s3dx:transform"] = "";
   }
-  syncPartsFromCompact();
+  transformForm.value = detectTransformForm(draft["s3dx:transform"] ?? "");
+  syncExpandedFromCompact();
   commitModelAttrs("s3dx:transform");
 }
 
 function clearModelTransform(): void {
   if (transformExpanded.value) return;
   draft["s3dx:transform"] = "";
+  transformForm.value = "matrix";
   Object.assign(transformParts, emptyTransformParts());
+  Object.assign(transformTrs, emptyTransformTrs());
   commitModelAttrs("s3dx:transform");
 }
 
 function commitModelTransformParts(): void {
   const next = transformDisplayFromParts(transformParts);
   if (next == null) {
-    syncPartsFromCompact();
+    syncExpandedFromCompact();
     return;
   }
   draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+  transformForm.value = "matrix";
   Object.assign(
     transformParts,
     syncTransformPartsFromDisplay(draft["s3dx:transform"])
@@ -999,11 +1114,29 @@ function clearModelTransformPart(key: TransformPartKey): void {
   commitModelTransformParts();
 }
 
+function commitModelTransformTrs(): void {
+  const next = transformDisplayFromTrs(transformTrs);
+  if (next == null) {
+    syncExpandedFromCompact();
+    return;
+  }
+  draft["s3dx:transform"] = isIdentityTransformDisplay(next) ? "" : next;
+  transformForm.value = "trs";
+  Object.assign(transformTrs, syncTransformTrsFromDisplay(draft["s3dx:transform"]));
+  commitModelAttrs("s3dx:transform");
+}
+
+function clearModelTransformTrsChannel(key: TransformTrsKey): void {
+  transformTrs[key] = "";
+  commitModelTransformTrs();
+}
+
 /** Flat rows so transform parts sit as siblings of s3dx:transform. */
 type InspectorRow =
   | { kind: "field"; field: FieldRow }
-  | { kind: "transform-part"; key: TransformPartKey };
-
+  | { kind: "transform-part"; key: TransformPartKey }
+  | { kind: "transform-trs"; key: TransformTrsKey }
+  | { kind: "transform-form-toggle" };
 /** Whether a schema field should show, given current draft values. */
 function isFieldVisible(field: AttrField): boolean {
   const rule = field.visibleWhen;
@@ -1065,8 +1198,15 @@ function rowsForSection(fields: FieldRow[]): InspectorRow[] {
   for (const field of fields) {
     rows.push({ kind: "field", field });
     if (field.name === "s3dx:transform" && transformExpanded.value) {
-      for (const key of TRANSFORM_PART_KEYS) {
-        rows.push({ kind: "transform-part", key });
+      rows.push({ kind: "transform-form-toggle" });
+      if (transformForm.value === "trs") {
+        for (const key of TRANSFORM_TRS_KEYS) {
+          rows.push({ kind: "transform-trs", key });
+        }
+      } else {
+        for (const key of TRANSFORM_PART_KEYS) {
+          rows.push({ kind: "transform-part", key });
+        }
       }
     }
   }
@@ -1075,7 +1215,9 @@ function rowsForSection(fields: FieldRow[]): InspectorRow[] {
 
 /** Points / vectors / matrices whose numbers should render as R·G·B segments. */
 function isVecRgbField(field: AttrField): boolean {
-  if (field.name === "s3dx:transform") return true;
+  if (field.name === "s3dx:transform") {
+    return detectTransformForm(draft["s3dx:transform"] ?? "") === "matrix";
+  }
   return looksLikeVecRgbText(field.placeholder ?? "");
 }
 
@@ -1439,9 +1581,14 @@ function commitStyleCategoryName(): void {
               <div class="value-cell">
                 <ExprAttrInput
                   :model-value="transformCompactShown"
-                  clearable
+                  :readonly="transformExpanded"
+                  :clearable="!transformExpanded"
                   class="value-input"
-                  :placeholder="IDENTITY_TRANSFORM_DISPLAY"
+                  :placeholder="
+                    transformForm === 'trs'
+                      ? 'translate(0 0 0) rotate(0 0 0) scale(1 1 1)'
+                      : IDENTITY_TRANSFORM_DISPLAY
+                  "
                   :param-groups="paramSourceGroups"
                   :effective-names="effectiveParamNames"
                   :param-values="effectiveParamValues"
@@ -1458,7 +1605,30 @@ function commitStyleCategoryName(): void {
               </div>
             </div>
             <div
-              v-for="key in transformExpanded ? TRANSFORM_PART_KEYS : []"
+              v-if="transformExpanded"
+              class="param-row transform-form-row"
+            >
+              <span class="name">{{ t("app.transformFormMode") }}</span>
+              <div class="value-cell">
+                <t-radio-group
+                  :value="transformForm"
+                  size="small"
+                  variant="default-filled"
+                  @change="onTransformFormRadio"
+                >
+                  <t-radio-button value="matrix">{{
+                    t("app.transformFormAxes")
+                  }}</t-radio-button>
+                  <t-radio-button value="trs">{{
+                    t("app.transformFormTrs")
+                  }}</t-radio-button>
+                </t-radio-group>
+              </div>
+            </div>
+            <div
+              v-for="key in transformExpanded && transformForm === 'matrix'
+                ? TRANSFORM_PART_KEYS
+                : []"
               :key="key"
               class="param-row"
             >
@@ -1476,6 +1646,30 @@ function commitStyleCategoryName(): void {
                   @blur="commitModelTransformParts"
                   @enter="commitModelTransformParts"
                   @clear="() => clearModelTransformPart(key)"
+                />
+              </div>
+            </div>
+            <div
+              v-for="key in transformExpanded && transformForm === 'trs'
+                ? TRANSFORM_TRS_KEYS
+                : []"
+              :key="key"
+              class="param-row"
+            >
+              <span class="name">{{ fieldDisplayName(key) }}</span>
+              <div class="value-cell">
+                <VecRgbInput
+                  v-model="transformTrs[key]"
+                  clearable
+                  class="value-input"
+                  :placeholder="transformTrsPlaceholder(key)"
+                  :max-components="3"
+                  :param-groups="paramSourceGroups"
+                  :effective-names="effectiveParamNames"
+                  :param-values="effectiveParamValues"
+                  @blur="commitModelTransformTrs"
+                  @enter="commitModelTransformTrs"
+                  @clear="() => clearModelTransformTrsChannel(key)"
                 />
               </div>
             </div>
@@ -1604,12 +1798,39 @@ function commitStyleCategoryName(): void {
             <template
               v-for="row in rowsForSection(sec.fields)"
               :key="
-                row.kind === 'field' ? row.field.key : `xform:${row.key}`
+                row.kind === 'field'
+                  ? row.field.key
+                  : row.kind === 'transform-form-toggle'
+                    ? 'xform:form'
+                    : `xform:${row.key}`
               "
             >
-              <!-- Transform split parts: peer rows of s3dx:transform -->
+              <!-- Form toggle: axes vs TRS -->
               <div
-                v-if="row.kind === 'transform-part'"
+                v-if="row.kind === 'transform-form-toggle'"
+                class="param-row transform-form-row"
+              >
+                <span class="name">{{ t("app.transformFormMode") }}</span>
+                <div class="value-cell">
+                  <t-radio-group
+                    :value="transformForm"
+                    size="small"
+                    variant="default-filled"
+                    @change="onTransformFormRadio"
+                  >
+                    <t-radio-button value="matrix">{{
+                      t("app.transformFormAxes")
+                    }}</t-radio-button>
+                    <t-radio-button value="trs">{{
+                      t("app.transformFormTrs")
+                    }}</t-radio-button>
+                  </t-radio-group>
+                </div>
+              </div>
+
+              <!-- Transform axis parts: peer rows of s3dx:transform -->
+              <div
+                v-else-if="row.kind === 'transform-part'"
                 class="param-row transform-part-row"
               >
                 <span class="name" :title="row.key">{{
@@ -1632,8 +1853,33 @@ function commitStyleCategoryName(): void {
                 </div>
               </div>
 
+              <!-- TRS channels -->
               <div
-                v-else-if="isFieldVisible(row.field)"
+                v-else-if="row.kind === 'transform-trs'"
+                class="param-row transform-part-row"
+              >
+                <span class="name" :title="row.key">{{
+                  fieldDisplayName(row.key)
+                }}</span>
+                <div class="value-cell">
+                  <VecRgbInput
+                    v-model="transformTrs[row.key]"
+                    clearable
+                    class="value-input"
+                    :placeholder="transformTrsPlaceholder(row.key)"
+                    :max-components="3"
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
+                    @blur="commitTransformTrs"
+                    @enter="commitTransformTrs"
+                    @clear="() => clearTransformTrsChannel(row.key)"
+                  />
+                </div>
+              </div>
+
+              <div
+                v-else-if="row.kind === 'field' && isFieldVisible(row.field)"
                 class="param-row"
                 :class="{ 'readonly-row': row.field.readonly }"
               >
@@ -1807,6 +2053,29 @@ function commitStyleCategoryName(): void {
                       @clear="onMaterialClear"
                     />
                   </div>
+                  <ExprAttrInput
+                    v-else-if="
+                      row.field.name === 's3dx:transform' &&
+                      transformForm === 'trs'
+                    "
+                    :model-value="transformCompactShown"
+                    :readonly="transformExpanded"
+                    :clearable="!transformExpanded"
+                    placeholder="translate(0 0 0) rotate(0 0 0) scale(1 1 1)"
+                    class="value-input"
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
+                    @update:model-value="
+                      (v: string) => {
+                        if (!transformExpanded)
+                          draft['s3dx:transform'] = String(v ?? '');
+                      }
+                    "
+                    @blur="commitTransformCompact"
+                    @enter="commitTransformCompact"
+                    @clear="clearTransform"
+                  />
                   <VecRgbInput
                     v-else-if="row.field.name === 's3dx:transform'"
                     :model-value="transformCompactShown"
@@ -2127,10 +2396,18 @@ function commitStyleCategoryName(): void {
   pointer-events: none;
 }
 
+.transform-form-row :deep(.t-radio-group) {
+  flex-wrap: wrap;
+}
+
+/* Mode + axis/TRS channels share the indented sub-row label column. */
+.transform-form-row .name,
 .transform-part-row .name {
   color: var(--td-text-color-secondary);
   font-weight: 500;
   padding-left: 8px;
+  align-items: center;
+  min-height: 28px;
 }
 
 .muted {

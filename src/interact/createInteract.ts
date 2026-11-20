@@ -12,10 +12,11 @@ import {
   type ParamMap,
 } from "svg3dx-viewer";
 import {
+  detectTransformForm,
   matrix4ToMat4x3,
   matrix12ToTransformAttr,
 } from "@/utils/nodeSchema";
-import { nodeKindAtPath } from "@/utils/nodeXmlEdit";
+import { nodeKindAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
 import {
   documentChain,
   modelUseGroupId,
@@ -887,11 +888,16 @@ export class InteractViewport {
     const path = this.highlightPath;
     const obj = this.transform.object;
     if (!path || !obj || !this.onTransformCommit) return;
+    const form = detectTransformForm(
+      this.document
+        ? (readAttrsAtPath(this.document, path)?.["s3dx:transform"] ?? "")
+        : ""
+    );
     const section = this.sectionProxies.get(path);
     if (section && obj === section.root) {
       this.onTransformCommit({
         path,
-        transform: section.commitTransformAttr(),
+        transform: section.commitTransformAttr(form),
       });
       return;
     }
@@ -899,7 +905,7 @@ export class InteractViewport {
     const m = matrix4ToMat4x3(obj.matrix);
     this.onTransformCommit({
       path,
-      transform: matrix12ToTransformAttr(m),
+      transform: matrix12ToTransformAttr(m, form),
     });
   }
 

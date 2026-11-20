@@ -94,6 +94,10 @@ export const ATTR_LABELS = {
   zdir: { zh: "Z 轴方向", en: "zdir" },
   /** Inspector expand part — SVG/CSS translate / spec tx ty tz. */
   translation: { zh: "平移", en: "translation" },
+  /** TRS expand channels (s3dx:transform TRS form). */
+  translate: { zh: "平移", en: "translate" },
+  rotate: { zh: "旋转 (°)", en: "rotate (°)" },
+  scale: { zh: "缩放", en: "scale" },
 
   // geometry
   length: { zh: "长度", en: "length" },

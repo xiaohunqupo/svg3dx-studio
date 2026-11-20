@@ -11,6 +11,7 @@ import {
   parseTransform12,
   matrix4ToMat4x3,
   matrix12ToTransformAttr,
+  type TransformForm,
 } from "@/utils/nodeSchema";
 import {
   listChildOpensAtPath,
@@ -382,10 +383,10 @@ export class SectionProxy {
   }
 
   /** `s3dx:transform` attr from the current local matrix (pose stays on planeHost). */
-  commitTransformAttr(): string {
+  commitTransformAttr(form: TransformForm = "matrix"): string {
     this.root.updateMatrix();
     const m = matrix4ToMat4x3(this.root.matrix);
-    return matrix12ToTransformAttr(m);
+    return matrix12ToTransformAttr(m, form);
   }
 
   dispose(): void {
