@@ -138,7 +138,7 @@ export async function createInteract(
   const viewer = await createViewer(container, {
     // Same as Browse: show the overlay params list by default (settings can hide).
     paramsBar: true,
-    // Editor previews skipped if/if-not branches (evaluation opt-in).
+    // Editor: preview skipped if/if-not branches; unused defs load on demand.
     retainInactive: true,
     ...viewerOptions,
     // Interact owns left-click routing (ViewHelper + pick).
@@ -270,6 +270,8 @@ export class InteractViewport {
   private entryPath: string | null = null;
   /** Defs group currently framed. Null while the model is showing. */
   private framedDef: string | null = null;
+  /** Generation for on-demand extra-def reloads (stale-guard). */
+  private extraDefGen = 0;
   private ghostBackups: {
     object: THREE.Mesh | THREE.Line;
     material: THREE.Material | THREE.Material[];
@@ -505,6 +507,8 @@ export class InteractViewport {
     this.restoreGhosts();
     this.setDocument(svgText);
     this.viewer.setHelperFrame(null);
+    // Fresh document — drop on-demand extras from the previous file.
+    await this.viewer.setExtraDefs([], { reload: false });
     const result = await this.viewer.loadSvg(svgText, options);
     this.reapplyHighlight();
     this.reapplyDrill();
@@ -612,6 +616,29 @@ export class InteractViewport {
     this.applyHighlight();
     this.syncTransformTarget();
     this.emitDrill();
+    void this.ensureExtraDefForPath(next);
+  }
+
+  /**
+   * If the tree selected a defs group that is not in the active model (no
+   * defs-world object yet), ask the viewer to evaluate that group and rebind.
+   */
+  private async ensureExtraDefForPath(path: string): Promise<void> {
+    if (!path.startsWith("defs:")) return;
+    const id = path.slice("defs:".length).split(".")[0];
+    if (!id) return;
+    const hasWorld = this.viewer.viewer.root.children.some(
+      (child) => child.userData?.defsWorld === id
+    );
+    if (hasWorld) return;
+    const current = this.viewer.getExtraDefs();
+    if (current.includes(id)) return;
+    const gen = ++this.extraDefGen;
+    await this.viewer.setExtraDefs([...current, id]);
+    if (gen !== this.extraDefGen || this.highlightPath !== path) return;
+    this.applyVisibility();
+    this.applyHighlight();
+    this.syncTransformTarget();
   }
 
   /**

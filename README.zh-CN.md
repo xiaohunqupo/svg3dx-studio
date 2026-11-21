@@ -28,7 +28,18 @@
 
 ## 开发
 
-本机并列：`svg3dx`、`svg3dx-core`（已 `wasm-pack` 产出 `pkg/`）、`svg3dx-viewer`、本仓。
+本机并列：`svg3dx`、`svg3dx-core`、`svg3dx-viewer`、本仓。
+
+一键分步编译（core 测试 + wasm → viewer → studio）：
+
+```powershell
+cd ..\svg3dx-studio
+npm run build:all          # 完整产物（含 studio dist）
+npm run build:all:dev      # 只到 viewer，随后 npm run dev
+npm run build:all:full     # 额外编 core C DLL / 头文件 / dump_json
+```
+
+手动分步：
 
 ```powershell
 # 1) engine wasm

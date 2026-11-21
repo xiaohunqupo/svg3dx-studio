@@ -28,7 +28,18 @@ Viewport layers (all in this repo — not separate packages):
 
 ## Develop
 
-Sibling checkouts: `svg3dx`, `svg3dx-core` (with `wasm-pack` output in `pkg/`), `svg3dx-viewer`, and this repo.
+Sibling checkouts: `svg3dx`, `svg3dx-core`, `svg3dx-viewer`, and this repo.
+
+One-shot stack build (core tests + wasm → viewer → studio):
+
+```powershell
+cd ..\svg3dx-studio
+npm run build:all          # full artifacts (includes studio dist)
+npm run build:all:dev      # stop after viewer, then npm run dev
+npm run build:all:full     # also build core C DLL / header / dump_json
+```
+
+Manual steps:
 
 ```powershell
 # 1) engine wasm
