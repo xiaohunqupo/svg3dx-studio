@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, toRef, watch } from "vue";
 import type { EvaluationResult } from "svg3dx-viewer";
 import {
   createInteract,
@@ -8,6 +8,7 @@ import {
   type TransformCommitPayload,
   type TransformMode,
 } from "@/interact";
+import { useHostDocumentLoad } from "@/composables/useHostDocumentLoad";
 import { elementLabel, useI18n } from "@/i18n";
 import { nodeKindAtPath } from "@/utils/nodeXmlEdit";
 import { useTheme } from "@/theme";
@@ -60,42 +61,8 @@ const gizmoActive = ref(false);
 const transformMode = ref<TransformMode>("translate");
 const drillCrumbs = ref<{ path: string; label: string; pending?: boolean }[]>([]);
 let interact: InteractViewport | null = null;
-let loadSeq = 0;
-let lastContent = "";
-let hasFitted = false;
 /** Suppress re-entrant pick→select→highlight loops. */
 let applyingHighlight = false;
-
-/** Ignore style-block text when deciding if the document structure changed. */
-function structureKey(svg: string): string {
-  return svg.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "<style/>");
-}
-
-/**
- * Drop empty groups + normalize newlines so adding an unused `<g>` to defs
- * does not force a viewer rebuild (those groups never affect evaluation).
- * Keep `<style>` text — `:root` / class custom properties drive evaluation.
- */
-function evalAffectingKey(svg: string): string {
-  return svg
-    .replace(/<g\b[^>]*>\s*<\/g>/gi, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    // Removing an empty <g> often leaves a blank line; collapse so compare is stable.
-    .replace(/\n[ \t]*\n+/g, "\n");
-}
-
-function isStyleOnlyChange(prev: string, next: string): boolean {
-  if (!prev.trim() || !next.trim()) return false;
-  return structureKey(prev) === structureKey(next);
-}
-
-function isEvalNoopChange(prev: string, next: string): boolean {
-  if (!prev.trim() || !next.trim()) return false;
-  // Style-only edits (params) must re-evaluate — never treat as noop.
-  if (isStyleOnlyChange(prev, next) && prev !== next) return false;
-  return evalAffectingKey(prev) === evalAffectingKey(next);
-}
 
 function resolveBackground(): number | string {
   return props.background ?? readViewportBackground();
@@ -163,61 +130,38 @@ async function ensureInteract(): Promise<InteractViewport | null> {
   return interact;
 }
 
+const docLoad = useHostDocumentLoad({
+  content: toRef(props, "content"),
+  documentBaseUrl: toRef(props, "documentBaseUrl"),
+  documentAssetUrls: toRef(props, "documentAssetUrls"),
+  getApi: () =>
+    interact
+      ? {
+          loadSvg: (text, opts) => interact!.loadSvg(text, opts),
+          applySvg: (text, opts) => interact!.applySvg(text, opts),
+          setDocument: (text) => interact!.setDocument(text),
+          hasSceneContent: () =>
+            interact!.viewer.viewer.root.children.length > 0,
+        }
+      : null,
+  onError: (message) => emit("error", message),
+  afterLoad: () => syncGizmoUi(),
+});
+
 async function loadContent(
   text: string,
   options: { soft?: boolean; skip?: boolean } = {}
 ): Promise<void> {
-  const seq = ++loadSeq;
-  try {
-    const v = await ensureInteract();
-    if (!v || seq !== loadSeq) return;
-    if (!text.trim()) return;
-    v.setDocument(text);
-    if (options.skip) {
-      lastContent = text;
-      return;
-    }
-    // Only treat as fitted when the scene actually has content. An empty
-    // model (e.g. uses with cleared href) must not lock hasFitted — otherwise
-    // the next load with geometry skips fitCamera and OrbitControls stays
-    // singular (camera/target both at origin).
-    const fit = !hasFitted;
-    const loadOpts = {
-      fitCamera: fit,
-      documentBaseUrl: props.documentBaseUrl,
-      documentAssetUrls: props.documentAssetUrls,
-    };
-    if (options.soft) {
-      await v.applySvg(text, loadOpts);
-    } else {
-      await v.loadSvg(text, loadOpts);
-    }
-    if (fit && v.viewer.viewer.root.children.length > 0) {
-      hasFitted = true;
-    }
-    lastContent = text;
-    syncGizmoUi();
-  } catch (e) {
-    emit("error", e instanceof Error ? e.message : String(e));
-  }
+  await ensureInteract();
+  await docLoad.loadContent(text, options);
 }
 
 onMounted(() => {
   void loadContent(props.content);
 });
 
-watch(
-  () => props.content,
-  (text, prev) => {
-    const from = typeof prev === "string" ? prev : lastContent;
-    if (text === from) return;
-    if (isEvalNoopChange(from, text)) {
-      void loadContent(text, { skip: true });
-      return;
-    }
-    void loadContent(text, { soft: isStyleOnlyChange(from, text) });
-  }
-);
+docLoad.watchContent();
+docLoad.watchAssetsAndBase();
 
 watch(
   () => props.model,
@@ -226,23 +170,6 @@ watch(
     void interact.setModel(model || undefined, { fitCamera: true }).then(() => {
       syncGizmoUi();
     });
-  }
-);
-
-watch(
-  () => props.documentAssetUrls,
-  () => {
-    if (!interact || !props.content) return;
-    void loadContent(props.content, { soft: true });
-  },
-  { deep: true }
-);
-
-watch(
-  () => props.documentBaseUrl,
-  () => {
-    if (!interact || !props.content) return;
-    void loadContent(props.content, { soft: true });
   }
 );
 
@@ -264,19 +191,8 @@ onBeforeUnmount(() => {
 
 defineExpose({
   async reload() {
-    if (interact && props.content) {
-      hasFitted = false;
-      await interact.loadSvg(props.content, {
-        fitCamera: true,
-        documentBaseUrl: props.documentBaseUrl,
-        documentAssetUrls: props.documentAssetUrls,
-      });
-      if (interact.viewer.viewer.root.children.length > 0) {
-        hasFitted = true;
-      }
-      lastContent = props.content;
-      syncGizmoUi();
-    }
+    await ensureInteract();
+    await docLoad.reloadHard();
   },
   getResult(): EvaluationResult | null {
     return interact?.getResult() ?? null;

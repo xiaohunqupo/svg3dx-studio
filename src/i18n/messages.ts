@@ -16,6 +16,8 @@ export const TAG_LABELS = {
   defs: { zh: "定义集", en: "Defs" },
   materials: { zh: "材质集", en: "Materials" },
   styles: { zh: "样式集", en: "Styles" },
+  /** `.svg3dxz` package / local sidecar file tree. */
+  resources: { zh: "资源", en: "Resources" },
   /** Singular / element vocabulary. */
   model: { zh: "模型", en: "model" },
   material: { zh: "材质", en: "material" },

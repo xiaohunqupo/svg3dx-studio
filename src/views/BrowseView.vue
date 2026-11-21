@@ -9,12 +9,12 @@ import SettingsMenu from "@/components/SettingsMenu.vue";
 import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
+import { useDocumentAssets } from "@/composables/useDocumentAssets";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import {
-  buildDocumentAssetUrls,
   defaultAssetHref,
-  deleteDocumentAssets,
+  ingestPackageAssets,
   isGltfFileName,
   putDocumentAsset,
 } from "@/utils/documentAssets";
@@ -61,19 +61,14 @@ const activeContent = computed(() => store.activeFile?.content ?? "");
 const activeDocumentBaseUrl = computed(
   () => store.activeFile?.documentBaseUrl
 );
-const previewAssetUrls = ref<Record<string, string>>({});
+const activeFileId = computed(() => store.activeId);
+const {
+  documentAssetUrls: previewAssetUrls,
+  refreshDocumentAssetUrls: refreshPreviewAssets,
+} = useDocumentAssets(activeFileId);
 const showPreviewSkeleton = computed(
   () => !!activeContent.value && !previewReady.value
 );
-
-async function refreshPreviewAssets(): Promise<void> {
-  const id = store.activeId;
-  if (!id) {
-    previewAssetUrls.value = {};
-    return;
-  }
-  previewAssetUrls.value = await buildDocumentAssetUrls(id);
-}
 const workspaceStyle = computed(() => ({
   gridTemplateColumns: `${sidebarWidth.value}px 0px minmax(0, 1fr)`,
 }));
@@ -131,7 +126,7 @@ watch(
   () => {
     previewReady.value = false;
     clearGltfCache();
-    void refreshPreviewAssets();
+    // Sidecar map clear/refresh is handled by useDocumentAssets(fileId).
   }
 );
 
@@ -188,12 +183,13 @@ async function loadSample(): Promise<void> {
         // Explicit empty clears a previous HTTP base when replacing with a package.
         documentBaseUrl: sample.documentBaseUrl ?? "",
       });
-      await deleteDocumentAssets(file.id);
-      if (sample.packageAssets?.length) {
-        for (const asset of sample.packageAssets) {
-          await putDocumentAsset(file.id, asset.path, asset.blob);
-        }
-      }
+      await ingestPackageAssets(
+        file.id,
+        (sample.packageAssets ?? []).map((a) => ({
+          path: a.path,
+          bytes: a.blob,
+        }))
+      );
     }
     // Drop loose siblings superseded by a fetched `.svg3dxz` package.
     for (const looseName of supersededLooseNames(samples)) {
@@ -285,7 +281,7 @@ function onMainDrop(e: DragEvent): void {
         <ViewportSkeleton v-if="showPreviewSkeleton" />
         <ViewerHost
           v-if="activeContent"
-          :key="(store.activeId ?? 'preview') + ':' + Object.keys(previewAssetUrls).length"
+          :key="store.activeId ?? 'preview'"
           :content="activeContent"
           :document-base-url="activeDocumentBaseUrl"
           :document-asset-urls="previewAssetUrls"

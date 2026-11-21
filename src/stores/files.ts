@@ -10,9 +10,11 @@ import {
   saveFile as idbSave,
   setActiveId,
 } from "@/utils/storage";
-import { deleteDocumentAssets, putDocumentAsset } from "@/utils/documentAssets";
 import {
-  bytesToBlob,
+  deleteDocumentAssets,
+  ingestPackageAssets,
+} from "@/utils/documentAssets";
+import {
   isSvg3dxzFileName,
   openSvg3dxzBytes,
   packageDisplayName,
@@ -116,19 +118,7 @@ export const useFilesStore = defineStore("files", () => {
           select: false,
           documentBaseUrl: "",
         });
-        // Replace assets atomically so a re-drop does not keep stale blobs.
-        await deleteDocumentAssets(file.id);
-        for (const asset of opened.assets) {
-          const mime = asset.path.toLowerCase().endsWith(".gltf")
-            ? "model/gltf+json"
-            : "model/gltf-binary";
-          await putDocumentAsset(
-            file.id,
-            asset.path,
-            bytesToBlob(asset.bytes, mime),
-            mime
-          );
-        }
+        await ingestPackageAssets(file.id, opened.assets);
         created.push(file);
       } else {
         const text = await f.text();

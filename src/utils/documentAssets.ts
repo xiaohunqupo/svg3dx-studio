@@ -4,6 +4,7 @@
  */
 
 import { ASSETS_STORE, idbTxDone, openStudioDb } from "@/utils/storage";
+import { bytesToBlob } from "@/utils/svg3dxz";
 
 export type DocumentAssetRecord = {
   /** `${fileId}::${path}` */
@@ -138,4 +139,120 @@ export function pickGltfFile(): Promise<File | null> {
 
 export function isGltfFileName(name: string): boolean {
   return /\.(glb|gltf)$/i.test(name);
+}
+
+export function mimeForAssetPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".gltf")) return "model/gltf+json";
+  if (lower.endsWith(".glb")) return "model/gltf-binary";
+  if (lower.endsWith(".bin")) return "application/octet-stream";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".ktx2")) return "image/ktx2";
+  return "application/octet-stream";
+}
+
+export type PackageAssetInput = {
+  path: string;
+  bytes: Uint8Array | ArrayBuffer | Blob;
+};
+
+/** Canonical entry path inside a `.svg3dxz` package (matches core `MAIN_ENTRY`). */
+export const PACKAGE_MAIN_ENTRY = "main.svg3dx";
+
+/** One node in a package / sidecar path tree (folders have children). */
+export type AssetPathTreeNode = {
+  name: string;
+  /** Relative path from package / document root. */
+  path: string;
+  children?: AssetPathTreeNode[];
+};
+
+/**
+ * Build a folder tree from flat relative paths (e.g. `assets/bunny.glb`).
+ * Folders sort before files; siblings are locale-sorted by name.
+ */
+export function buildAssetPathTree(paths: string[]): AssetPathTreeNode[] {
+  type Mutable = {
+    name: string;
+    path: string;
+    children?: Map<string, Mutable>;
+  };
+  const root = new Map<string, Mutable>();
+
+  for (const raw of paths) {
+    const parts = normalizeAssetPath(raw).split("/").filter(Boolean);
+    if (!parts.length) continue;
+    let cursor = root;
+    let acc = "";
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!;
+      acc = acc ? `${acc}/${part}` : part;
+      let node = cursor.get(part);
+      if (!node) {
+        node = { name: part, path: acc };
+        cursor.set(part, node);
+      }
+      if (i < parts.length - 1) {
+        if (!node.children) node.children = new Map();
+        cursor = node.children;
+      }
+    }
+  }
+
+  function toList(map: Map<string, Mutable>): AssetPathTreeNode[] {
+    return [...map.values()]
+      .sort((a, b) => {
+        const aDir = !!a.children;
+        const bDir = !!b.children;
+        if (aDir !== bDir) return aDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })
+      .map((n) => ({
+        name: n.name,
+        path: n.path,
+        children: n.children ? toList(n.children) : undefined,
+      }));
+  }
+
+  return toList(root);
+}
+
+/**
+ * Paths shown under the Resources tree for a document.
+ * Packages always include `main.svg3dx`; sidecars follow in path order.
+ */
+export function packageTreePaths(
+  assetPaths: string[],
+  isPackage: boolean
+): string[] {
+  const sidecars = [
+    ...new Set(assetPaths.map(normalizeAssetPath).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  if (!isPackage) return sidecars;
+  return [
+    PACKAGE_MAIN_ENTRY,
+    ...sidecars.filter((p) => p !== PACKAGE_MAIN_ENTRY),
+  ];
+}
+
+/** Replace all sidecars for a document with the given package assets. */
+export async function ingestPackageAssets(
+  fileId: string,
+  assets: PackageAssetInput[]
+): Promise<void> {
+  await deleteDocumentAssets(fileId);
+  for (const asset of assets) {
+    const mime = mimeForAssetPath(asset.path);
+    let blob: Blob;
+    if (asset.bytes instanceof Blob) {
+      blob = asset.bytes;
+    } else if (asset.bytes instanceof Uint8Array) {
+      blob = bytesToBlob(asset.bytes, mime);
+    } else {
+      blob = bytesToBlob(new Uint8Array(asset.bytes), mime);
+    }
+    await putDocumentAsset(fileId, asset.path, blob, mime);
+  }
 }

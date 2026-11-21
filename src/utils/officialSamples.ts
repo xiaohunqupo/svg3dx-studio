@@ -1,5 +1,6 @@
 /** Fetch official samples from the svg3dx GitHub repo. */
 
+import { mimeForAssetPath } from "@/utils/documentAssets";
 import {
   bytesToBlob,
   isSvg3dxzFileName,
@@ -108,12 +109,7 @@ export async function fetchOfficialSamples(): Promise<OfficialSample[]> {
           // No documentBaseUrl — assets are embedded in the package (may be empty).
           packageAssets: opened.assets.map((a) => ({
             path: a.path,
-            blob: bytesToBlob(
-              a.bytes,
-              a.path.toLowerCase().endsWith(".gltf")
-                ? "model/gltf+json"
-                : "model/gltf-binary"
-            ),
+            blob: bytesToBlob(a.bytes, mimeForAssetPath(a.path)),
           })),
         } satisfies OfficialSample;
       }

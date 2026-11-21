@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { clearGltfCache, type EvaluationResult } from "svg3dx-viewer";
 import AppMenus from "@/components/AppMenus.vue";
@@ -16,19 +16,12 @@ import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
+import { useDocumentAssets } from "@/composables/useDocumentAssets";
 import type { DrillCrumb } from "@/interact";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
 import { downloadBlob, downloadText } from "@/utils/storage";
-import {
-  buildDocumentAssetUrls,
-  defaultAssetHref,
-  filterAssetsReferencedInContent,
-  listDocumentAssets,
-  pickGltfFile,
-  putDocumentAsset,
-} from "@/utils/documentAssets";
 import {
   bytesToBlob,
   packageDownloadName,
@@ -77,7 +70,6 @@ const props = defineProps<{ id: string }>();
 
 const store = useFilesStore();
 const router = useRouter();
-const route = useRoute();
 const { t } = useI18n();
 
 const TREE_W_KEY = "svg3dx.studio.treeWidth";
@@ -314,27 +306,19 @@ const bootstrapping = ref(true);
 const file = computed(() => store.getById(props.id) ?? null);
 const dirty = computed(() => file.value?.dirty || draftContent.value !== (file.value?.content ?? ""));
 const pageReady = computed(() => store.ready && !!file.value && !bootstrapping.value);
-/** Local glTF sidecars for the active document (relative href → blob:). */
-const documentAssetUrls = ref<Record<string, string>>({});
-
-async function refreshDocumentAssetUrls(): Promise<void> {
-  if (!file.value) {
-    documentAssetUrls.value = {};
-    return;
-  }
-  documentAssetUrls.value = await buildDocumentAssetUrls(file.value.id);
-}
-
-/** Pick a local .glb/.gltf, store beside the document, return relative href. */
-async function pickAndAttachGltf(): Promise<string | null> {
-  if (!file.value) return null;
-  const picked = await pickGltfFile();
-  if (!picked) return null;
-  const href = defaultAssetHref(picked.name);
-  await putDocumentAsset(file.value.id, href, picked);
-  await refreshDocumentAssetUrls();
-  return href;
-}
+const activeFileId = computed(() => file.value?.id ?? null);
+const {
+  documentAssetUrls,
+  refreshDocumentAssetUrls,
+  pickAndAttachGltf,
+  listReferencedAssets,
+} = useDocumentAssets(activeFileId);
+const documentAssetPaths = computed(() =>
+  Object.keys(documentAssetUrls.value).sort((a, b) => a.localeCompare(b))
+);
+const isPackageDocument = computed(() =>
+  /\.svg3dxz$/i.test(file.value?.name ?? "")
+);
 const contentLoading = computed(
   () =>
     pageReady.value &&
@@ -355,20 +339,13 @@ onMounted(async () => {
   bootstrapping.value = false;
 });
 
+// `props.id` is bound from the route (`props: true`); useDocumentAssets
+// already clears/refreshes the sidecar map when `activeFileId` changes.
 watch(
   () => props.id,
-  async () => {
+  () => {
     clearGltfCache();
     syncFromStore();
-    await refreshDocumentAssetUrls();
-  }
-);
-
-watch(
-  () => route.params.id,
-  async () => {
-    syncFromStore();
-    await refreshDocumentAssetUrls();
   }
 );
 
@@ -776,9 +753,7 @@ function onDownload(): void {
 async function onDownloadPackage(): Promise<void> {
   if (!file.value) return;
   try {
-    const all = await listDocumentAssets(file.value.id);
-    // Skip blobs no longer referenced in markup (undo / href edits).
-    const assets = filterAssetsReferencedInContent(draftContent.value, all);
+    const assets = await listReferencedAssets(draftContent.value);
     const packed = await writeSvg3dxzBytes(
       draftContent.value,
       assets.map((a) => ({ path: a.path, bytes: a.blob }))
@@ -1140,6 +1115,8 @@ onBeforeUnmount(() => {
         :file-name="file.name"
         :dirty="dirty"
         :drill-marks="drillMarks"
+        :asset-paths="documentAssetPaths"
+        :is-package="isPackageDocument"
         @select="onSelect"
         @add-group="onAddGroup"
         @add-model="onAddModel"

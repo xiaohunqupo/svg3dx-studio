@@ -6,7 +6,9 @@ import {
   ChartBubbleIcon,
   DeleteIcon,
   EditIcon,
+  FileIcon,
   FilterClearIcon,
+  FolderOpenIcon,
   JumpIcon,
   LayersIcon,
   Link1Icon,
@@ -14,6 +16,11 @@ import {
   PaletteIcon,
   WidgetIcon,
 } from "tdesign-icons-vue-next";
+import {
+  buildAssetPathTree,
+  packageTreePaths,
+  type AssetPathTreeNode,
+} from "@/utils/documentAssets";
 import {
   ArcIcon,
   BoolCategoryIcon,
@@ -144,6 +151,13 @@ const props = defineProps<{
    * Drill breadcrumb marks. `n` is shown on the right of the matching node.
    */
   drillMarks?: { path: string; n: number }[];
+  /**
+   * Local sidecar paths for this document (e.g. `assets/bunny.glb`).
+   * Combined with `isPackage` to build the Resources file tree.
+   */
+  assetPaths?: string[];
+  /** True when the open document came from a `.svg3dxz` package. */
+  isPackage?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -170,7 +184,13 @@ const emit = defineEmits<{
 
 const { t, tagLabel, elementLabel } = useI18n();
 
-type TreeKind = "section" | "model" | "geometry" | "style" | "material";
+type TreeKind =
+  | "section"
+  | "model"
+  | "geometry"
+  | "style"
+  | "material"
+  | "resource";
 
 type TreeItem = {
   value: string;
@@ -192,6 +212,10 @@ type TreeItem = {
     materialColor?: string;
     materialMetalness?: string;
     materialRoughness?: string;
+    /** Relative path inside the package / document asset tree. */
+    resourcePath?: string;
+    /** Folder vs leaf file under Resources. */
+    resourceKind?: "folder" | "file";
     /** Tree trailing action button(s). */
     action?:
       | "add-group"
@@ -226,7 +250,58 @@ type TreeItem = {
 
 const treeData = ref<TreeItem[]>([]);
 const actived = ref<string[]>([]);
-const expanded = ref<string[]>(["models", "defs", "materials", "style"]);
+const expanded = ref<string[]>([
+  "models",
+  "defs",
+  "materials",
+  "style",
+  "resources",
+]);
+
+function resourceTreeValue(path: string): string {
+  return `resource:${path}`;
+}
+
+function mapAssetPathNode(node: AssetPathTreeNode): TreeItem {
+  const isFolder = !!node.children?.length;
+  return {
+    value: resourceTreeValue(node.path),
+    label: node.name,
+    meta: {
+      kind: "resource",
+      icon: isFolder ? FolderOpenIcon : FileIcon,
+      resourcePath: node.path,
+      resourceKind: isFolder ? "folder" : "file",
+    },
+    children: node.children?.map(mapAssetPathNode),
+  };
+}
+
+/** Resources section: package entry + sidecar file tree (when applicable). */
+function buildResourcesSection(): TreeItem | null {
+  const paths = packageTreePaths(
+    props.assetPaths ?? [],
+    !!props.isPackage
+  );
+  if (!paths.length) return null;
+  return {
+    value: "resources",
+    label: tagLabel("resources"),
+    meta: { kind: "section", icon: LayersIcon },
+    children: buildAssetPathTree(paths).map(mapAssetPathNode),
+  };
+}
+
+function collectResourceExpandKeys(item: TreeItem): string[] {
+  const keys: string[] = [];
+  if (item.meta.kind === "resource" && item.meta.resourceKind === "folder") {
+    keys.push(item.value);
+  }
+  for (const child of item.children ?? []) {
+    keys.push(...collectResourceExpandKeys(child));
+  }
+  return keys;
+}
 
 const PRIMITIVE_KIND_SET = new Set<string>(PRIMITIVE_MENU.map((p) => p.kind));
 
@@ -420,6 +495,18 @@ function ancestorPaths(path: string): string[] {
   }
   if (path.startsWith("style:")) return ["style"];
   if (path.startsWith("material:")) return ["materials"];
+  if (path === "resources" || path.startsWith("resource:")) {
+    const parts: string[] = ["resources"];
+    if (!path.startsWith("resource:")) return parts;
+    const rel = path.slice("resource:".length);
+    const segs = rel.split("/").filter(Boolean);
+    let cur = "";
+    for (let i = 0; i < segs.length - 1; i++) {
+      cur = cur ? `${cur}/${segs[i]}` : segs[i]!;
+      parts.push(resourceTreeValue(cur));
+    }
+    return parts;
+  }
   const parts: string[] = ["defs"];
   const m = new RegExp(
     `^(defs:[^.]+|${SYNTHETIC_TREE_PATH_PREFIX}\\d+)(.*)$`
@@ -1124,7 +1211,7 @@ function buildTree(
             : undefined,
       }));
 
-  return [
+  const sections: TreeItem[] = [
     {
       value: "models",
       label: tagLabel("models"),
@@ -1226,6 +1313,9 @@ function buildTree(
       ],
     },
   ];
+  const resources = buildResourcesSection();
+  if (resources) sections.push(resources);
+  return sections;
 }
 
 /** Rebuild style tree when categories appear/disappear (not on prop edits). */
@@ -1306,11 +1396,15 @@ watch(
     }
     if (!prev) {
       rebuildTree();
+      const resourceKeys = (treeData.value.find((n) => n.value === "resources")
+        ?.children ?? []).flatMap(collectResourceExpandKeys);
       expanded.value = [
         "models",
         "defs",
         "materials",
         "style",
+        "resources",
+        ...resourceKeys,
         ...r.models.map((m) => `model:${m.id}`),
       ];
       return;
@@ -1343,6 +1437,22 @@ watch(locale, () => {
   if (props.result) rebuildTree();
 });
 
+function assetPathsKey(paths: string[] | undefined): string {
+  return (paths ?? []).slice().sort().join("\n");
+}
+
+watch(
+  () => [props.isPackage, assetPathsKey(props.assetPaths)] as const,
+  (next, prev) => {
+    if (!props.result) return;
+    if (prev && next[0] === prev[0] && next[1] === prev[1]) return;
+    rebuildTree();
+    if (next[1] && !expanded.value.includes("resources")) {
+      expanded.value = [...expanded.value, "resources"];
+    }
+  }
+);
+
 function findItem(items: TreeItem[], value: string): TreeItem | null {
   for (const it of items) {
     if (it.value === value) return it;
@@ -1366,7 +1476,9 @@ function onActive(values: Array<string | number>): void {
     path === "models" ||
     path === "defs" ||
     path === "materials" ||
-    path === "style"
+    path === "style" ||
+    path === "resources" ||
+    path.startsWith("resource:")
   ) {
     return;
   }
@@ -1412,6 +1524,7 @@ function onActive(values: Array<string | number>): void {
 function labelHint(item: TreeItem | undefined): string {
   const meta = item?.meta;
   if (!meta) return "";
+  if (meta.kind === "resource") return "";
   if (meta.kind === "style") {
     // Category rows: do not hint a single consumer id (many may share it).
     if (meta.styleScope === "root") return ":root";
