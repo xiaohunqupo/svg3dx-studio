@@ -440,7 +440,11 @@ export class InteractViewport {
 
   async loadSvg(
     svgText: string,
-    options: { fitCamera?: boolean } = {}
+    options: {
+      fitCamera?: boolean;
+      documentBaseUrl?: string;
+      documentAssetUrls?: Record<string, string>;
+    } = {}
   ): Promise<EvaluationResult> {
     this.transform.detach();
     this.clearSectionProxies();
@@ -455,7 +459,11 @@ export class InteractViewport {
 
   async applySvg(
     svgText: string,
-    options: { fitCamera?: boolean } = {}
+    options: {
+      fitCamera?: boolean;
+      documentBaseUrl?: string;
+      documentAssetUrls?: Record<string, string>;
+    } = {}
   ): Promise<EvaluationResult> {
     this.transform.detach();
     this.clearSectionProxies();

@@ -4,6 +4,8 @@ export interface StudioFile {
   content: string;
   updatedAt: number;
   dirty?: boolean;
+  /** Base URL for resolving relative `s3dx:gltf` hrefs (e.g. official samples). */
+  documentBaseUrl?: string;
 }
 
 /** Insertable geometry kinds (svg3dx draft 0.1). */
@@ -24,7 +26,8 @@ export type GeometryKind =
   | "revolve"
   | "loft"
   | "sweep"
-  | "pipe";
+  | "pipe"
+  | "gltf";
 
 /** Bool / logic / loop containers (draft §5–7). */
 export type ContainerKind =

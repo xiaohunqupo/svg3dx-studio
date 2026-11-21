@@ -12,9 +12,18 @@ import ViewerHost from "@/components/ViewerHost.vue";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import {
+  buildDocumentAssetUrls,
+  defaultAssetHref,
+  deleteDocumentAssets,
+  isGltfFileName,
+  putDocumentAsset,
+} from "@/utils/documentAssets";
+import {
   fetchOfficialSamples,
   preferredSampleName,
+  supersededLooseNames,
 } from "@/utils/officialSamples";
+import { clearGltfCache } from "svg3dx-viewer";
 
 const SIDEBAR_W_KEY = "svg3dx.studio.browseSidebarWidth";
 const SIDEBAR_W_MIN = 200;
@@ -49,9 +58,22 @@ const workspaceEl = ref<HTMLElement | null>(null);
 
 const showEmpty = computed(() => store.ready && store.isEmpty);
 const activeContent = computed(() => store.activeFile?.content ?? "");
+const activeDocumentBaseUrl = computed(
+  () => store.activeFile?.documentBaseUrl
+);
+const previewAssetUrls = ref<Record<string, string>>({});
 const showPreviewSkeleton = computed(
   () => !!activeContent.value && !previewReady.value
 );
+
+async function refreshPreviewAssets(): Promise<void> {
+  const id = store.activeId;
+  if (!id) {
+    previewAssetUrls.value = {};
+    return;
+  }
+  previewAssetUrls.value = await buildDocumentAssetUrls(id);
+}
 const workspaceStyle = computed(() => ({
   gridTemplateColumns: `${sidebarWidth.value}px 0px minmax(0, 1fr)`,
 }));
@@ -93,6 +115,7 @@ onMounted(async () => {
   window.addEventListener("pointerup", stopResize);
   window.addEventListener("pointercancel", stopResize);
   if (!store.ready) await store.hydrate();
+  await refreshPreviewAssets();
 });
 
 onBeforeUnmount(() => {
@@ -100,23 +123,55 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerup", stopResize);
   window.removeEventListener("pointercancel", stopResize);
   stopResize();
+  clearGltfCache();
 });
 
 watch(
   () => store.activeId,
   () => {
     previewReady.value = false;
+    clearGltfCache();
+    void refreshPreviewAssets();
   }
 );
 
 async function onFiles(list: FileList | File[]): Promise<void> {
   try {
-    const created = await store.addBrowserFiles(list);
-    if (!created.length) {
+    const arr = Array.from(list);
+    const gltfs = arr.filter((f) => isGltfFileName(f.name));
+    const docs = arr.filter(
+      (f) => /\.(svg|svg3dx|svg3dxz)$/i.test(f.name)
+    );
+
+    // Documents first so a multi-drop of `.svg3dx` + `.glb` can attach to the new file.
+    if (docs.length) {
+      const created = await store.addBrowserFiles(docs);
+      if (!created.length) {
+        MessagePlugin.warning(t("browse.noSvgFiles"));
+        return;
+      }
+      MessagePlugin.success(t("browse.filesAdded", { n: created.length }));
+    }
+
+    if (gltfs.length) {
+      const targetId = store.activeId;
+      if (!targetId) {
+        MessagePlugin.warning(t("browse.gltfNeedsDocument"));
+      } else {
+        for (const f of gltfs) {
+          await putDocumentAsset(targetId, defaultAssetHref(f.name), f);
+        }
+        MessagePlugin.success(
+          t("app.gltfAttached", { name: gltfs.map((g) => g.name).join(", ") })
+        );
+      }
+    }
+
+    if (!docs.length && !gltfs.length) {
       MessagePlugin.warning(t("browse.noSvgFiles"));
       return;
     }
-    MessagePlugin.success(t("browse.filesAdded", { n: created.length }));
+    await refreshPreviewAssets();
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
   }
@@ -128,11 +183,27 @@ async function loadSample(): Promise<void> {
   try {
     const samples = await fetchOfficialSamples();
     for (const sample of samples) {
-      await store.upsertFromText(sample.name, sample.content, { select: false });
+      const file = await store.upsertFromText(sample.name, sample.content, {
+        select: false,
+        // Explicit empty clears a previous HTTP base when replacing with a package.
+        documentBaseUrl: sample.documentBaseUrl ?? "",
+      });
+      await deleteDocumentAssets(file.id);
+      if (sample.packageAssets?.length) {
+        for (const asset of sample.packageAssets) {
+          await putDocumentAsset(file.id, asset.path, asset.blob);
+        }
+      }
+    }
+    // Drop loose siblings superseded by a fetched `.svg3dxz` package.
+    for (const looseName of supersededLooseNames(samples)) {
+      const old = store.files.find((f) => f.name === looseName);
+      if (old) await store.remove(old.id);
     }
     const preferred = preferredSampleName(samples);
     const active = store.files.find((f) => f.name === preferred);
     if (active) store.select(active.id);
+    await refreshPreviewAssets();
     MessagePlugin.success(t("browse.samplesLoaded", { n: samples.length }));
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
@@ -214,8 +285,10 @@ function onMainDrop(e: DragEvent): void {
         <ViewportSkeleton v-if="showPreviewSkeleton" />
         <ViewerHost
           v-if="activeContent"
-          :key="store.activeId ?? 'preview'"
+          :key="(store.activeId ?? 'preview') + ':' + Object.keys(previewAssetUrls).length"
           :content="activeContent"
+          :document-base-url="activeDocumentBaseUrl"
+          :document-asset-urls="previewAssetUrls"
           @error="(m) => MessagePlugin.error(m)"
           @result="previewReady = true"
         />

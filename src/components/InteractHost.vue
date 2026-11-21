@@ -26,11 +26,17 @@ const props = withDefaults(
     paramsEl?: HTMLElement | null;
     /** Override scene background; default follows TDesign `--td-bg-color-page`. */
     background?: number | string;
+    /** Base URL for relative `s3dx:gltf` hrefs. */
+    documentBaseUrl?: string;
+    /** Local sidecar map: relative href → blob URL. */
+    documentAssetUrls?: Record<string, string>;
   }>(),
   {
     model: undefined,
     paramsEl: null,
     background: undefined,
+    documentBaseUrl: undefined,
+    documentAssetUrls: undefined,
   }
 );
 
@@ -176,10 +182,15 @@ async function loadContent(
     // the next load with geometry skips fitCamera and OrbitControls stays
     // singular (camera/target both at origin).
     const fit = !hasFitted;
+    const loadOpts = {
+      fitCamera: fit,
+      documentBaseUrl: props.documentBaseUrl,
+      documentAssetUrls: props.documentAssetUrls,
+    };
     if (options.soft) {
-      await v.applySvg(text, { fitCamera: fit });
+      await v.applySvg(text, loadOpts);
     } else {
-      await v.loadSvg(text, { fitCamera: fit });
+      await v.loadSvg(text, loadOpts);
     }
     if (fit && v.viewer.viewer.root.children.length > 0) {
       hasFitted = true;
@@ -219,6 +230,23 @@ watch(
 );
 
 watch(
+  () => props.documentAssetUrls,
+  () => {
+    if (!interact || !props.content) return;
+    void loadContent(props.content, { soft: true });
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.documentBaseUrl,
+  () => {
+    if (!interact || !props.content) return;
+    void loadContent(props.content, { soft: true });
+  }
+);
+
+watch(
   [colorScheme, () => props.background],
   () => {
     syncBackground();
@@ -238,7 +266,11 @@ defineExpose({
   async reload() {
     if (interact && props.content) {
       hasFitted = false;
-      await interact.loadSvg(props.content, { fitCamera: true });
+      await interact.loadSvg(props.content, {
+        fitCamera: true,
+        documentBaseUrl: props.documentBaseUrl,
+        documentAssetUrls: props.documentAssetUrls,
+      });
       if (interact.viewer.viewer.root.children.length > 0) {
         hasFitted = true;
       }

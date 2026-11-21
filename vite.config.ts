@@ -45,19 +45,41 @@ export default defineConfig({
     {
       name: "svg3dx-sample-api",
       configureServer(server) {
+        const samplesDir = path.join(svg3dxRoot, "samples");
         server.middlewares.use("/api/sample", (_req, res) => {
           const sample = resolveSamplePath();
           if (!sample) {
             res.statusCode = 404;
             res.end(
               JSON.stringify({
-                error: `missing sample under ${path.join(svg3dxRoot, "samples")}`,
+                error: `missing sample under ${samplesDir}`,
               })
             );
             return;
           }
           res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
           fs.createReadStream(sample).pipe(res);
+        });
+        // Local loose `.svg3dx` + relative `assets/*.glb` during `vite dev`.
+        server.middlewares.use("/svg3dx-samples", (req, res, next) => {
+          const rel = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/");
+          const filePath = path.normalize(path.join(samplesDir, rel));
+          if (!filePath.startsWith(samplesDir) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+            res.statusCode = 404;
+            res.end("not found");
+            return;
+          }
+          const ext = path.extname(filePath).toLowerCase();
+          const type =
+            ext === ".glb"
+              ? "model/gltf-binary"
+              : ext === ".gltf"
+                ? "model/gltf+json"
+                : ext === ".svg" || ext === ".svg3dx"
+                  ? "image/svg+xml; charset=utf-8"
+                  : "application/octet-stream";
+          res.setHeader("Content-Type", type);
+          fs.createReadStream(filePath).pipe(res);
         });
       },
     },

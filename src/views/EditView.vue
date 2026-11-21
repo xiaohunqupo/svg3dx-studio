@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
-import type { EvaluationResult } from "svg3dx-viewer";
+import { clearGltfCache, type EvaluationResult } from "svg3dx-viewer";
 import AppMenus from "@/components/AppMenus.vue";
 import ReposMenu from "@/components/ReposMenu.vue";
 import SettingsMenu from "@/components/SettingsMenu.vue";
@@ -20,8 +20,22 @@ import type { DrillCrumb } from "@/interact";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
-import { downloadText } from "@/utils/storage";
+import { downloadBlob, downloadText } from "@/utils/storage";
 import {
+  buildDocumentAssetUrls,
+  defaultAssetHref,
+  filterAssetsReferencedInContent,
+  listDocumentAssets,
+  pickGltfFile,
+  putDocumentAsset,
+} from "@/utils/documentAssets";
+import {
+  bytesToBlob,
+  packageDownloadName,
+  writeSvg3dxzBytes,
+} from "@/utils/svg3dxz";
+import {
+  gltfSnippet,
   insertChildIntoGroup,
   insertEmptyGroup,
   insertEmptyMaterial,
@@ -300,6 +314,27 @@ const bootstrapping = ref(true);
 const file = computed(() => store.getById(props.id) ?? null);
 const dirty = computed(() => file.value?.dirty || draftContent.value !== (file.value?.content ?? ""));
 const pageReady = computed(() => store.ready && !!file.value && !bootstrapping.value);
+/** Local glTF sidecars for the active document (relative href → blob:). */
+const documentAssetUrls = ref<Record<string, string>>({});
+
+async function refreshDocumentAssetUrls(): Promise<void> {
+  if (!file.value) {
+    documentAssetUrls.value = {};
+    return;
+  }
+  documentAssetUrls.value = await buildDocumentAssetUrls(file.value.id);
+}
+
+/** Pick a local .glb/.gltf, store beside the document, return relative href. */
+async function pickAndAttachGltf(): Promise<string | null> {
+  if (!file.value) return null;
+  const picked = await pickGltfFile();
+  if (!picked) return null;
+  const href = defaultAssetHref(picked.name);
+  await putDocumentAsset(file.value.id, href, picked);
+  await refreshDocumentAssetUrls();
+  return href;
+}
 const contentLoading = computed(
   () =>
     pageReady.value &&
@@ -316,17 +351,25 @@ onMounted(async () => {
   bootstrapping.value = true;
   if (!store.ready) await store.hydrate();
   syncFromStore();
+  await refreshDocumentAssetUrls();
   bootstrapping.value = false;
 });
 
 watch(
   () => props.id,
-  () => syncFromStore()
+  async () => {
+    clearGltfCache();
+    syncFromStore();
+    await refreshDocumentAssetUrls();
+  }
 );
 
 watch(
   () => route.params.id,
-  () => syncFromStore()
+  async () => {
+    syncFromStore();
+    await refreshDocumentAssetUrls();
+  }
 );
 
 watch(selected, () => {
@@ -547,10 +590,17 @@ async function onAddChild(payload: {
   kind: AddChildKind;
 }): Promise<void> {
   if (!file.value) return;
+  let snippet: string | undefined;
+  if (payload.kind === "gltf") {
+    const href = await pickAndAttachGltf();
+    if (!href) return;
+    snippet = gltfSnippet(href);
+  }
   const { content, childId, kind } = insertChildIntoGroup(
     draftContent.value,
     payload.parentGroupId,
-    payload.kind
+    payload.kind,
+    snippet ? { snippet } : undefined
   );
   draftContent.value = content;
   await store.updateContent(file.value.id, content, true);
@@ -566,7 +616,12 @@ async function onInsertChildAtPath(payload: {
 }): Promise<void> {
   if (!file.value) return;
   const parentKind = nodeKindAtPath(draftContent.value, payload.parentPath)?.kind;
-  const snippet = snippetForPathInsert(payload.kind, parentKind);
+  let snippet = snippetForPathInsert(payload.kind, parentKind);
+  if (payload.kind === "gltf") {
+    const href = await pickAndAttachGltf();
+    if (!href) return;
+    snippet = gltfSnippet(href);
+  }
   if (!snippet) return;
   const content = insertXmlAtPath(
     draftContent.value,
@@ -718,6 +773,24 @@ function onDownload(): void {
   MessagePlugin.success(t("app.downloaded"));
 }
 
+async function onDownloadPackage(): Promise<void> {
+  if (!file.value) return;
+  try {
+    const all = await listDocumentAssets(file.value.id);
+    // Skip blobs no longer referenced in markup (undo / href edits).
+    const assets = filterAssetsReferencedInContent(draftContent.value, all);
+    const packed = await writeSvg3dxzBytes(
+      draftContent.value,
+      assets.map((a) => ({ path: a.path, bytes: a.blob }))
+    );
+    const name = packageDownloadName(file.value.name);
+    downloadBlob(name, bytesToBlob(packed, "application/zip"));
+    MessagePlugin.success(t("app.downloadedPackage"));
+  } catch (e) {
+    MessagePlugin.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
 function onSelect(payload: TreeSelectPayload | null): void {
   selected.value = payload;
   interactHost.value?.setHighlight(payload?.path ?? null);
@@ -846,6 +919,13 @@ async function onStyleCategoryRename(payload: {
   await nextTick();
   treePanel.value?.syncAfterEdit(newPath, { select: "self" });
   revealSelectedInSource();
+}
+
+async function onPickGltfHref(payload: { path: string }): Promise<void> {
+  const href = await pickAndAttachGltf();
+  if (!href) return;
+  await onNodeAttrsChange({ path: payload.path, updates: { href } });
+  MessagePlugin.success(t("app.gltfAttached", { name: href }));
 }
 
 async function onNodeAttrsChange(payload: {
@@ -1010,6 +1090,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointercancel", stopResize);
   window.removeEventListener("keydown", onEditKeydown);
   stopResize();
+  clearGltfCache();
 });
 </script>
 
@@ -1029,6 +1110,7 @@ onBeforeUnmount(() => {
         :can-redo="canRedo"
         @save="onSave"
         @export="onDownload"
+        @export-package="onDownloadPackage"
         @back="goBrowse"
         @undo="() => onUndo({ focusSource: true })"
         @redo="() => onRedo({ focusSource: true })"
@@ -1127,6 +1209,8 @@ onBeforeUnmount(() => {
             :key="file.id"
             :content="draftContent"
             :model="activeModelId || undefined"
+            :document-base-url="file.documentBaseUrl"
+            :document-asset-urls="documentAssetUrls"
             @result="onResult"
             @error="(m) => MessagePlugin.error(m)"
             @pick="onViewportPick"
@@ -1157,6 +1241,7 @@ onBeforeUnmount(() => {
           @style-category-rename="onStyleCategoryRename"
           @node-attrs-change="onNodeAttrsChange"
           @edit-section="onEditSection"
+          @pick-gltf-href="onPickGltfHref"
         />
       </aside>
     </div>

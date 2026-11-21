@@ -27,7 +27,7 @@ const title = computed(() =>
 );
 const resolvedHint = computed(() => props.hint ?? t("browse.dropHint"));
 // Extensions only — MIME extras like text/xml / octet-stream flood the OS picker.
-const accept = ".svg,.svg3dx";
+const accept = ".svg,.svg3dx,.svg3dxz,.glb,.gltf";
 
 function onSelectChange(files: File[]): void {
   if (!files.length) return;

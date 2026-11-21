@@ -92,6 +92,7 @@ const emit = defineEmits<{
   styleCategoryRename: [payload: { from: string; to: string }];
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
   editSection: [payload: { path: string }];
+  pickGltfHref: [payload: { path: string }];
 }>();
 
 const canEditSectionProfile = computed(() => {
@@ -104,6 +105,18 @@ function openSectionProfile(): void {
   const sel = props.selected;
   if (!sel || sel.kind !== "geometry") return;
   emit("editSection", { path: sel.path });
+}
+
+const isGltfHrefField = computed(() => {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry") return false;
+  return sel.node.type === "primitive" && sel.node.kind === "gltf";
+});
+
+function browseGltfHref(): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry") return;
+  emit("pickGltfHref", { path: sel.path });
 }
 
 const {
@@ -2116,6 +2129,38 @@ function commitStyleCategoryName(): void {
                       }
                     "
                   />
+                  <div
+                    v-else-if="
+                      isGltfHrefField &&
+                      (row.field.name === 'href' ||
+                        row.field.name === 'xlink:href')
+                    "
+                    class="value-input-row"
+                  >
+                    <t-input
+                      v-model="draft[row.field.name]"
+                      clearable
+                      class="value-input"
+                      :placeholder="
+                        row.field.placeholder || 'assets/model.glb'
+                      "
+                      @blur="commitField(row.field.name)"
+                      @enter="commitField(row.field.name)"
+                      @clear="
+                        () => {
+                          draft[row.field.name] = '';
+                          commitField(row.field.name);
+                        }
+                      "
+                    />
+                    <t-button
+                      size="small"
+                      variant="outline"
+                      @click="browseGltfHref"
+                    >
+                      {{ t("app.browseGltf") }}
+                    </t-button>
+                  </div>
                   <HrefRefInput
                     v-else-if="
                       row.field.name === 'href' ||

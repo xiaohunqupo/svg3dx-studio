@@ -1,11 +1,14 @@
 import type { StudioFile } from "@/types/file";
 
 const DB_NAME = "svg3dx-studio";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "files";
+/** Shared with `documentAssets.ts` — keep schema upgrades in one place. */
+export const ASSETS_STORE = "assets";
 const ACTIVE_KEY = "svg3dx-studio:active-id";
 
-function openDb(): Promise<IDBDatabase> {
+/** Open the studio IndexedDB (files + document assets). */
+export function openStudioDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
@@ -13,13 +16,17 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(ASSETS_STORE)) {
+        const assets = db.createObjectStore(ASSETS_STORE, { keyPath: "key" });
+        assets.createIndex("fileId", "fileId", { unique: false });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("indexedDB open failed"));
   });
 }
 
-function txDone(tx: IDBTransaction): Promise<void> {
+export function idbTxDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("indexedDB tx failed"));
@@ -28,7 +35,7 @@ function txDone(tx: IDBTransaction): Promise<void> {
 }
 
 export async function loadAllFiles(): Promise<StudioFile[]> {
-  const db = await openDb();
+  const db = await openStudioDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).getAll();
@@ -41,32 +48,32 @@ export async function loadAllFiles(): Promise<StudioFile[]> {
 }
 
 export async function saveFile(file: StudioFile): Promise<void> {
-  const db = await openDb();
+  const db = await openStudioDb();
   const tx = db.transaction(STORE, "readwrite");
   tx.objectStore(STORE).put(file);
-  await txDone(tx);
+  await idbTxDone(tx);
 }
 
 export async function saveFiles(files: StudioFile[]): Promise<void> {
-  const db = await openDb();
+  const db = await openStudioDb();
   const tx = db.transaction(STORE, "readwrite");
   const store = tx.objectStore(STORE);
   for (const f of files) store.put(f);
-  await txDone(tx);
+  await idbTxDone(tx);
 }
 
 export async function deleteFile(id: string): Promise<void> {
-  const db = await openDb();
+  const db = await openStudioDb();
   const tx = db.transaction(STORE, "readwrite");
   tx.objectStore(STORE).delete(id);
-  await txDone(tx);
+  await idbTxDone(tx);
 }
 
 export async function clearAllFiles(): Promise<void> {
-  const db = await openDb();
+  const db = await openStudioDb();
   const tx = db.transaction(STORE, "readwrite");
   tx.objectStore(STORE).clear();
-  await txDone(tx);
+  await idbTxDone(tx);
 }
 
 export function getActiveId(): string | null {
@@ -98,9 +105,19 @@ export function downloadText(filename: string, content: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename.endsWith(".svg") || filename.endsWith(".svg3dx")
-    ? filename
-    : `${filename}.svg3dx`;
+  let name = filename;
+  if (/\.svg3dxz$/i.test(name)) name = name.replace(/\.svg3dxz$/i, ".svg3dx");
+  else if (!/\.(svg|svg3dx)$/i.test(name)) name = `${name}.svg3dx`;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }

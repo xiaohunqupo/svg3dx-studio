@@ -68,6 +68,7 @@ import type { AddChildKind, GeometryKind } from "@/types/file";
 import { extractDocumentMaterials } from "@/utils/documentMaterials";
 import {
   ADD_CHILD_MENU,
+  ASSET_MENU,
   BOOL_MENU,
   CURVE_MENU,
   LOGIC_MENU,
@@ -542,8 +543,7 @@ function kindIcon(kind: string): Component {
       return LoftIcon;
     case "sweep":
       return SweepIcon;
-    case "mesh":
-    case "triangles":
+    case "gltf":
       return LayersIcon;
     case "group":
       return GroupIcon;
@@ -680,6 +680,7 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
   categoryOption("app.addCurve", "__add-curve", CurveCategoryIcon, CURVE_MENU),
   categoryOption("app.addSolid", "__add-solid", SolidCategoryIcon, SOLID_MENU),
   categoryOption("app.addModeling", "__add-modeling", ModelingCategoryIcon, MODELING_MENU),
+  categoryOption("app.addAsset", "__add-asset", LayersIcon, ASSET_MENU),
   categoryOption("app.addBool", "__add-bool", BoolCategoryIcon, BOOL_MENU),
   categoryOption("app.addLogic", "__add-logic", LogicCategoryIcon, LOGIC_MENU),
   categoryOption("app.addLoop", "__add-loop", LoopIcon, LOOP_MENU),

@@ -1129,6 +1129,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
       },
     },
   ],
+  gltf: [{ name: "href", placeholder: "assets/model.glb" }],
 };
 
 export const GROUP_BASIC_FIELDS: AttrField[] = [

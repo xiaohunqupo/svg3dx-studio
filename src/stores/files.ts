@@ -10,6 +10,13 @@ import {
   saveFile as idbSave,
   setActiveId,
 } from "@/utils/storage";
+import { deleteDocumentAssets, putDocumentAsset } from "@/utils/documentAssets";
+import {
+  bytesToBlob,
+  isSvg3dxzFileName,
+  openSvg3dxzBytes,
+  packageDisplayName,
+} from "@/utils/svg3dxz";
 
 function normalizeName(name: string): string {
   return name.trim() || "untitled.svg3dx";
@@ -52,7 +59,7 @@ export const useFilesStore = defineStore("files", () => {
   async function upsertFromText(
     name: string,
     content: string,
-    opts?: { select?: boolean; id?: string }
+    opts?: { select?: boolean; id?: string; documentBaseUrl?: string }
   ): Promise<StudioFile> {
     const now = Date.now();
     const existing = opts?.id
@@ -67,6 +74,10 @@ export const useFilesStore = defineStore("files", () => {
         content,
         updatedAt: now,
         dirty: false,
+        documentBaseUrl:
+          opts?.documentBaseUrl !== undefined
+            ? opts.documentBaseUrl
+            : existing.documentBaseUrl,
       };
       files.value = files.value.map((f) => (f.id === file.id ? file : f));
     } else {
@@ -76,6 +87,7 @@ export const useFilesStore = defineStore("files", () => {
         content,
         updatedAt: now,
         dirty: false,
+        documentBaseUrl: opts?.documentBaseUrl,
       };
       files.value = [file, ...files.value];
     }
@@ -89,13 +101,39 @@ export const useFilesStore = defineStore("files", () => {
   }
 
   async function addBrowserFiles(list: FileList | File[]): Promise<StudioFile[]> {
-    const arr = Array.from(list).filter((f) => /\.(svg|svg3dx)$/i.test(f.name));
+    const arr = Array.from(list).filter(
+      (f) => /\.(svg|svg3dx)$/i.test(f.name) || isSvg3dxzFileName(f.name)
+    );
     if (!arr.length) return [];
 
     const created: StudioFile[] = [];
     for (const f of arr) {
-      const text = await f.text();
-      created.push(await upsertFromText(f.name, text, { select: false }));
+      if (isSvg3dxzFileName(f.name)) {
+        const opened = await openSvg3dxzBytes(await f.arrayBuffer());
+        // Empty base URL: sidecars come from the package via documentAssets, not HTTP.
+        // XML-only packages (no sidecars) are valid.
+        const file = await upsertFromText(packageDisplayName(f.name), opened.mainXml, {
+          select: false,
+          documentBaseUrl: "",
+        });
+        // Replace assets atomically so a re-drop does not keep stale blobs.
+        await deleteDocumentAssets(file.id);
+        for (const asset of opened.assets) {
+          const mime = asset.path.toLowerCase().endsWith(".gltf")
+            ? "model/gltf+json"
+            : "model/gltf-binary";
+          await putDocumentAsset(
+            file.id,
+            asset.path,
+            bytesToBlob(asset.bytes, mime),
+            mime
+          );
+        }
+        created.push(file);
+      } else {
+        const text = await f.text();
+        created.push(await upsertFromText(f.name, text, { select: false }));
+      }
     }
     if (created.length) {
       activeId.value = created[0].id;
@@ -140,6 +178,7 @@ export const useFilesStore = defineStore("files", () => {
 
   async function remove(id: string): Promise<void> {
     files.value = files.value.filter((f) => f.id !== id);
+    await deleteDocumentAssets(id);
     await idbDelete(id);
     if (activeId.value === id) {
       activeId.value = files.value[0]?.id ?? null;
@@ -148,6 +187,9 @@ export const useFilesStore = defineStore("files", () => {
   }
 
   async function clearAll(): Promise<void> {
+    for (const f of files.value) {
+      await deleteDocumentAssets(f.id);
+    }
     await idbClearAll();
     files.value = [];
     activeId.value = null;

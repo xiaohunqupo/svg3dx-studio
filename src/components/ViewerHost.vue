@@ -17,11 +17,17 @@ const props = withDefaults(
     paramsEl?: HTMLElement | null;
     /** Override scene background; default follows TDesign `--td-bg-color-page`. */
     background?: number | string;
+    /** Base URL for relative `s3dx:gltf` hrefs. */
+    documentBaseUrl?: string;
+    /** Local sidecar map: relative href → blob URL. */
+    documentAssetUrls?: Record<string, string>;
   }>(),
   {
     model: undefined,
     paramsEl: null,
     background: undefined,
+    documentBaseUrl: undefined,
+    documentAssetUrls: undefined,
   }
 );
 
@@ -109,10 +115,15 @@ async function loadContent(
     }
     // Only mark fitted when the scene has content (see InteractHost).
     const fit = !hasFitted;
+    const loadOpts = {
+      fitCamera: fit,
+      documentBaseUrl: props.documentBaseUrl,
+      documentAssetUrls: props.documentAssetUrls,
+    };
     if (options.soft) {
-      await v.applySvg(text, { fitCamera: fit });
+      await v.applySvg(text, loadOpts);
     } else {
-      await v.loadSvg(text, { fitCamera: fit });
+      await v.loadSvg(text, loadOpts);
     }
     if (fit && v.viewer.root.children.length > 0) {
       hasFitted = true;
@@ -149,6 +160,23 @@ watch(
 );
 
 watch(
+  () => props.documentAssetUrls,
+  () => {
+    if (!embed || !props.content) return;
+    void loadContent(props.content, { soft: true });
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.documentBaseUrl,
+  () => {
+    if (!embed || !props.content) return;
+    void loadContent(props.content, { soft: true });
+  }
+);
+
+watch(
   [colorScheme, () => props.background],
   () => {
     syncBackground();
@@ -168,7 +196,11 @@ defineExpose({
   async reload() {
     if (embed && props.content) {
       hasFitted = false;
-      await embed.loadSvg(props.content, { fitCamera: true });
+      await embed.loadSvg(props.content, {
+        fitCamera: true,
+        documentBaseUrl: props.documentBaseUrl,
+        documentAssetUrls: props.documentAssetUrls,
+      });
       if (embed.viewer.root.children.length > 0) {
         hasFitted = true;
       }

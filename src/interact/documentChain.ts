@@ -33,8 +33,7 @@ const PRIMITIVES = new Set([
   "loft",
   "sweep",
   "pipe",
-  "mesh",
-  "triangles",
+  "gltf",
 ]);
 
 function attr(attrs: string, name: string): string {

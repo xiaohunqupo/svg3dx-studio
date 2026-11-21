@@ -56,6 +56,7 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
   pipe: `<s3dx:pipe form="child" radius="20" innerRadius="16" outerCorner="round" innerCorner="round" outerCornerRadius="50" innerCornerRadius="50">
         <s3dx:path form="polyline" points="0 0 0  100 0 0  100 0 100"/>
       </s3dx:pipe>`,
+  gltf: `<s3dx:gltf href="assets/model.glb"/>`,
 };
 
 const CONTAINER_SNIPPETS: Record<ContainerKind, string> = {
@@ -469,7 +470,8 @@ export type InsertChildResult = {
 export function insertChildIntoGroup(
   content: string,
   parentGroupId: string,
-  kind: AddChildKind
+  kind: AddChildKind,
+  opts?: { snippet?: string }
 ): InsertChildResult {
   const svg = ensureSvgShell(content);
   const nl = lineEnding(svg);
@@ -484,7 +486,7 @@ export function insertChildIntoGroup(
     };
   }
 
-  const body = DEFAULT_SNIPPETS[kind];
+  const body = opts?.snippet ?? DEFAULT_SNIPPETS[kind];
   if (!body) {
     return { content: svg, kind };
   }
@@ -493,6 +495,12 @@ export function insertChildIntoGroup(
     content: insertXmlIntoGroup(svg, parentGroupId, child),
     kind,
   };
+}
+
+/** Build a `s3dx:gltf` element snippet with the given href. */
+export function gltfSnippet(href: string): string {
+  const safe = href.replace(/"/g, "&quot;");
+  return `<s3dx:gltf href="${safe}"/>`;
 }
 
 /** Span of `<g id="…">…</g>` (or self-closing), or null. */
@@ -586,6 +594,11 @@ export const MODELING_MENU: AddChildMenuItem[] = [
   { kind: "pipe", labelZh: "圆管", labelEn: "Pipe" },
 ];
 
+/** External triangle asset — draft §3.2.5. */
+export const ASSET_MENU: AddChildMenuItem[] = [
+  { kind: "gltf", labelZh: "glTF 引用", labelEn: "glTF" },
+];
+
 /** Boolean ops — 并集 / 差集 / 交集. */
 export const BOOL_MENU: AddChildMenuItem[] = [
   { kind: "bool-union", labelZh: "并集", labelEn: "Union" },
@@ -603,11 +616,12 @@ export const LOOP_MENU: AddChildMenuItem[] = [
   { kind: "loop-range", labelZh: "范围循环", labelEn: "Loop range" },
 ];
 
-/** All insertable geometry kinds (curves + solids + modeling). */
+/** All insertable geometry kinds (curves + solids + modeling + assets). */
 export const PRIMITIVE_MENU: AddChildMenuItem[] = [
   ...CURVE_MENU,
   ...SOLID_MENU,
   ...MODELING_MENU,
+  ...ASSET_MENU,
 ];
 
 /** Every non-group add-child kind (for type guards / menus). */

@@ -33,6 +33,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   save: [];
   export: [];
+  "export-package": [];
   back: [];
   undo: [];
   redo: [];
@@ -48,6 +49,7 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
   const key = String(active);
   if (key === "save") emit("save");
   else if (key === "export") emit("export");
+  else if (key === "export-package") emit("export-package");
   else if (key === "back") emit("back");
   else if (key === "undo") {
     if (props.canUndo) emit("undo");
@@ -82,6 +84,10 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
       <t-menu-item value="export">
         <template #icon><DownloadIcon /></template>
         {{ t("app.export") }}
+      </t-menu-item>
+      <t-menu-item value="export-package">
+        <template #icon><DownloadIcon /></template>
+        {{ t("app.exportPackage") }}
       </t-menu-item>
     </t-submenu>
 
