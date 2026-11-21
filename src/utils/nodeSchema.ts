@@ -1130,6 +1130,9 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     },
   ],
   gltf: [{ name: "href", placeholder: "assets/model.glb" }],
+  /** Control-flow containers — draft §5. */
+  if: [{ name: "test", placeholder: "true" }],
+  "if-not": [{ name: "test", placeholder: "true" }],
 };
 
 export const GROUP_BASIC_FIELDS: AttrField[] = [

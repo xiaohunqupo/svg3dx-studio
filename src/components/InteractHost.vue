@@ -189,6 +189,19 @@ onBeforeUnmount(() => {
   interact = null;
 });
 
+// Class methods on InteractViewport are not patched onto the live instance by
+// Vite HMR — dispose and recreate so helper-frame / drill fixes take effect.
+if (import.meta.hot) {
+  const remountInteract = () => {
+    const text = props.content;
+    interact?.dispose();
+    interact = null;
+    void loadContent(text);
+  };
+  import.meta.hot.accept("@/interact", remountInteract);
+  import.meta.hot.accept("@/interact/createInteract", remountInteract);
+}
+
 defineExpose({
   async reload() {
     await ensureInteract();

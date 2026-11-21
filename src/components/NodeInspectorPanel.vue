@@ -506,6 +506,9 @@ const geometryView = computed(() => {
       ),
     });
   } else if (node.type === "primitive") {
+    /** Control-flow assembly nodes: params + transform; no appearance cascade. */
+    const isControlFlow =
+      node.kind === "if" || node.kind === "if-not";
     const idVal = attrLookup(xmlAttrs, "id");
     const classVal = attrLookup(xmlAttrs, "class") || sel.className || "";
     sections.push({
@@ -552,14 +555,18 @@ const geometryView = computed(() => {
       fields: paramFields,
     });
 
-    sections.push({
-      id: "appearance",
-      title: t("app.appearance"),
-      fields: APPEARANCE_FIELDS.map((f) =>
-        pushField("appearance", f, attrLookup(xmlAttrs, f.name))
-      ),
-    });
+    if (!isControlFlow) {
+      sections.push({
+        id: "appearance",
+        title: t("app.appearance"),
+        fields: APPEARANCE_FIELDS.map((f) =>
+          pushField("appearance", f, attrLookup(xmlAttrs, f.name))
+        ),
+      });
+    }
 
+    // All 3D assembly nodes in the tree (incl. if / if-not / section) expose
+    // s3dx:transform. Profile SVG under <s3dx:section> is not listed in the tree.
     const xformVal =
       node.kind === "section"
         ? sectionTransformDisplay(props.content ?? "", path, xmlAttrs)

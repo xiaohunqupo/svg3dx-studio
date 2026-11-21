@@ -59,6 +59,38 @@ export function isLoopPath(content: string, path: string | null): boolean {
   return isLoopKind(nodeKindAtPath(content, path)?.kind);
 }
 
+/**
+ * Document kinds with no drillable children (double-click must not enter).
+ * `gltf` is an asset leaf; basic solids / curves have no structural subtree.
+ * Constructs (`extrude` / `path` / …), containers, and `section` stay enterable.
+ */
+const DRILL_LEAF_KINDS = new Set([
+  "box",
+  "cylinder",
+  "sphere",
+  "torus",
+  "cone",
+  "wedge",
+  "pyramid",
+  "prism",
+  "sector-cylinder",
+  "line",
+  "arc",
+  "gltf",
+]);
+
+export function isDrillLeafKind(kind: string | null | undefined): boolean {
+  return !!kind && DRILL_LEAF_KINDS.has(kind);
+}
+
+export function isDrillLeafPath(
+  content: string | null | undefined,
+  path: string | null | undefined
+): boolean {
+  if (!content || !path) return false;
+  return isDrillLeafKind(nodeKindAtPath(content, path)?.kind);
+}
+
 /** `model:id.N` → href target group id. */
 export function modelUseGroupId(content: string, modelPath: string): string | null {
   const open = findOpenTagAtPath(content, modelPath);

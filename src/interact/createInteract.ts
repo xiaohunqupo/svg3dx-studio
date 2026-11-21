@@ -9,6 +9,7 @@ import {
   type CreateViewerOptions,
   type EmbedViewer,
   type EvaluationResult,
+  type GeometryInstruction,
   type ParamMap,
 } from "svg3dx-viewer";
 import {
@@ -19,6 +20,7 @@ import {
 import { nodeKindAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
 import {
   documentChain,
+  isDrillLeafPath,
   modelUseGroupId,
   withModelCrumb,
   type DocStep,
@@ -43,6 +45,53 @@ applyWorldUp();
 const PICK_DRAG_PX = 5;
 const DBLCLICK_MS = 500;
 const DBLCLICK_PX = 8;
+/** Opacity for skipped `if` / `if-not` branch geometry when revealed. */
+const CONDITION_INACTIVE_OPACITY = 0.28;
+
+function isConditionKind(kind: string | null | undefined): boolean {
+  return kind === "if" || kind === "if-not";
+}
+
+function isConditionPath(content: string, path: string | null | undefined): boolean {
+  if (!path || !content) return false;
+  return isConditionKind(nodeKindAtPath(content, path)?.kind);
+}
+
+/** True when this object or an ancestor is a skipped if/if-not branch. */
+function isConditionInactive(obj: THREE.Object3D): boolean {
+  let cur: THREE.Object3D | null = obj;
+  while (cur) {
+    if (cur.userData?.conditionInactive) return true;
+    cur = cur.parent;
+  }
+  return false;
+}
+
+/** Studio: tag skipped if/if-not geometry for ghost reveal. */
+function stampConditionInactive(obj: THREE.Object3D, hideRoot = false): void {
+  if (hideRoot) obj.visible = false;
+  obj.userData.conditionInactive = true;
+  obj.traverse((child) => {
+    child.userData.conditionInactive = true;
+  });
+}
+
+/** Tag retained inactive branches for Studio ghost reveal. */
+function studioSceneBuildHooks() {
+  return {
+    afterObjectBuilt: (obj: THREE.Object3D, inst: GeometryInstruction) => {
+      if (inst.type === "group" && inst.inactive) {
+        stampConditionInactive(obj, true);
+      }
+    },
+    afterGltfHydrated: (
+      placeholder: THREE.Object3D,
+      instance: THREE.Object3D
+    ) => {
+      if (isConditionInactive(placeholder)) stampConditionInactive(instance);
+    },
+  };
+}
 
 export type TransformMode = "translate" | "rotate" | "scale";
 
@@ -87,8 +136,10 @@ export async function createInteract(
 ): Promise<InteractViewport> {
   const { onPick, onTransformCommit, onDrillChange, ...viewerOptions } = options;
   const viewer = await createViewer(container, {
-    // Studio edits :root via the style tree — hide overlay Params by default.
-    paramsBar: false,
+    // Same as Browse: show the overlay params list by default (settings can hide).
+    paramsBar: true,
+    // Editor previews skipped if/if-not branches (evaluation opt-in).
+    retainInactive: true,
     ...viewerOptions,
     // Interact owns left-click routing (ViewHelper + pick).
     viewHelperClick: false,
@@ -151,6 +202,8 @@ function isGhost(obj: THREE.Object3D): boolean {
   if (obj.userData?.sectionProxy) return false;
   let cur: THREE.Object3D | null = obj;
   while (cur) {
+    // Revealed inactive if/if-not branch stays pickable (select + double-click enter).
+    if (cur.userData?.conditionInactive) return false;
     if (cur.userData?.drillGhost) return true;
     cur = cur.parent;
   }
@@ -259,6 +312,7 @@ export class InteractViewport {
   ) {
     this.viewer = viewer;
     this.viewer.viewer.includeDefsWorld = true;
+    this.viewer.viewer.buildHooks = studioSceneBuildHooks();
     this.onPick = options.onPick;
     this.onTransformCommit = options.onTransformCommit;
     this.onDrillChange = options.onDrillChange;
@@ -687,8 +741,34 @@ export class InteractViewport {
 
   /** After a pick, ensure `scopePath` is the level empty-click should keep. */
   private ensureLevelForSelection(path: string): void {
-    this.scopePath = levelAfterSelect(path, this.scopePath);
+    // if / if-not: soft-enter the container so its children stay solid (true)
+    // or ghost-revealable (false), instead of hiding as grandchildren of parent.
+    if (this.document && isConditionPath(this.document, path)) {
+      this.scopePath = path;
+    } else if (this.document && this.conditionAncestor(path)) {
+      // Child under if/if-not: stay on the condition level (or a drilled child
+      // scope) so a false branch stays ghost-visible while its child is selected.
+      const cond = this.conditionAncestor(path)!;
+      if (!this.scopePath || !path.startsWith(`${this.scopePath}.`)) {
+        this.scopePath = cond;
+      } else {
+        this.scopePath = levelAfterSelect(path, this.scopePath);
+      }
+    } else {
+      this.scopePath = levelAfterSelect(path, this.scopePath);
+    }
     if (!this.entryPath) this.entryPath = path;
+  }
+
+  /** Nearest `if` / `if-not` ancestor path (or the path itself), if any. */
+  private conditionAncestor(path: string): string | null {
+    if (!this.document) return null;
+    let p: string | null = path;
+    while (p) {
+      if (isConditionPath(this.document, p)) return p;
+      p = parentTreePath(p);
+    }
+    return null;
   }
 
   /**
@@ -845,9 +925,14 @@ export class InteractViewport {
     const path = this.highlightPath;
     // Do not syncSectionProxies here — that rebuilds profile Lines and clears
     // SelectionHighlight colors. applyVisibility already refreshed overlays.
+    const finish = (): void => {
+      // Keep plane/axes on the parent even when only the gizmo target changes.
+      this.syncHelperFrame();
+    };
     if (!isTransformablePath(path)) {
       this.transform.detach();
       this.transform.enabled = false;
+      finish();
       return;
     }
 
@@ -859,12 +944,14 @@ export class InteractViewport {
       if (!proxy) {
         this.transform.detach();
         this.transform.enabled = false;
+        finish();
         return;
       }
       // Local space so gizmo axes match inspector xdir/ydir/zdir (section frame).
       this.transform.setSpace("local");
       this.transform.enabled = true;
       this.transform.attach(proxy);
+      finish();
       return;
     }
 
@@ -872,6 +959,7 @@ export class InteractViewport {
     if (sectionAncestorPath(this.document, path)) {
       this.transform.detach();
       this.transform.enabled = false;
+      finish();
       return;
     }
 
@@ -885,11 +973,13 @@ export class InteractViewport {
     if (!target) {
       this.transform.detach();
       this.transform.enabled = false;
+      finish();
       return;
     }
     this.transform.setSpace("world");
     this.transform.enabled = true;
     this.transform.attach(target);
+    finish();
   }
 
   private commitTransform(): void {
@@ -953,9 +1043,11 @@ export class InteractViewport {
    * - Soft pick may set `scopePath === selection` (model use). Formalize that
    *   level (tip `?`) — do not `stepUnder` again or we skip into `main`.
    * - Otherwise enter the selected direct child, or one step under the hit.
+   * - Leaf kinds (`gltf`, basic solids/curves) are not enterable.
    */
   private handleDrill(event: PointerEvent): void {
     if (this.selection && this.selection === this.scopePath) {
+      if (isDrillLeafPath(this.document, this.selection)) return;
       if (!this.entryPath) this.entryPath = this.selection;
       this.enterLevel(this.selection, this.locationChain);
       return;
@@ -966,6 +1058,7 @@ export class InteractViewport {
       (parentTreePath(this.selection) === this.scopePath ||
         this.isUseContentSelection(this.selection, this.scopePath))
     ) {
+      if (isDrillLeafPath(this.document, this.selection)) return;
       if (!this.entryPath) this.entryPath = this.selection;
       this.enterLevel(
         this.selection,
@@ -984,6 +1077,7 @@ export class InteractViewport {
     if (!chain.length) return;
     const node = this.stepUnder(chain);
     if (!node || node.path === this.scopePath) return;
+    if (isDrillLeafPath(this.document, node.path)) return;
     if (!this.entryPath) this.entryPath = node.path;
     this.enterLevel(node.path, chain);
   }
@@ -1273,10 +1367,15 @@ export class InteractViewport {
       this.entryPath = null;
     }
     const scope = this.isolationScope();
+    const root = this.viewer.viewer.root;
     if (!scope) {
       this.viewer.setHelperFrame(null);
+      // Live view: keep skipped if/if-not branches hidden.
+      root.traverse((obj) => {
+        if (obj === root) return;
+        if (isConditionInactive(obj)) obj.visible = false;
+      });
     } else {
-      const root = this.viewer.viewer.root;
       root.traverse((obj) => {
         if (obj === root) return;
         // Section XOY proxy / profile wires: keep under the current branch.
@@ -1286,6 +1385,17 @@ export class InteractViewport {
           return;
         }
         const chain = this.chainFor(obj);
+        // Skipped if/if-not geometry (incl. glTF hydrated under a flagged
+        // ancestor): hidden unless this selection reveals it as a ghost.
+        if (isConditionInactive(obj)) {
+          if (chain.length && this.shouldRevealInactive(chain)) {
+            obj.visible = true;
+            this.ghostOne(obj, CONDITION_INACTIVE_OPACITY);
+          } else {
+            obj.visible = false;
+          }
+          return;
+        }
         if (!chain.length) {
           // Keep structural groups visible so section overlays parented under
           // them still render; only hide empty-chain leaves.
@@ -1308,11 +1418,66 @@ export class InteractViewport {
     }
     this.revealSectionOverlays(scope);
     this.applySectionProxyDims(scope);
-    // After overlays exist: section / path levels use the section XOY frame,
-    // not the parent construct (revolve) solid matrix.
-    this.viewer.setHelperFrame(scope ? this.frameFor(scope) : null);
     this.applyDefView();
     this.maybeFrameDef();
+    // After def/model visibility settles: plane/axes follow the parent frame.
+    this.syncHelperFrame();
+  }
+
+  /** PlaneHelper + AxesHelper → parent of selection; gizmo stays on the node. */
+  private syncHelperFrame(): void {
+    this.viewer.setHelperFrame(this.helperFrameSource());
+  }
+
+  /**
+   * World frame for PlaneHelper + AxesHelper.
+   * Always the **parent** of the current selection (gizmo stays on the node).
+   * Soft-selecting a 定义集 direct child (`defs:id`) roots at the **world**
+   * origin — never treat that group as its own helper origin.
+   * After formal enter with no selection, helpers follow the entered level.
+   */
+  private helperFrameSource(): THREE.Object3D | null {
+    const sel = this.highlightPath ?? this.selection;
+    const root = this.viewer.viewer.root;
+
+    if (sel) {
+      // 定义集 direct child: hierarchy starts at world (parent of the named group).
+      if (sel.startsWith("defs:") && !parentTreePath(sel)) return null;
+
+      // Section / 2D under section: keep the section XOY pose (not the construct).
+      if (this.document) {
+        const sectionPath = sectionAncestorPath(this.document, sel);
+        if (sectionPath) {
+          this.ensureSectionProxy(sectionPath, false);
+          const frame = this.sectionProxies.get(sectionPath)?.helperFrame;
+          if (frame) return frame;
+          return this.frameFor(sectionPath);
+        }
+      }
+
+      // Prefer the live scene-graph parent of the gizmo target.
+      const target =
+        this.objectFor(sel) ?? findTransformTarget(root, sel);
+      if (target?.parent && target.parent !== root) {
+        return target.parent;
+      }
+
+      const parent = parentTreePath(sel);
+      if (!parent) return null;
+      return this.frameFor(parent);
+    }
+
+    const scope = this.isolationScope();
+    if (!scope) return null;
+    // Formal enter into `defs:id` → that group's frame (parent for its children).
+    // Soft-select of a bare defs group no longer sets scope (see levelAfterSelect).
+    if (this.document && isSectionPath(this.document, scope)) {
+      this.ensureSectionProxy(scope, false);
+      return (
+        this.sectionProxies.get(scope)?.helperFrame ?? this.frameFor(scope)
+      );
+    }
+    return this.frameFor(scope);
   }
 
   /**
@@ -1426,6 +1591,22 @@ export class InteractViewport {
   private ancestorGhostOpacity(depth: number): number {
     const d = Math.max(1, depth);
     return Math.max(0.1, 0.36 * Math.pow(0.62, d - 1));
+  }
+
+  /**
+   * Reveal skipped if/if-not geometry when the drill tip (selection or formal
+   * scope) sits on that condition node or anywhere under it — including when
+   * a child is selected (ancestors must stay visible) or after double-click enter.
+   */
+  private shouldRevealInactive(chain: DocStep[]): boolean {
+    const tip =
+      this.highlightPath ?? this.selection ?? this.scopePath;
+    if (!tip || !this.document) return false;
+    const condStep = chain.find((step) =>
+      isConditionPath(this.document!, step.path)
+    );
+    if (!condStep) return false;
+    return tip === condStep.path || tip.startsWith(`${condStep.path}.`);
   }
 
   /**
@@ -1544,14 +1725,19 @@ export class InteractViewport {
     this.ghostBackups = kept;
   }
 
-  private frameFor(scope: string): THREE.Object3D | null {
-    // Section and its 2D children have no eval mesh — use the section pose frame.
-    const sectionPath = sectionAncestorPath(this.document, scope);
-    if (sectionPath) {
-      this.ensureSectionProxy(sectionPath, false);
-      const frame = this.sectionProxies.get(sectionPath)?.helperFrame;
+  private frameFor(path: string): THREE.Object3D | null {
+    // Section pose frame when the path is a section (parent of 2D profiles).
+    if (isSectionPath(this.document, path)) {
+      this.ensureSectionProxy(path, false);
+      const frame = this.sectionProxies.get(path)?.helperFrame;
       if (frame) return frame;
     }
+
+    // Prefer the node's own Object3D (group / if wrapper / primitive).
+    const own =
+      this.objectFor(path) ??
+      findTransformTarget(this.viewer.viewer.root, path);
+    if (own) return own;
 
     const root = this.viewer.viewer.root;
     let best: THREE.Object3D | null = null;
@@ -1560,10 +1746,10 @@ export class InteractViewport {
       if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
       if (!this.inCurrentView(chain)) return;
-      if (!chain.some((step) => step.path === scope)) return;
-      const loop = chain.find((step) => step.path === scope);
+      if (!chain.some((step) => step.path === path)) return;
+      const loop = chain.find((step) => step.path === path);
       if (loop?.loopIndex !== undefined && loop.loopIndex !== 0) return;
-      if (!this.iterationVisible(chain, scope)) return;
+      if (!this.iterationVisible(chain, path)) return;
       let depth = 0;
       for (let parent = obj.parent; parent; parent = parent.parent) depth += 1;
       if (depth < bestDepth) {
@@ -1574,7 +1760,7 @@ export class InteractViewport {
     if (!best) return null;
     const last = this.chainFor(best)[this.chainFor(best).length - 1]?.path;
     const parent = (best as THREE.Object3D).parent;
-    if (last !== scope && parent && parent !== root) return parent;
+    if (last !== path && parent && parent !== root) return parent;
     return best;
   }
 
@@ -1623,6 +1809,13 @@ export class InteractViewport {
       if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
       if (!this.includeInHighlight(chain, path)) return;
+      // Inactive if branch: outline only while revealed (selected ghost).
+      if (
+        isConditionInactive(obj) &&
+        !this.shouldRevealInactive(chain)
+      ) {
+        return;
+      }
       const mesh = obj as THREE.Mesh;
       if (mesh.isMesh) objects.push(mesh);
       const line = obj as THREE.Line & { isLineSegments?: boolean };

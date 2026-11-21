@@ -304,6 +304,19 @@ function collectResourceExpandKeys(item: TreeItem): string[] {
 }
 
 const PRIMITIVE_KIND_SET = new Set<string>(PRIMITIVE_MENU.map((p) => p.kind));
+/** Bool / if / loop containers — editable in the tree but not eval leaf kinds. */
+const CONTAINER_KIND_SET = new Set<string>([
+  ...BOOL_MENU.map((p) => p.kind),
+  ...LOGIC_MENU.map((p) => p.kind),
+  ...LOOP_MENU.map((p) => p.kind),
+]);
+/** Expand/skip in eval — never overlay their markup node with flattened children. */
+const CONTROL_FLOW_KIND_SET = new Set([
+  "if",
+  "if-not",
+  "loop-points",
+  "loop-range",
+]);
 
 function attrOf(attrs: string, name: string): string | null {
   const re = new RegExp(
@@ -414,6 +427,25 @@ function childrenFromPathMarkup(
             : isSweepPath
               ? ("path-more" as const)
               : ("geom-more" as const),
+        },
+      };
+    }
+    if (CONTAINER_KIND_SET.has(local)) {
+      const elemId = attrOf(attrs, "id") ?? undefined;
+      const classAttr = attrOf(attrs, "class");
+      const kids = open.selfClosing
+        ? undefined
+        : childrenFromPathMarkup(content, path, classById);
+      return {
+        value: path,
+        label: elemId ?? elementLabel(local),
+        children: kids?.length ? kids : undefined,
+        meta: {
+          kind: "geometry" as const,
+          icon: kindIcon(local),
+          node: syntheticPrimitive(local, parentPath),
+          className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
+          action: "geom-more" as const,
         },
       };
     }
@@ -1054,6 +1086,13 @@ function mapGeometry(
       if (
         item.meta.action === "use-more" ||
         item.meta.node?.type === "instance"
+      ) {
+        return item;
+      }
+      // if / loop expand away in eval — keep the control node for editing.
+      if (
+        item.meta.node?.type === "primitive" &&
+        CONTROL_FLOW_KIND_SET.has(item.meta.node.kind)
       ) {
         return item;
       }

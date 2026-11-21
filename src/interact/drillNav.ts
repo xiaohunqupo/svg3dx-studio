@@ -12,7 +12,8 @@
  *
  * ## How level is set
  * - Viewer double-click → `enterLevel(child)` (formal; selection cleared → tip `?`)
- * - Tree / viewport pick → `levelAfterSelect(path)` (keep containing scope, else parent)
+ * - Tree / viewport pick → `levelAfterSelect(path)` (keep containing scope, else parent;
+ *   bare `defs:id` → world / null, not soft-enter onto itself)
  * - Model use pick → level is the use path (needed so referenced geometry stays solid)
  * - Empty click when `selection === scopePath` → clear that soft level too
  *   (otherwise `model/引用` → empty → `model/引用/?`)
@@ -50,7 +51,10 @@ export function emptyClickAction(selection: string | null): EmptyClickAction {
  *
  * - If `path` is a **direct child** of the current `scopePath`, keep that level
  *   (same as after double-click enter, then picking a child).
- * - Otherwise level is the parent of `path` (or `path` itself at a branch root).
+ * - Otherwise level is the parent of `path`.
+ * - Bare `defs:id` (定义集 direct child): **`null`** — hierarchy roots at the
+ *   world origin. Soft-entering onto the group itself made plane/axes use that
+ *   group as origin and conflicted with “helpers = parent of selection”.
  *
  * Do **not** keep an ancestor scope for arbitrary descendants — that left
  * `scopePath=main` while selecting a section, so sibling revolves stayed visible.
@@ -67,7 +71,7 @@ export function levelAfterSelect(
   path: string,
   scopePath: string | null,
   _pathInScope?: (p: string) => boolean
-): string {
+): string | null {
   if (scopePath && parentTreePath(path) === scopePath) return scopePath;
   if (path.startsWith("model:")) return path;
   if (
@@ -86,6 +90,8 @@ export function levelAfterSelect(
   }
   const parent = parentTreePath(path);
   if (parent) return parent;
+  // 定义集 direct child (`defs:id`): world-rooted, do not soft-enter onto self.
+  if (path.startsWith("defs:")) return null;
   return path;
 }
 
