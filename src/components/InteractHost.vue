@@ -60,7 +60,7 @@ const emit = defineEmits<{
 const host = ref<HTMLElement | null>(null);
 const gizmoActive = ref(false);
 const transformMode = ref<TransformMode>("translate");
-const frameOnHighlight = ref(false);
+const frameOnHighlight = ref(true);
 const drillCrumbs = ref<{ path: string; label: string; pending?: boolean }[]>([]);
 let interact: InteractViewport | null = null;
 /** Suppress re-entrant pick→select→highlight loops. */

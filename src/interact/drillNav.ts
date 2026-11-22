@@ -72,8 +72,11 @@ export function levelAfterSelect(
   scopePath: string | null,
   _pathInScope?: (p: string) => boolean
 ): string | null {
-  if (scopePath && parentTreePath(path) === scopePath) return scopePath;
+  // Model / use picks always soft-level on themselves. Do not keep a bare
+  // `model:id` parent when selecting `model:id.N` — that scope is not a prefix
+  // of use chains and hid every referenced mesh in drill isolation.
   if (path.startsWith("model:")) return path;
+  if (scopePath && parentTreePath(path) === scopePath) return scopePath;
   if (
     scopePath &&
     scopePath.startsWith("model:") &&
@@ -110,6 +113,13 @@ export function mergeLocationChain(
     if (hint.length && hint.some((s) => s.path === path)) {
       const at = hint.findIndex((s) => s.path === path);
       return hint.slice(0, at + 1);
+    }
+    // Promote bare `model:id` → `model:id` + `model:id.N` when picking a use.
+    if (path.startsWith("model:") && path.includes(".")) {
+      const modelId = path.slice("model:".length).split(".")[0]!;
+      const bare = `model:${modelId}`;
+      const base = prior[0]?.path === bare ? prior : hint[0]?.path === bare ? hint : null;
+      if (base) return [{ path: bare }, { path }];
     }
     return hint.length ? [...hint] : ancestorChain(path);
   }

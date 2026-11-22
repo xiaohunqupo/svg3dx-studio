@@ -14,16 +14,10 @@ import {
 } from "svg3dx-viewer";
 import {
   detectTransformForm,
-  isIdentityTransformDisplay,
   matrix4ToMat4x3,
   matrix12ToTransformAttr,
-  transformToDisplay,
 } from "@/utils/nodeSchema";
-import {
-  listChildOpensAtPath,
-  nodeKindAtPath,
-  readAttrsAtPath,
-} from "@/utils/nodeXmlEdit";
+import { nodeKindAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
 import {
   documentChain,
   isDrillLeafPath,
@@ -168,46 +162,6 @@ function isTransformablePath(path: string | null | undefined): boolean {
 function isBareDefsGroupPath(path: string | null | undefined): boolean {
   if (!path?.startsWith("defs:")) return false;
   return !path.slice("defs:".length).includes(".");
-}
-
-/** Children that can carry the visible placement under a bare defs group. */
-const PLACEMENT_CHILD_LOCALS = new Set([
-  "bool-union",
-  "bool-subtract",
-  "bool-intersect",
-  "if",
-  "if-not",
-  "g",
-]);
-
-function attrTransformRaw(attrs: Record<string, string> | null | undefined): string {
-  if (!attrs) return "";
-  return (attrs["s3dx:transform"] ?? attrs.transform ?? "").trim();
-}
-
-function isAbsentOrIdentityTransform(raw: string): boolean {
-  if (!raw) return true;
-  return isIdentityTransformDisplay(transformToDisplay(raw));
-}
-
-/**
- * When a bare `<g id>` has no placement of its own and exactly one bool/if/group
- * child, the gizmo must edit that child — otherwise handles sit at the group
- * origin while the solid lives on the child's `s3dx:transform` (looks like a fly-away).
- */
-function solePlacementChildPath(
-  content: string,
-  bareDefsPath: string
-): string | null {
-  if (!isBareDefsGroupPath(bareDefsPath)) return null;
-  if (!isAbsentOrIdentityTransform(attrTransformRaw(readAttrsAtPath(content, bareDefsPath)))) {
-    return null;
-  }
-  const kids = listChildOpensAtPath(content, bareDefsPath);
-  if (kids.length !== 1) return null;
-  const local = kids[0]?.local ?? "";
-  if (!PLACEMENT_CHILD_LOCALS.has(local)) return null;
-  return `${bareDefsPath}.0`;
 }
 
 /** svg3dx 12-vector → THREE.Matrix4 (same layout as viewer `mat4x3ToMatrix4`). */
@@ -358,9 +312,9 @@ export class InteractViewport {
   private entryPath: string | null = null;
   /**
    * When true, selecting / rebinding a highlight frames the camera on it.
-   * Off by default so tree picks and gizmo commits do not steal the view.
+   * On by default; toggle off in the viewer chrome to keep the current view.
    */
-  private frameOnHighlight = false;
+  private frameOnHighlight = true;
   /** Generation for on-demand extra-def reloads (stale-guard). */
   private extraDefGen = 0;
   private ghostBackups: {
@@ -1179,15 +1133,14 @@ export class InteractViewport {
       return;
     }
 
-    const editPath = this.resolveGizmoEditPath(path!);
     let target: THREE.Object3D | null = null;
     // Defs-only view: edit the defs-world copy (group-local matrix, no use bake).
     const defId = this.viewingDef();
     if (
-      editPath &&
-      isBareDefsGroupPath(editPath) &&
+      path &&
+      isBareDefsGroupPath(path) &&
       defId &&
-      editPath === `defs:${defId}`
+      path === `defs:${defId}`
     ) {
       target =
         this.viewer.viewer.root.children.find(
@@ -1195,13 +1148,13 @@ export class InteractViewport {
         ) ?? null;
     }
     if (!target) {
-      target = this.objectFor(editPath);
+      target = this.objectFor(path!);
     }
     if (
       !target &&
-      !this.locationChain.some((step) => step.path === editPath)
+      !this.locationChain.some((step) => step.path === path)
     ) {
-      target = findTransformTarget(this.viewer.viewer.root, editPath);
+      target = findTransformTarget(this.viewer.viewer.root, path!);
       // Never attach the gizmo to a hidden defs-world clone while the model
       // use is what the user sees.
       if (target && !isShown(target)) target = null;
@@ -1218,23 +1171,10 @@ export class InteractViewport {
     finish();
   }
 
-  /**
-   * Path whose `s3dx:transform` the gizmo should read/write.
-   * Bare identity groups that wrap a single bool/if redirect to that child so
-   * the handles sit on the solid, not at a distant group origin.
-   */
-  private resolveGizmoEditPath(selectionPath: string): string {
-    if (!this.document) return selectionPath;
-    return (
-      solePlacementChildPath(this.document, selectionPath) ?? selectionPath
-    );
-  }
-
   private commitTransform(): void {
-    const selectionPath = this.highlightPath;
+    const path = this.highlightPath;
     const obj = this.transform.object;
-    if (!selectionPath || !obj || !this.onTransformCommit) return;
-    const path = this.resolveGizmoEditPath(selectionPath);
+    if (!path || !obj || !this.onTransformCommit) return;
     const form = detectTransformForm(
       this.document
         ? (readAttrsAtPath(this.document, path)?.["s3dx:transform"] ?? "")
@@ -1254,7 +1194,6 @@ export class InteractViewport {
     // the gizmo to the use clone (`matrix ≈ use × group`). Strip the use
     // placement before writing the named group's `s3dx:transform`, or the
     // next bind applies use again and the solid flies away / vanishes.
-    // Nested sole-placement children already store a local matrix — do not unbake.
     const pick = getPickData(obj);
     if (
       isBareDefsGroupPath(path) &&
@@ -1600,9 +1539,22 @@ export class InteractViewport {
   /** Highlight stays on the canonical copy once a loop has been entered. */
   private includeInHighlight(chain: DocStep[], path: string): boolean {
     if (!this.inCurrentView(chain)) return false;
-    if (!chain.some((step) => step.path === path)) return false;
+    // Bare `model:id` should light up every use under that model.
+    if (path.startsWith("model:") && !path.includes(".")) {
+      if (!chain[0]?.path.startsWith(`${path}.`) && chain[0]?.path !== path) {
+        return false;
+      }
+    } else if (!chain.some((step) => step.path === path)) {
+      return false;
+    }
     const root = this.locationChain[0]?.path;
-    if (root?.startsWith("model:") && chain[0]?.path !== root) return false;
+    if (root?.startsWith("model:") && !root.includes(".")) {
+      if (!chain[0]?.path.startsWith(`${root}.`) && chain[0]?.path !== root) {
+        return false;
+      }
+    } else if (root?.startsWith("model:") && chain[0]?.path !== root) {
+      return false;
+    }
     if (!this.iterationVisible(chain, this.scopePath)) return false;
     if (!this.scopePath) return true;
     const scopeIdx = this.locationChain.findIndex(
@@ -1619,11 +1571,21 @@ export class InteractViewport {
 
   /**
    * Current isolation level: formal `scopePath`, or a nested defs selection
-   * (same for every kind — section is not special). Never isolate bare
-   * `model:id.N` uses — those paths are not prefixes of child defs paths.
+   * (same for every kind — section is not special).
+   * Never isolate bare `model:id` — use chains are `model:id.N`, so that scope
+   * matches nothing and hides every mesh. `model:id.N` soft-level is kept so
+   * referenced geometry stays solid under the use.
    */
   private isolationScope(): string | null {
-    if (this.scopePath) return this.scopePath;
+    if (this.scopePath) {
+      if (
+        this.scopePath.startsWith("model:") &&
+        !this.scopePath.includes(".")
+      ) {
+        return null;
+      }
+      return this.scopePath;
+    }
     const sel = this.highlightPath ?? this.selection;
     if (!sel?.startsWith("defs:")) return null;
     // `defs:groupId.child…` only — bare `defs:groupId` stays unisolated.
@@ -1814,8 +1776,12 @@ export class InteractViewport {
     for (const child of root.children) {
       const id = child.userData?.defsWorld;
       const worldId = typeof id === "string" ? id : "";
-      if (defId) child.visible = worldId === defId;
-      else if (worldId) child.visible = false;
+      if (defId) {
+        child.visible = worldId === defId;
+      } else {
+        // Model view: always show uses; only defs-world clones stay hidden.
+        child.visible = !worldId;
+      }
     }
   }
 
@@ -1826,11 +1792,22 @@ export class InteractViewport {
   private frameHighlightIfEnabled(force = false): void {
     if (!this.frameOnHighlight) return;
     const path = this.highlightPath;
-    if (!path || !isTransformablePath(path)) return;
-    const editPath = this.resolveGizmoEditPath(path);
+    if (!path) return;
+    // Bare `model:id` is not a gizmo target — still frame the active use body.
+    const framePath =
+      path.startsWith("model:") && !path.includes(".")
+        ? this.locationChain.find(
+            (s) => s.path.startsWith(`${path}.`) || s.path === path
+          )?.path ??
+          (() => {
+            const id = path.slice("model:".length);
+            return id ? `model:${id}.0` : null;
+          })()
+        : path;
+    if (!framePath || !isTransformablePath(framePath)) return;
     const defId = this.viewingDef();
     let target: THREE.Object3D | null = null;
-    if (isBareDefsGroupPath(editPath) && defId && editPath === `defs:${defId}`) {
+    if (isBareDefsGroupPath(framePath) && defId && framePath === `defs:${defId}`) {
       target =
         this.viewer.viewer.root.children.find(
           (child) => child.userData?.defsWorld === defId
@@ -1838,9 +1815,9 @@ export class InteractViewport {
     }
     if (!target) {
       target =
-        this.objectFor(editPath) ??
-        findTransformTarget(this.viewer.viewer.root, editPath) ??
-        this.frameFor(path);
+        this.objectFor(framePath) ??
+        findTransformTarget(this.viewer.viewer.root, framePath) ??
+        this.frameFor(framePath);
     }
     if (!target || !isShown(target)) return;
     target.updateMatrixWorld(true);
