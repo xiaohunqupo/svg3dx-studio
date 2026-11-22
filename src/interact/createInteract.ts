@@ -14,10 +14,16 @@ import {
 } from "svg3dx-viewer";
 import {
   detectTransformForm,
+  isIdentityTransformDisplay,
   matrix4ToMat4x3,
   matrix12ToTransformAttr,
+  transformToDisplay,
 } from "@/utils/nodeSchema";
-import { nodeKindAtPath, readAttrsAtPath } from "@/utils/nodeXmlEdit";
+import {
+  listChildOpensAtPath,
+  nodeKindAtPath,
+  readAttrsAtPath,
+} from "@/utils/nodeXmlEdit";
 import {
   documentChain,
   isDrillLeafPath,
@@ -158,6 +164,88 @@ function isTransformablePath(path: string | null | undefined): boolean {
   return false;
 }
 
+/** Named defs group root (`defs:id`) — not a nested `defs:id.N` child. */
+function isBareDefsGroupPath(path: string | null | undefined): boolean {
+  if (!path?.startsWith("defs:")) return false;
+  return !path.slice("defs:".length).includes(".");
+}
+
+/** Children that can carry the visible placement under a bare defs group. */
+const PLACEMENT_CHILD_LOCALS = new Set([
+  "bool-union",
+  "bool-subtract",
+  "bool-intersect",
+  "if",
+  "if-not",
+  "g",
+]);
+
+function attrTransformRaw(attrs: Record<string, string> | null | undefined): string {
+  if (!attrs) return "";
+  return (attrs["s3dx:transform"] ?? attrs.transform ?? "").trim();
+}
+
+function isAbsentOrIdentityTransform(raw: string): boolean {
+  if (!raw) return true;
+  return isIdentityTransformDisplay(transformToDisplay(raw));
+}
+
+/**
+ * When a bare `<g id>` has no placement of its own and exactly one bool/if/group
+ * child, the gizmo must edit that child — otherwise handles sit at the group
+ * origin while the solid lives on the child's `s3dx:transform` (looks like a fly-away).
+ */
+function solePlacementChildPath(
+  content: string,
+  bareDefsPath: string
+): string | null {
+  if (!isBareDefsGroupPath(bareDefsPath)) return null;
+  if (!isAbsentOrIdentityTransform(attrTransformRaw(readAttrsAtPath(content, bareDefsPath)))) {
+    return null;
+  }
+  const kids = listChildOpensAtPath(content, bareDefsPath);
+  if (kids.length !== 1) return null;
+  const local = kids[0]?.local ?? "";
+  if (!PLACEMENT_CHILD_LOCALS.has(local)) return null;
+  return `${bareDefsPath}.0`;
+}
+
+/** svg3dx 12-vector → THREE.Matrix4 (same layout as viewer `mat4x3ToMatrix4`). */
+function mat4From12(m: ArrayLike<number>): THREE.Matrix4 {
+  const mat = new THREE.Matrix4();
+  mat.set(
+    Number(m[0]),
+    Number(m[3]),
+    Number(m[6]),
+    Number(m[9]),
+    Number(m[1]),
+    Number(m[4]),
+    Number(m[7]),
+    Number(m[10]),
+    Number(m[2]),
+    Number(m[5]),
+    Number(m[8]),
+    Number(m[11]),
+    0,
+    0,
+    0,
+    1
+  );
+  return mat;
+}
+
+/**
+ * Model-use clones are built as `matrix = use × group` (group applyMatrix4,
+ * then use applyMatrix4 on the same Object3D). Persist only the defs-local
+ * group matrix onto `s3dx:transform`.
+ */
+function groupMatrixFromUseClone(
+  objMatrix: THREE.Matrix4,
+  useMatrix: THREE.Matrix4
+): THREE.Matrix4 {
+  return useMatrix.clone().invert().multiply(objMatrix);
+}
+
 /**
  * Prefer the shallowest object whose pick data exactly matches `path`
  * (`treePath` or `defsPath`). Under a model use, remapped meshes share the
@@ -268,8 +356,11 @@ export class InteractViewport {
   private echoSelection: string | null = null;
   /** Outermost node entered by the first double-click. Esc selects this. */
   private entryPath: string | null = null;
-  /** Defs group currently framed. Null while the model is showing. */
-  private framedDef: string | null = null;
+  /**
+   * When true, selecting / rebinding a highlight frames the camera on it.
+   * Off by default so tree picks and gizmo commits do not steal the view.
+   */
+  private frameOnHighlight = false;
   /** Generation for on-demand extra-def reloads (stale-guard). */
   private extraDefGen = 0;
   private ghostBackups: {
@@ -500,6 +591,8 @@ export class InteractViewport {
       fitCamera?: boolean;
       documentBaseUrl?: string;
       documentAssetUrls?: Record<string, string>;
+      /** Drop on-demand defs extras (file switch / remount). Default false. */
+      resetExtraDefs?: boolean;
     } = {}
   ): Promise<EvaluationResult> {
     this.transform.detach();
@@ -507,11 +600,17 @@ export class InteractViewport {
     this.restoreGhosts();
     this.setDocument(svgText);
     this.viewer.setHelperFrame(null);
-    // Fresh document — drop on-demand extras from the previous file.
-    await this.viewer.setExtraDefs([], { reload: false });
+    if (options.resetExtraDefs) {
+      await this.viewer.setExtraDefs([], { reload: false });
+    } else {
+      // Keep 定义集 soft-view extras across transform / attr rebinds — wiping
+      // them here made the solid vanish until the tree was clicked again.
+      await this.syncExtraDefsForView({ reload: false });
+    }
     const result = await this.viewer.loadSvg(svgText, options);
     this.reapplyHighlight();
     this.reapplyDrill();
+    await this.ensureExtraDefForCurrentView();
     return result;
   }
 
@@ -528,9 +627,11 @@ export class InteractViewport {
     this.restoreGhosts();
     this.setDocument(svgText);
     this.viewer.setHelperFrame(null);
+    await this.syncExtraDefsForView({ reload: false });
     const result = await this.viewer.applySvg(svgText, options);
     this.reapplyHighlight();
     this.reapplyDrill();
+    await this.ensureExtraDefForCurrentView();
     return result;
   }
 
@@ -539,9 +640,11 @@ export class InteractViewport {
     this.clearSectionProxies();
     this.restoreGhosts();
     this.viewer.setHelperFrame(null);
+    await this.syncExtraDefsForView({ reload: false });
     const result = await this.viewer.setParams(params);
     this.reapplyHighlight();
     this.reapplyDrill();
+    await this.ensureExtraDefForCurrentView();
     return result;
   }
 
@@ -559,7 +662,6 @@ export class InteractViewport {
     this.entryPath = null;
     this.selection = null;
     this.locationChain = [];
-    this.framedDef = null;
     this.viewer.setHelperFrame(null);
     const result = await this.viewer.setModel(model, options);
     this.reapplyHighlight();
@@ -587,6 +689,9 @@ export class InteractViewport {
     const next = path || null;
     if (next && next === this.echoSelection) {
       this.echoSelection = null;
+      // Viewport pick already applied visibility via selectLevel; still ensure
+      // off-model 定义集 are evaluated (echo must not skip that).
+      void this.ensureExtraDefForPath(next);
       return;
     }
     this.echoSelection = null;
@@ -601,11 +706,13 @@ export class InteractViewport {
       return;
     }
     if (this.staysOnEntryBranch(next)) {
-      this.locationChain = mergeLocationChain(
-        next,
-        this.locationChain,
-        this.locationChain
-      );
+      // `setModel` clears the chain — seed the active model/use so soft-select
+      // keeps the live clone instead of flipping to defs-only view.
+      const prior =
+        this.locationChain.length > 0
+          ? this.locationChain
+          : this.activeModelEntryPrior(next);
+      this.locationChain = mergeLocationChain(next, prior, prior);
     } else {
       this.scopePath = null;
       this.entryPath = null;
@@ -616,7 +723,57 @@ export class InteractViewport {
     this.applyHighlight();
     this.syncTransformTarget();
     this.emitDrill();
+    this.frameHighlightIfEnabled();
     void this.ensureExtraDefForPath(next);
+  }
+
+  /** Toggle auto-frame when the highlight changes (tree pick, gizmo commit). */
+  setFrameOnHighlight(on: boolean): void {
+    this.frameOnHighlight = on;
+    if (on) this.frameHighlightIfEnabled(true);
+  }
+
+  /** Defs group ids needed for the current drill/selection (replaces prior set). */
+  private extrasNeededForView(): string[] {
+    const ids = new Set<string>();
+    const consider = (path: string | null | undefined) => {
+      if (!path?.startsWith("defs:")) return;
+      const id = path.slice("defs:".length).split(".")[0];
+      if (id) ids.add(id);
+    };
+    consider(this.highlightPath);
+    consider(this.selection);
+    consider(this.scopePath);
+    for (const step of this.locationChain) consider(step.path);
+    const viewing = this.viewingDef();
+    if (viewing) ids.add(viewing);
+    return [...ids];
+  }
+
+  /** Sync viewer extras to exactly what the current view needs. */
+  private async syncExtraDefsForView(options: {
+    reload?: boolean;
+  } = {}): Promise<void> {
+    const needed = this.extrasNeededForView();
+    const current = this.viewer.getExtraDefs();
+    const same =
+      needed.length === current.length &&
+      needed.every((id) => current.includes(id));
+    if (same) return;
+    await this.viewer.setExtraDefs(needed, {
+      reload: options.reload === true,
+      fitCamera: false,
+    });
+  }
+
+  /** After a rebind, bring back a missing defs-world for the open selection. */
+  private async ensureExtraDefForCurrentView(): Promise<void> {
+    const path =
+      this.highlightPath ??
+      this.locationChain.find((s) => s.path.startsWith("defs:"))?.path ??
+      null;
+    if (!path) return;
+    await this.ensureExtraDefForPath(path);
   }
 
   /**
@@ -632,13 +789,20 @@ export class InteractViewport {
     );
     if (hasWorld) return;
     const current = this.viewer.getExtraDefs();
-    if (current.includes(id)) return;
     const gen = ++this.extraDefGen;
-    await this.viewer.setExtraDefs([...current, id]);
+    const next = current.includes(id) ? [...current] : [...current, id];
+    // Same id list can still be missing from the scene after a wiped reload —
+    // force a re-eval when the defs-world clone is absent.
+    await this.viewer.setExtraDefs(next, {
+      reload: true,
+      fitCamera: false,
+      force: current.includes(id),
+    });
     if (gen !== this.extraDefGen || this.highlightPath !== path) return;
     this.applyVisibility();
     this.applyHighlight();
     this.syncTransformTarget();
+    this.frameHighlightIfEnabled();
   }
 
   /**
@@ -648,9 +812,30 @@ export class InteractViewport {
    */
   private staysOnEntryBranch(path: string): boolean {
     if (this.pathInScope(path)) return true;
-    if (!this.locationChain[0]?.path.startsWith("model:")) return false;
     if (!path.startsWith("defs:")) return false;
-    return this.onModelEntryDefsBranch(path);
+    const head = this.locationChain[0]?.path;
+    if (head?.startsWith("model:")) return this.onModelEntryDefsBranch(path);
+    // Empty chain after setModel — still soft-select when the active model uses it.
+    if (!head) return this.activeModelEntryPrior(path).length > 0;
+    return false;
+  }
+
+  /** `model:id` + `model:id.N` for the active model use that targets `defs:…`. */
+  private activeModelEntryPrior(defsPath: string): DocStep[] {
+    if (!defsPath.startsWith("defs:")) return [];
+    const result = this.getResult();
+    const modelId = result?.active_model ?? result?.models[0]?.id;
+    if (!modelId) return [];
+    const model = result?.models.find((m) => m.id === modelId);
+    if (!model?.uses.length) return [];
+    const want = defsPath.slice("defs:".length).split(".")[0];
+    if (!want) return [];
+    const useIdx = model.uses.findIndex((u) => u.group_id === want);
+    if (useIdx < 0) return [];
+    return [
+      { path: `model:${modelId}` },
+      { path: `model:${modelId}.${useIdx}` },
+    ];
   }
 
   /** Same href-target definition subtree as the active model-entry chain. */
@@ -669,15 +854,19 @@ export class InteractViewport {
     const useStep = [...this.locationChain]
       .reverse()
       .find((s) => s.path.startsWith("model:") && s.path.includes("."));
-    if (!useStep) return false;
-    const gid = modelUseGroupId(this.document, useStep.path);
-    if (!gid) return false;
-    const root = `defs:${gid}`;
-    return (
-      path === root ||
-      path.startsWith(`${root}.`) ||
-      root.startsWith(`${path}.`)
-    );
+    if (useStep) {
+      const gid = modelUseGroupId(this.document, useStep.path);
+      if (!gid) return false;
+      const root = `defs:${gid}`;
+      return (
+        path === root ||
+        path.startsWith(`${root}.`) ||
+        root.startsWith(`${path}.`)
+      );
+    }
+    // Breadcrumb may be bare `model:id` (no use index yet) — match against the
+    // active evaluation model's uses so 定义集 picks stay on the live clone.
+    return this.activeModelEntryPrior(path).length > 0;
   }
 
   /**
@@ -990,12 +1179,32 @@ export class InteractViewport {
       return;
     }
 
-    let target = this.objectFor(path!);
+    const editPath = this.resolveGizmoEditPath(path!);
+    let target: THREE.Object3D | null = null;
+    // Defs-only view: edit the defs-world copy (group-local matrix, no use bake).
+    const defId = this.viewingDef();
+    if (
+      editPath &&
+      isBareDefsGroupPath(editPath) &&
+      defId &&
+      editPath === `defs:${defId}`
+    ) {
+      target =
+        this.viewer.viewer.root.children.find(
+          (child) => child.userData?.defsWorld === defId
+        ) ?? null;
+    }
+    if (!target) {
+      target = this.objectFor(editPath);
+    }
     if (
       !target &&
-      !this.locationChain.some((step) => step.path === path)
+      !this.locationChain.some((step) => step.path === editPath)
     ) {
-      target = findTransformTarget(this.viewer.viewer.root, path!);
+      target = findTransformTarget(this.viewer.viewer.root, editPath);
+      // Never attach the gizmo to a hidden defs-world clone while the model
+      // use is what the user sees.
+      if (target && !isShown(target)) target = null;
     }
     if (!target) {
       this.transform.detach();
@@ -1009,10 +1218,23 @@ export class InteractViewport {
     finish();
   }
 
+  /**
+   * Path whose `s3dx:transform` the gizmo should read/write.
+   * Bare identity groups that wrap a single bool/if redirect to that child so
+   * the handles sit on the solid, not at a distant group origin.
+   */
+  private resolveGizmoEditPath(selectionPath: string): string {
+    if (!this.document) return selectionPath;
+    return (
+      solePlacementChildPath(this.document, selectionPath) ?? selectionPath
+    );
+  }
+
   private commitTransform(): void {
-    const path = this.highlightPath;
+    const selectionPath = this.highlightPath;
     const obj = this.transform.object;
-    if (!path || !obj || !this.onTransformCommit) return;
+    if (!selectionPath || !obj || !this.onTransformCommit) return;
+    const path = this.resolveGizmoEditPath(selectionPath);
     const form = detectTransformForm(
       this.document
         ? (readAttrsAtPath(this.document, path)?.["s3dx:transform"] ?? "")
@@ -1027,11 +1249,40 @@ export class InteractViewport {
       return;
     }
     obj.updateMatrix();
-    const m = matrix4ToMat4x3(obj.matrix);
+    let matrix = obj.matrix.clone();
+    // Soft-selecting `defs:id` while the model use is still showing attaches
+    // the gizmo to the use clone (`matrix ≈ use × group`). Strip the use
+    // placement before writing the named group's `s3dx:transform`, or the
+    // next bind applies use again and the solid flies away / vanishes.
+    // Nested sole-placement children already store a local matrix — do not unbake.
+    const pick = getPickData(obj);
+    if (
+      isBareDefsGroupPath(path) &&
+      pick?.treePath?.startsWith("model:") &&
+      pick.treePath.includes(".")
+    ) {
+      const useMat = this.useTransformMatrix(pick.treePath);
+      if (useMat) {
+        matrix = groupMatrixFromUseClone(matrix, useMat);
+      }
+    }
+    const m = matrix4ToMat4x3(matrix);
     this.onTransformCommit({
       path,
       transform: matrix12ToTransformAttr(m, form),
     });
+  }
+
+  /** Evaluated `<s3dx:use>` transform for `model:id.N`, or identity if unset. */
+  private useTransformMatrix(usePath: string): THREE.Matrix4 | null {
+    const matched = /^model:([^.]+)\.(\d+)$/.exec(usePath);
+    if (!matched) return null;
+    const model = this.getResult()?.models.find((m) => m.id === matched[1]);
+    const use = model?.uses[Number(matched[2])];
+    if (!use) return null;
+    const nums = use.transform?.m;
+    if (!nums || nums.length !== 12) return new THREE.Matrix4();
+    return mat4From12(nums);
   }
 
   private handlePick(event: PointerEvent): void {
@@ -1195,6 +1446,8 @@ export class InteractViewport {
     this.applyHighlight();
     this.syncTransformTarget();
     this.emitDrill();
+    this.frameHighlightIfEnabled();
+    void this.ensureExtraDefForPath(path);
     this.onPick?.(path);
   }
 
@@ -1446,7 +1699,6 @@ export class InteractViewport {
     this.revealSectionOverlays(scope);
     this.applySectionProxyDims(scope);
     this.applyDefView();
-    this.maybeFrameDef();
     // After def/model visibility settles: plane/axes follow the parent frame.
     this.syncHelperFrame();
   }
@@ -1568,35 +1820,55 @@ export class InteractViewport {
   }
 
   /**
-   * Keep the camera where it is when the definition is already in frame,
-   * so its world position stays comparable. Frame it only when it is off screen.
+   * Frame the current highlight when auto-frame is enabled.
+   * `force` always fitCamera; otherwise only re-fit if the center left the view.
    */
-  private maybeFrameDef(): void {
-    const id = this.viewingDef();
-    if (id === this.framedDef) return;
-    this.framedDef = id;
-    if (!id) return;
-    const target = this.viewer.viewer.root.children.find(
-      (child) => child.userData?.defsWorld === id
-    );
-    if (!target || this.objectInView(target)) return;
+  private frameHighlightIfEnabled(force = false): void {
+    if (!this.frameOnHighlight) return;
+    const path = this.highlightPath;
+    if (!path || !isTransformablePath(path)) return;
+    const editPath = this.resolveGizmoEditPath(path);
+    const defId = this.viewingDef();
+    let target: THREE.Object3D | null = null;
+    if (isBareDefsGroupPath(editPath) && defId && editPath === `defs:${defId}`) {
+      target =
+        this.viewer.viewer.root.children.find(
+          (child) => child.userData?.defsWorld === defId
+        ) ?? null;
+    }
+    if (!target) {
+      target =
+        this.objectFor(editPath) ??
+        findTransformTarget(this.viewer.viewer.root, editPath) ??
+        this.frameFor(path);
+    }
+    if (!target || !isShown(target)) return;
+    target.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(target);
+    if (!box.isEmpty()) {
+      this.viewer.controls.target.copy(box.getCenter(new THREE.Vector3()));
+      this.viewer.controls.update();
+    }
+    if (!force && this.objectCenterInView(target)) return;
     this.viewer.viewer.fitCamera(this.viewer.camera, this.viewer.controls, {
       object: target,
     });
   }
 
-  private objectInView(obj: THREE.Object3D): boolean {
+  /** True when the object's bounds center projects near the view center. */
+  private objectCenterInView(obj: THREE.Object3D): boolean {
     this.viewer.camera.updateMatrixWorld();
     obj.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(obj);
     if (box.isEmpty()) return false;
-    const frustum = new THREE.Frustum().setFromProjectionMatrix(
-      new THREE.Matrix4().multiplyMatrices(
-        this.viewer.camera.projectionMatrix,
-        this.viewer.camera.matrixWorldInverse
-      )
-    );
-    return frustum.intersectsBox(box);
+    const center = box.getCenter(new THREE.Vector3());
+    const ndc = center.project(this.viewer.camera);
+    if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y) || !Number.isFinite(ndc.z)) {
+      return false;
+    }
+    // Outside NDC cube, or behind camera / clipped.
+    if (ndc.z < -1 || ndc.z > 1) return false;
+    return Math.abs(ndc.x) <= 0.85 && Math.abs(ndc.y) <= 0.85;
   }
 
   private ghostIterations(scope: string): void {
@@ -1874,6 +2146,7 @@ export class InteractViewport {
       this.entryPath = null;
     }
     this.applyVisibility();
+    this.frameHighlightIfEnabled();
     this.emitDrill();
   }
 

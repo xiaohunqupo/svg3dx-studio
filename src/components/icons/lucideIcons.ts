@@ -15,6 +15,7 @@ export {
   Cuboid as ExtrudeIcon,
   Cylinder as CylinderIcon,
   DraftingCompass as CurveCategoryIcon,
+  Focus as FrameHighlightIcon,
   Globe as RootParamsIcon,
   Hexagon as PrismIcon,
   Layers2 as LoftIcon,

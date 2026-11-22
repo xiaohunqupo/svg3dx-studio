@@ -1,8 +1,5 @@
 import { watch, type Ref } from "vue";
-import {
-  isEvalNoopChange,
-  isStyleOnlyChange,
-} from "@/utils/documentLoadKeys";
+import { isEvalNoopChange } from "@/utils/documentLoadKeys";
 
 export type HostLoadOptions = {
   fitCamera?: boolean;
@@ -97,7 +94,10 @@ export function useHostDocumentLoad(options: {
           void loadContent(text, { skip: true });
           return;
         }
-        void loadContent(text, { soft: isStyleOnlyChange(from, text) });
+        // Always soft-rebind for in-session edits (transform / attrs / style).
+        // Hard loadSvg was clearing studio extraDefs and made 定义集 solids
+        // vanish until the tree selection was clicked again.
+        void loadContent(text, { soft: true });
       }
     );
   }

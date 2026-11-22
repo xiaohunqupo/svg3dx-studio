@@ -14,6 +14,7 @@ import { nodeKindAtPath } from "@/utils/nodeXmlEdit";
 import { useTheme } from "@/theme";
 import { readViewportBackground } from "@/utils/viewportTheme";
 import {
+  FrameHighlightIcon,
   TransformMoveIcon,
   TransformRotateIcon,
   TransformScaleIcon,
@@ -59,6 +60,7 @@ const emit = defineEmits<{
 const host = ref<HTMLElement | null>(null);
 const gizmoActive = ref(false);
 const transformMode = ref<TransformMode>("translate");
+const frameOnHighlight = ref(false);
 const drillCrumbs = ref<{ path: string; label: string; pending?: boolean }[]>([]);
 let interact: InteractViewport | null = null;
 /** Suppress re-entrant pick→select→highlight loops. */
@@ -100,6 +102,11 @@ function onTransformModeRadio(value: string | number | boolean): void {
   }
 }
 
+function onFrameOnHighlightToggle(): void {
+  frameOnHighlight.value = !frameOnHighlight.value;
+  interact?.setFrameOnHighlight(frameOnHighlight.value);
+}
+
 async function ensureInteract(): Promise<InteractViewport | null> {
   if (interact) return interact;
   if (!host.value) return null;
@@ -125,6 +132,7 @@ async function ensureInteract(): Promise<InteractViewport | null> {
       emit("drill", crumbs);
     },
   });
+  interact.setFrameOnHighlight(frameOnHighlight.value);
   emit("ready", interact);
   syncGizmoUi();
   return interact;
@@ -137,7 +145,8 @@ const docLoad = useHostDocumentLoad({
   getApi: () =>
     interact
       ? {
-          loadSvg: (text, opts) => interact!.loadSvg(text, opts),
+          loadSvg: (text, opts) =>
+            interact!.loadSvg(text, { ...opts, resetExtraDefs: true }),
           applySvg: (text, opts) => interact!.applySvg(text, opts),
           setDocument: (text) => interact!.setDocument(text),
           hasSceneContent: () =>
@@ -291,6 +300,19 @@ defineExpose({
         <TransformScaleIcon />
       </t-radio-button>
     </t-radio-group>
+    <t-button
+      class="frame-toggle"
+      variant="outline"
+      shape="square"
+      size="large"
+      :theme="frameOnHighlight ? 'primary' : 'default'"
+      :aria-pressed="frameOnHighlight"
+      :aria-label="t('app.frameOnHighlight')"
+      :title="t('app.frameOnHighlight')"
+      @click="onFrameOnHighlightToggle"
+    >
+      <FrameHighlightIcon />
+    </t-button>
   </div>
 </template>
 
@@ -395,5 +417,18 @@ defineExpose({
 /* Hide filled-segment dividers between icon-only buttons. */
 .xform-toolbar :deep(.t-radio-button::before) {
   display: none;
+}
+
+.frame-toggle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+}
+
+.frame-toggle :deep(svg) {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 </style>
