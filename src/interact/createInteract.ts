@@ -1787,7 +1787,8 @@ export class InteractViewport {
 
   /**
    * Frame the current highlight when auto-frame is enabled.
-   * `force` always fitCamera; otherwise only re-fit if the center left the view.
+   * Pans the orbit (target + eye) so the current view direction is preserved —
+   * never calls fitCamera iso reset (that rotated the viewport after gizmo moves).
    */
   private frameHighlightIfEnabled(force = false): void {
     if (!this.frameOnHighlight) return;
@@ -1822,14 +1823,46 @@ export class InteractViewport {
     if (!target || !isShown(target)) return;
     target.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(target);
-    if (!box.isEmpty()) {
-      this.viewer.controls.target.copy(box.getCenter(new THREE.Vector3()));
-      this.viewer.controls.update();
-    }
+    if (box.isEmpty()) return;
+    // Already framed enough after a small gizmo nudge — leave the view alone.
     if (!force && this.objectCenterInView(target)) return;
-    this.viewer.viewer.fitCamera(this.viewer.camera, this.viewer.controls, {
-      object: target,
-    });
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.length() * 0.5, 1e-3);
+    this.panOrbitTo(center, true, radius);
+  }
+
+  /**
+   * Move orbit target to `center`, shifting the camera by the same delta so the
+   * view direction stays unchanged. Optionally pull/push distance to fit `radius`.
+   */
+  private panOrbitTo(
+    center: THREE.Vector3,
+    adjustDistance: boolean,
+    radius = 0
+  ): void {
+    const camera = this.viewer.camera;
+    const controls = this.viewer.controls;
+    const delta = center.clone().sub(controls.target);
+    controls.target.copy(center);
+    camera.position.add(delta);
+    if (adjustDistance && radius > 0) {
+      const offset = camera.position.clone().sub(controls.target);
+      const dist = offset.length();
+      if (dist > 1e-6) {
+        const fov = THREE.MathUtils.degToRad(camera.fov);
+        const aspect = Math.max(camera.aspect || 1, 1e-4);
+        const fitH = radius / Math.tan(fov / 2);
+        const fitW = radius / (Math.tan(fov / 2) * aspect);
+        const need = Math.max(fitH, fitW) * 1.35;
+        offset.multiplyScalar(need / dist);
+        camera.position.copy(controls.target).add(offset);
+        camera.near = Math.max(0.1, need / 100);
+        camera.far = need * 100;
+        camera.updateProjectionMatrix();
+      }
+    }
+    controls.update();
   }
 
   /** True when the object's bounds center projects near the view center. */
