@@ -1,0 +1,5 @@
+/**
+ * Public CSS entry for embedders: `import "svg3dx-studio/style.css"`.
+ * Layout tokens are overridable; colors follow TDesign `--td-*`.
+ */
+@import "../styles/global.css";

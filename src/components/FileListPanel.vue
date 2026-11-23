@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRouter } from "vue-router";
 import {
   ClearIcon,
   DeleteIcon,
@@ -8,6 +7,7 @@ import {
   FolderOpenIcon,
 } from "tdesign-icons-vue-next";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
+import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import { useI18n } from "@/i18n";
 import type { StudioFile } from "@/types/file";
 import { useFilesStore } from "@/stores/files";
@@ -18,18 +18,21 @@ const props = withDefaults(
     files: StudioFile[];
     activeId: string | null;
     loadingSamples?: boolean;
+    /** Show “fetch official samples” link (hosts may disable). */
+    showOfficialSamples?: boolean;
   }>(),
-  { loadingSamples: false }
+  { loadingSamples: false, showOfficialSamples: true }
 );
 
 const emit = defineEmits<{
   select: [id: string];
   files: [FileList | File[]];
   "fetch-samples": [];
+  edit: [id: string];
 }>();
 
 const store = useFilesStore();
-const router = useRouter();
+const nav = useStudioNavigation();
 const { t, locale } = useI18n();
 
 const sorted = computed(() =>
@@ -43,7 +46,8 @@ function formatTime(ts: number): string {
 }
 
 function onEdit(id: string): void {
-  router.push({ name: "edit", params: { id } });
+  emit("edit", id);
+  nav.goEdit(id);
 }
 
 /** Destructive confirm: red confirm, cancel as safer default (TDesign danger pattern). */
@@ -131,7 +135,7 @@ function onClearAll(): void {
 
     <div class="add-row">
       <FileDropZone compact class="drop-inline" @files="emit('files', $event)" />
-      <div class="sample-extra">
+      <div v-if="showOfficialSamples" class="sample-extra">
         <t-link
           theme="primary"
           hover="color"

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { clearGltfCache, type EvaluationResult } from "svg3dx-viewer";
 import AppMenus from "@/components/AppMenus.vue";
@@ -17,6 +16,7 @@ import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
+import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import type { DrillCrumb } from "@/interact";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
@@ -66,10 +66,20 @@ import {
   readSectionElementXml,
 } from "@/utils/shapeSvgEditor";
 
-const props = defineProps<{ id: string }>();
+const props = withDefaults(
+  defineProps<{
+    id: string;
+    showReposMenu?: boolean;
+    showSettingsMenu?: boolean;
+  }>(),
+  {
+    showReposMenu: true,
+    showSettingsMenu: true,
+  }
+);
 
 const store = useFilesStore();
-const router = useRouter();
+const nav = useStudioNavigation();
 const { t } = useI18n();
 
 const TREE_W_KEY = "svg3dx.studio.treeWidth";
@@ -455,7 +465,7 @@ function syncFromStore(): void {
   const f = store.getById(props.id);
   if (!f) {
     MessagePlugin.warning(t("app.fileMissing"));
-    router.replace({ name: "browse" });
+    nav.goBrowse();
     return;
   }
   store.select(f.id);
@@ -475,7 +485,7 @@ function syncFromStore(): void {
 }
 
 function goBrowse(): void {
-  router.push({ name: "browse" });
+  nav.goBrowse();
 }
 
 function syncActiveModelFromResult(r: EvaluationResult | null): void {
@@ -1087,10 +1097,12 @@ onBeforeUnmount(() => {
 
   <div v-else-if="file" class="edit-page">
     <header class="topbar">
-      <div class="brand">
-        <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
-        <span class="product">svg3dx Studio</span>
-      </div>
+      <slot name="topbar-start">
+        <div class="brand">
+          <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
+          <span class="product">svg3dx Studio</span>
+        </div>
+      </slot>
       <AppMenus
         :show-model="showModel"
         :show-source="showSource"
@@ -1107,9 +1119,12 @@ onBeforeUnmount(() => {
         @toggle-model="setShowModel(!showModel)"
         @toggle-source="setShowSource(!showSource)"
       />
+      <slot name="toolbar-extra" />
       <div class="right">
-        <ReposMenu />
-        <SettingsMenu />
+        <slot name="topbar-end">
+          <ReposMenu v-if="showReposMenu" />
+          <SettingsMenu v-if="showSettingsMenu" />
+        </slot>
       </div>
     </header>
 
@@ -1119,33 +1134,35 @@ onBeforeUnmount(() => {
       :class="{ resizing: !!resizing }"
       :style="workspaceStyle"
     >
-      <NodeTreePanel
-        ref="treePanel"
-        class="tree"
-        :result="result"
-        :content="draftContent"
-        :loading="contentLoading"
-        :file-name="file.name"
-        :dirty="dirty"
-        :drill-marks="drillMarks"
-        :asset-paths="documentAssetPaths"
-        :is-package="isPackageDocument"
-        @select="onSelect"
-        @add-group="onAddGroup"
-        @add-model="onAddModel"
-        @add-material="onAddMaterial"
-        @add-style-category="onAddStyleCategory"
-        @add-use="onAddUse"
-        @add-child="onAddChild"
-        @insert-child-at-path="onInsertChildAtPath"
-        @edit-section="onEditSection"
-        @delete-node="onDeleteNode"
-        @delete-model="onDeleteModel"
-        @delete-use="onDeleteUse"
-        @delete-element="onDeleteUse"
-        @delete-style-category="onDeleteStyleCategory"
-        @optimize="onOptimize"
-      />
+      <slot name="tree">
+        <NodeTreePanel
+          ref="treePanel"
+          class="tree"
+          :result="result"
+          :content="draftContent"
+          :loading="contentLoading"
+          :file-name="file.name"
+          :dirty="dirty"
+          :drill-marks="drillMarks"
+          :asset-paths="documentAssetPaths"
+          :is-package="isPackageDocument"
+          @select="onSelect"
+          @add-group="onAddGroup"
+          @add-model="onAddModel"
+          @add-material="onAddMaterial"
+          @add-style-category="onAddStyleCategory"
+          @add-use="onAddUse"
+          @add-child="onAddChild"
+          @insert-child-at-path="onInsertChildAtPath"
+          @edit-section="onEditSection"
+          @delete-node="onDeleteNode"
+          @delete-model="onDeleteModel"
+          @delete-use="onDeleteUse"
+          @delete-element="onDeleteUse"
+          @delete-style-category="onDeleteStyleCategory"
+          @optimize="onOptimize"
+        />
+      </slot>
       <div
         class="resize-handle resize-handle--tree"
         role="separator"
@@ -1166,18 +1183,20 @@ onBeforeUnmount(() => {
         }"
         :style="midStyle"
       >
-        <SourceEditorPanel
-          v-if="showSource"
-          ref="sourcePanel"
-          class="source"
-          :heading="t('app.sourceCode')"
-          :model-value="draftContent"
-          :format-mode="sourceFormatMode"
-          :loading="contentLoading"
-          @update:model-value="onSourceContent"
-          @update:format-mode="onSourceFormatModeChange"
-          @cursor-path="onSourceCursorPath"
-        />
+        <slot name="source">
+          <SourceEditorPanel
+            v-if="showSource"
+            ref="sourcePanel"
+            class="source"
+            :heading="t('app.sourceCode')"
+            :model-value="draftContent"
+            :format-mode="sourceFormatMode"
+            :loading="contentLoading"
+            @update:model-value="onSourceContent"
+            @update:format-mode="onSourceFormatModeChange"
+            @cursor-path="onSourceCursorPath"
+          />
+        </slot>
         <div
           v-if="midBoth"
           class="resize-handle"
@@ -1193,21 +1212,23 @@ onBeforeUnmount(() => {
           @pointerdown="(e) => startResize('source', e)"
         />
         <main v-if="showModel" class="viewport">
-          <ViewportSkeleton v-if="contentLoading" />
-          <InteractHost
-            ref="interactHost"
-            :key="file.id"
-            :content="draftContent"
-            :model="activeModelId || undefined"
-            :document-base-url="file.documentBaseUrl"
-            :document-asset-urls="documentAssetUrls"
-            @result="onResult"
-            @error="(m) => MessagePlugin.error(m)"
-            @pick="onViewportPick"
-            @transform-preview="onViewportTransformPreview"
-            @transform="onViewportTransform"
-            @drill="onDrillCrumbs"
-          />
+          <slot name="viewport-chrome">
+            <ViewportSkeleton v-if="contentLoading" />
+            <InteractHost
+              ref="interactHost"
+              :key="file.id"
+              :content="draftContent"
+              :model="activeModelId || undefined"
+              :document-base-url="file.documentBaseUrl"
+              :document-asset-urls="documentAssetUrls"
+              @result="onResult"
+              @error="(m) => MessagePlugin.error(m)"
+              @pick="onViewportPick"
+              @transform-preview="onViewportTransformPreview"
+              @transform="onViewportTransform"
+              @drill="onDrillCrumbs"
+            />
+          </slot>
         </main>
       </div>
 
@@ -1220,21 +1241,23 @@ onBeforeUnmount(() => {
         @pointerdown="(e) => startResize('inspector', e)"
       />
       <aside class="inspector">
-        <div class="panel-head">
-          {{ selected?.kind === "style" ? t("app.styleParams") : t("app.nodeParams") }}
-        </div>
-        <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
-        <NodeInspectorPanel
-          v-else
-          ref="inspectorPanel"
-          :selected="selected"
-          :content="draftContent"
-          @style-params-change="onStyleParamsChange"
-          @style-category-rename="onStyleCategoryRename"
-          @node-attrs-change="onNodeAttrsChange"
-          @edit-section="onEditSection"
-          @pick-gltf-href="onPickGltfHref"
-        />
+        <slot name="inspector">
+          <div class="panel-head">
+            {{ selected?.kind === "style" ? t("app.styleParams") : t("app.nodeParams") }}
+          </div>
+          <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
+          <NodeInspectorPanel
+            v-else
+            ref="inspectorPanel"
+            :selected="selected"
+            :content="draftContent"
+            @style-params-change="onStyleParamsChange"
+            @style-category-rename="onStyleCategoryRename"
+            @node-attrs-change="onNodeAttrsChange"
+            @edit-section="onEditSection"
+            @pick-gltf-href="onPickGltfHref"
+          />
+        </slot>
       </aside>
     </div>
 
@@ -1256,7 +1279,7 @@ onBeforeUnmount(() => {
 
 .topbar {
   position: relative;
-  height: 40px;
+  height: var(--svg3dx-studio-topbar-height, 40px);
   flex-shrink: 0;
   display: flex;
   align-items: center;

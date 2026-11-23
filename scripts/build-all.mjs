@@ -74,7 +74,14 @@ requireDir(coreRoot, "svg3dx-core");
 requireDir(viewerRoot, "svg3dx-viewer");
 requireDir(path.join(coreRoot, "crates", "svg3dx-ffi-wasm"), "svg3dx-ffi-wasm crate");
 
-const total = fullCore ? (devOnly ? 5 : 6) : (devOnly ? 3 : 4);
+// Steps: optional tests; optional full-core×3; wasm; viewer; [studio app + lib] unless --dev
+const total = fullCore
+  ? devOnly
+    ? 5
+    : 7
+  : devOnly
+    ? 3
+    : 5;
 let n = 0;
 const next = (title) => step(++n, total, title);
 
@@ -161,9 +168,14 @@ if (devOnly) {
 next("svg3dx-studio: vue-tsc + vite build");
 run("npm", ["run", "build"], studioRoot);
 
+// --- 6) studio library build (embeddable pages) ---
+next("svg3dx-studio: vite build:lib → dist-lib/");
+run("npm", ["run", "build:lib"], studioRoot);
+
 console.log("\n✓ done.");
-console.log(`  studio dist: ${path.join(studioRoot, "dist")}`);
-console.log(`  core wasm:   ${path.join(coreRoot, "pkg")}`);
+console.log(`  studio dist:     ${path.join(studioRoot, "dist")}`);
+console.log(`  studio dist-lib: ${path.join(studioRoot, "dist-lib")}`);
+console.log(`  core wasm:       ${path.join(coreRoot, "pkg")}`);
 if (fullCore) {
-  console.log(`  core DLL:    ${path.join(coreRoot, "target", "release")}`);
+  console.log(`  core DLL:        ${path.join(coreRoot, "target", "release")}`);
 }

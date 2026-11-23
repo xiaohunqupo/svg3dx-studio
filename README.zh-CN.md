@@ -6,16 +6,16 @@
 
 [English](README.md) | 中文
 
-**svg3dx 编辑器**：Vite + Vue 3 + TDesign + three.js。打开 / 缓存本地文件，浏览预览，进入编辑页新增体元并保存。
+**svg3dx Studio**：可嵌入的 Vue 页面库（浏览 / 编辑）+ 本仓演示 SPA。Vite + Vue 3 + TDesign + three.js。
 
 渲染与参数面板复用 [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer)。
 
-视口分层（均在本仓，不单独开库）：
-
 | 层 | 用途 |
 |----|------|
-| `ViewerHost` + `svg3dx-viewer` | 浏览页：轻量显示（无点击选中） |
-| `InteractHost` + `src/interact` | 编辑页：点击拾取 / 高亮等视口交互（不含文档编辑本身） |
+| `ViewerHost` + `svg3dx-viewer` | 浏览预览（无点击选中） |
+| `InteractHost` + `createInteract` | 编辑视口：拾取 / 高亮 / 变换 |
+| `BrowsePage` / `EditPage` | 整页模板（插槽可改布局） |
+| `DocumentRepository` / `AssetRepository` | 可替换的文档与 sidecar 存储 |
 
 ## 关联库
 
@@ -24,60 +24,86 @@
 | [svg3dx](https://github.com/xiaohunqupo/svg3dx) | 格式规范与 samples |
 | [svg3dx-core](https://github.com/xiaohunqupo/svg3dx-core) | 解析求值引擎 |
 | [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | 查看器组件 |
-| **svg3dx-studio**（本仓） | 编辑器应用 |
+| **svg3dx-studio**（本仓） | 编辑器页面库 + 演示应用 |
+
+## 嵌入（厂商宿主）
+
+```bash
+npm run build:lib   # → dist-lib/
+# 或依赖 file:../svg3dx-studio（开发时可用 Vite alias 指到 src/lib/index.ts）
+```
+
+```ts
+import { createApp } from "vue";
+import { createPinia } from "pinia";
+import TDesign from "tdesign-vue-next";
+import "tdesign-vue-next/es/style/index.css";
+import {
+  installStudio,
+  BrowsePage,
+  EditPage,
+  createIndexedDbDocumentRepository,
+  createIndexedDbAssetRepository,
+} from "svg3dx-studio";
+import "svg3dx-studio/style.css";
+
+const app = createApp(HostRoot);
+const pinia = createPinia();
+app.use(pinia);
+app.use(router);
+installStudio(app, {
+  // 省略则默认 IndexedDB；接业务库 / FTP 代理时实现接口即可
+  documents: createIndexedDbDocumentRepository(),
+  assets: createIndexedDbAssetRepository(),
+  navigation: {
+    goBrowse: () => router.push("/studio"),
+    goEdit: (id) => router.push(`/studio/edit/${id}`),
+  },
+});
+app.use(TDesign);
+```
+
+路由挂载 `BrowsePage` / `EditPage`（`EditPage` 需 `props: true` 传入 `id`）。
+
+### 三层开放度
+
+1. **整页**：直接挂页面；用 props（如 `showOfficialSamples`）与插槽微调。
+2. **换存储**：实现 `DocumentRepository` / `AssetRepository`（list/get/save/remove；资产 list/read/write/removeAll）。
+3. **自组布局**：只引 `ViewerHost` / `InteractHost` / `FileListPanel` / 节点面板等积木。
+
+**Browse 插槽**：`topbar-start` · `topbar-end` · `sidebar` · `empty` · `viewport-chrome`  
+**Edit 插槽**：`topbar-start` · `topbar-end` · `toolbar-extra` · `tree` · `source` · `viewport-chrome` · `inspector`
+
+### 样式
+
+- `import "svg3dx-studio/style.css"`
+- 覆盖布局变量：`--svg3dx-studio-topbar-height`、`--svg3dx-studio-sidebar-width` 等（见 `src/styles/global.css`）
+- 颜色沿用 TDesign `--td-*` / `theme-mode`
 
 ## 开发
 
 本机并列：`svg3dx`、`svg3dx-core`、`svg3dx-viewer`、本仓。
 
-一键分步编译（core 测试 + wasm → viewer → studio）：
-
 ```powershell
 cd ..\svg3dx-studio
-npm run build:all          # 完整产物（含 studio dist）
+npm run build:all          # wasm → viewer → SPA dist + dist-lib
 npm run build:all:dev      # 只到 viewer，随后 npm run dev
-npm run build:all:full     # 额外编 core C DLL / 头文件 / dump_json
-```
-
-手动分步：
-
-```powershell
-# 1) engine wasm
-cd ..\svg3dx-core
-wasm-pack build crates/svg3dx-ffi-wasm --target bundler --out-dir pkg --out-name svg3dx_ffi_wasm
-
-# 2) editor
-cd ..\svg3dx-studio
-npm install
-npm run dev
+npm run build:lib          # 仅页面库
 ```
 
 ## CI / GitHub Pages
 
-GitHub Actions（`.github/workflows/ci.yml`）在 `main` / PR 上：
-
-1. 检出并列仓 `svg3dx-core`、`svg3dx-viewer`、`svg3dx`
+1. 检出 `svg3dx-core`、`svg3dx-viewer`、`svg3dx`
 2. `wasm-pack` → core `pkg/`
-3. viewer / studio 分别 `npm ci`，再 `npm run build`（vue-tsc + Vite；`VITE_BASE=/svg3dx-studio/`）
-4. 上传 `dist` 产物；`main` 上额外部署到 GitHub Pages
+3. `npm run build`（SPA，`VITE_BASE=/svg3dx-studio/`）→ Pages
+4. `npm run build:lib` → 上传 `svg3dx-studio-lib` artifact
 
-在线地址：https://xiaohunqupo.github.io/svg3dx-studio/
+在线演示：https://xiaohunqupo.github.io/svg3dx-studio/
 
-## 页面
+## 演示 SPA 路由
 
-### 浏览（`/`）
-
-- 无缓存文件：中央拖拽 / 点击选择区域
-- 有文件：左侧文件列表 + 中央 viewer 预览；可继续拖入追加
-- 文件名旁「编辑」进入编辑页；顶部可加载官方示例
-
-### 编辑（`/edit/:id`）
-
-- 上侧：返回浏览、新增体元菜单、保存 / 导出
-- 左侧：求值后的 Models / Geometry 节点树
-- 中央：`InteractHost` 视口（基于 viewer 的交互层）
-- 右侧：外部参数 + 选中节点 JSON
-- 保存写入浏览器 IndexedDB 本地缓存
+- `/` 浏览（默认 IndexedDB）
+- `/edit/:id` 编辑
 
 ## 许可证
 

@@ -1,12 +1,7 @@
-export interface StudioFile {
-  id: string;
-  name: string;
-  content: string;
-  updatedAt: number;
-  dirty?: boolean;
-  /** Base URL for resolving relative `s3dx:gltf` hrefs (e.g. official samples). */
-  documentBaseUrl?: string;
-}
+import type { StudioDocument } from "@/repos/types";
+
+/** @deprecated Prefer StudioDocument — kept as alias for existing imports. */
+export type StudioFile = StudioDocument;
 
 /** Insertable geometry kinds (svg3dx draft 0.1). */
 export type GeometryKind =

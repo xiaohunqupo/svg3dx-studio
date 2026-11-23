@@ -25,6 +25,20 @@ import {
 } from "@/utils/officialSamples";
 import { clearGltfCache } from "svg3dx-viewer";
 
+withDefaults(
+  defineProps<{
+    /** Show official-samples fetch UI. */
+    showOfficialSamples?: boolean;
+    showReposMenu?: boolean;
+    showSettingsMenu?: boolean;
+  }>(),
+  {
+    showOfficialSamples: true,
+    showReposMenu: true,
+    showSettingsMenu: true,
+  }
+);
+
 const SIDEBAR_W_KEY = "svg3dx.studio.browseSidebarWidth";
 const SIDEBAR_W_MIN = 200;
 const SIDEBAR_W_MAX = 480;
@@ -218,34 +232,40 @@ function onMainDrop(e: DragEvent): void {
 <template>
   <div class="browse-page">
     <header class="topbar">
-      <div class="brand">
-        <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
-        <span class="product">svg3dx Studio</span>
-      </div>
+      <slot name="topbar-start">
+        <div class="brand">
+          <img class="logo" src="/logo.png" alt="svg3dx studio" width="22" height="22" />
+          <span class="product">svg3dx Studio</span>
+        </div>
+      </slot>
       <div class="right">
-        <ReposMenu />
-        <SettingsMenu />
+        <slot name="topbar-end">
+          <ReposMenu v-if="showReposMenu" />
+          <SettingsMenu v-if="showSettingsMenu" />
+        </slot>
       </div>
     </header>
 
     <BrowsePageSkeleton v-if="!store.ready" />
 
     <div v-else-if="showEmpty" class="empty-stage">
-      <FileDropZone @files="onFiles" />
-      <div class="empty-extra">
-        <t-link
-          theme="primary"
-          :disabled="loadingSamples"
-          @click="loadSample"
-        >
-          <template #prefix-icon><FolderOpenIcon /></template>
-          {{
-            loadingSamples
-              ? t("browse.fetchingSamples")
-              : t("browse.fetchSamples")
-          }}
-        </t-link>
-      </div>
+      <slot name="empty">
+        <FileDropZone @files="onFiles" />
+        <div v-if="showOfficialSamples" class="empty-extra">
+          <t-link
+            theme="primary"
+            :disabled="loadingSamples"
+            @click="loadSample"
+          >
+            <template #prefix-icon><FolderOpenIcon /></template>
+            {{
+              loadingSamples
+                ? t("browse.fetchingSamples")
+                : t("browse.fetchSamples")
+            }}
+          </t-link>
+        </div>
+      </slot>
     </div>
 
     <div
@@ -259,15 +279,18 @@ function onMainDrop(e: DragEvent): void {
       @dragleave.prevent="dragOverMain = false"
       @drop.prevent="onMainDrop"
     >
-      <FileListPanel
-        class="sidebar"
-        :files="store.files"
-        :active-id="store.activeId"
-        :loading-samples="loadingSamples"
-        @select="store.select"
-        @files="onFiles"
-        @fetch-samples="loadSample"
-      />
+      <slot name="sidebar">
+        <FileListPanel
+          class="sidebar"
+          :files="store.files"
+          :active-id="store.activeId"
+          :loading-samples="loadingSamples"
+          :show-official-samples="showOfficialSamples"
+          @select="store.select"
+          @files="onFiles"
+          @fetch-samples="loadSample"
+        />
+      </slot>
       <div
         class="resize-handle"
         role="separator"
@@ -277,20 +300,22 @@ function onMainDrop(e: DragEvent): void {
         @pointerdown="startResize"
       />
       <main class="viewport">
-        <div v-if="dragOverMain" class="drop-mask">{{ t("browse.dropToAdd") }}</div>
-        <ViewportSkeleton v-if="showPreviewSkeleton" />
-        <ViewerHost
-          v-if="activeContent"
-          :key="store.activeId ?? 'preview'"
-          :content="activeContent"
-          :document-base-url="activeDocumentBaseUrl"
-          :document-asset-urls="previewAssetUrls"
-          @error="(m) => MessagePlugin.error(m)"
-          @result="previewReady = true"
-        />
-        <div v-else class="viewport-empty">
-          <t-empty :title="t('browse.selectToPreview')" />
-        </div>
+        <slot name="viewport-chrome">
+          <div v-if="dragOverMain" class="drop-mask">{{ t("browse.dropToAdd") }}</div>
+          <ViewportSkeleton v-if="showPreviewSkeleton" />
+          <ViewerHost
+            v-if="activeContent"
+            :key="store.activeId ?? 'preview'"
+            :content="activeContent"
+            :document-base-url="activeDocumentBaseUrl"
+            :document-asset-urls="previewAssetUrls"
+            @error="(m) => MessagePlugin.error(m)"
+            @result="previewReady = true"
+          />
+          <div v-else class="viewport-empty">
+            <t-empty :title="t('browse.selectToPreview')" />
+          </div>
+        </slot>
       </main>
     </div>
   </div>
@@ -305,7 +330,7 @@ function onMainDrop(e: DragEvent): void {
 }
 
 .topbar {
-  height: 40px;
+  height: var(--svg3dx-studio-topbar-height, 40px);
   flex-shrink: 0;
   display: flex;
   align-items: center;

@@ -1,4 +1,4 @@
-# Build pipeline: checkout core + viewer → wasm-pack → vite production build → GitHub Pages
+# Build pipeline: checkout core + viewer → wasm-pack → SPA (Pages) + lib artifact
 name: CI
 
 on:
@@ -108,8 +108,11 @@ jobs:
       - name: npm ci (studio)
         run: npm ci
 
-      - name: Build studio
+      - name: Build studio (SPA → Pages)
         run: npm run build
+
+      - name: Build studio library (dist-lib)
+        run: npm run build:lib
 
       # SPA fallback for vue-router history mode on GitHub Pages
       - name: Prepare Pages SPA fallback
@@ -120,6 +123,13 @@ jobs:
         with:
           name: svg3dx-studio-dist
           path: svg3dx-studio/dist
+          if-no-files-found: error
+
+      - name: Upload lib artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: svg3dx-studio-lib
+          path: svg3dx-studio/dist-lib
           if-no-files-found: error
 
       - name: Upload Pages artifact

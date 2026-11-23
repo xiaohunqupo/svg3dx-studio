@@ -1,9 +1,9 @@
 /**
- * Local sidecar assets for a Studio document (e.g. `assets/foo.glb`).
- * Stored in IndexedDB; exposed to the viewer as blob: URL map.
+ * Sidecar assets for a Studio document (e.g. `assets/foo.glb`).
+ * IO goes through the configured AssetRepository; blob: URLs are cached in-memory.
  */
 
-import { ASSETS_STORE, idbTxDone, openStudioDb } from "@/utils/storage";
+import { getAssetRepository } from "@/repos/runtime";
 import { bytesToBlob } from "@/utils/svg3dxz";
 
 export type DocumentAssetRecord = {
@@ -47,46 +47,38 @@ export async function putDocumentAsset(
   mime?: string
 ): Promise<string> {
   const normalized = normalizeAssetPath(path);
-  const key = assetKey(fileId, normalized);
-  const record: DocumentAssetRecord = {
-    key,
-    fileId,
-    path: normalized,
-    mime: mime || file.type || "model/gltf-binary",
-    blob: file,
-    updatedAt: Date.now(),
-  };
-  const db = await openStudioDb();
-  const tx = db.transaction(ASSETS_STORE, "readwrite");
-  tx.objectStore(ASSETS_STORE).put(record);
-  await idbTxDone(tx);
-  revokeKey(key);
+  const resolvedMime = mime || file.type || "model/gltf-binary";
+  await getAssetRepository().write(fileId, normalized, file, resolvedMime);
+  revokeKey(assetKey(fileId, normalized));
   return normalized;
 }
 
 export async function listDocumentAssets(
   fileId: string
 ): Promise<DocumentAssetRecord[]> {
-  const db = await openStudioDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(ASSETS_STORE, "readonly");
-    const idx = tx.objectStore(ASSETS_STORE).index("fileId");
-    const req = idx.getAll(fileId);
-    req.onsuccess = () => resolve((req.result as DocumentAssetRecord[]) ?? []);
-    req.onerror = () => reject(req.error);
-  });
+  const assets = getAssetRepository();
+  const listed = await assets.list(fileId);
+  const out: DocumentAssetRecord[] = [];
+  for (const item of listed) {
+    const blob = await assets.read(fileId, item.path);
+    if (!blob) continue;
+    const path = normalizeAssetPath(item.path);
+    out.push({
+      key: assetKey(fileId, path),
+      fileId,
+      path,
+      mime: item.mime || blob.type || "application/octet-stream",
+      blob,
+      updatedAt: Date.now(),
+    });
+  }
+  return out;
 }
 
 export async function deleteDocumentAssets(fileId: string): Promise<void> {
   const list = await listDocumentAssets(fileId);
-  const db = await openStudioDb();
-  const tx = db.transaction(ASSETS_STORE, "readwrite");
-  const store = tx.objectStore(ASSETS_STORE);
-  for (const rec of list) {
-    store.delete(rec.key);
-    revokeKey(rec.key);
-  }
-  await idbTxDone(tx);
+  for (const rec of list) revokeKey(rec.key);
+  await getAssetRepository().removeAll(fileId);
 }
 
 /** Build relative-path → blob: URL map for the viewer. */

@@ -3,7 +3,10 @@
  * Avoid a parallel brand palette — less to maintain for this open-source app.
  */
 
-/* Thin aliases for svg3dx-viewer overlay chrome (maps to official TDesign tokens). */
+/*
+ * Thin aliases for svg3dx-viewer overlay chrome (maps to official TDesign tokens).
+ * Hosts may override layout tokens below when embedding.
+ */
 :root {
   --svg3dx-chrome-bg: var(--td-bg-color-container);
   --svg3dx-chrome-fg: var(--td-text-color-primary);
@@ -11,6 +14,12 @@
   --svg3dx-chrome-input-bg: var(--td-bg-color-secondarycontainer);
   --svg3dx-chrome-divider: var(--td-component-stroke);
   --svg3dx-chrome-shadow: var(--td-shadow-1);
+
+  /* Studio shell layout (override in host CSS) */
+  --svg3dx-studio-topbar-height: 40px;
+  --svg3dx-studio-sidebar-width: 280px;
+  --svg3dx-studio-tree-width: 260px;
+  --svg3dx-studio-inspector-width: 280px;
 }
 
 * {
