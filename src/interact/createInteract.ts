@@ -121,6 +121,11 @@ export type TransformCommitPayload = {
 export type CreateInteractOptions = Omit<CreateViewerOptions, "viewHelperClick"> & {
   /** Fired when the user clicks geometry (not orbit-drag / ViewHelper / gizmo). */
   onPick?: (path: string | null) => void;
+  /**
+   * Live gizmo values while dragging (rAF-coalesced). Inspector-only —
+   * do **not** write the document or push undo from this callback.
+   */
+  onTransformPreview?: (payload: TransformCommitPayload) => void;
   /** Fired after a TransformControls drag commits a new local matrix. */
   onTransformCommit?: (payload: TransformCommitPayload) => void;
   /**
@@ -134,7 +139,13 @@ export async function createInteract(
   container: HTMLElement,
   options: CreateInteractOptions = {}
 ): Promise<InteractViewport> {
-  const { onPick, onTransformCommit, onDrillChange, ...viewerOptions } = options;
+  const {
+    onPick,
+    onTransformPreview,
+    onTransformCommit,
+    onDrillChange,
+    ...viewerOptions
+  } = options;
   const viewer = await createViewer(container, {
     // Same as Browse: show the overlay params list by default (settings can hide).
     paramsBar: true,
@@ -144,7 +155,12 @@ export async function createInteract(
     // Interact owns left-click routing (ViewHelper + pick).
     viewHelperClick: false,
   });
-  return new InteractViewport(viewer, { onPick, onTransformCommit, onDrillChange });
+  return new InteractViewport(viewer, {
+    onPick,
+    onTransformPreview,
+    onTransformCommit,
+    onDrillChange,
+  });
 }
 
 function isTransformablePath(path: string | null | undefined): boolean {
@@ -289,6 +305,7 @@ export class InteractViewport {
   readonly viewer: EmbedViewer;
 
   private onPick?: (path: string | null) => void;
+  private onTransformPreview?: (payload: TransformCommitPayload) => void;
   private onTransformCommit?: (payload: TransformCommitPayload) => void;
   private onDrillChange?: (crumbs: DrillCrumb[]) => void;
   /** Isolated node. Null = whole model, axes at the world origin. */
@@ -343,6 +360,8 @@ export class InteractViewport {
   /** Separate from main scene so OutlinePass does not outline the gizmo. */
   private overlayScene: THREE.Scene;
   private transformDirty = false;
+  /** Coalesce objectChange → inspector preview to one emit per frame. */
+  private transformPreviewRaf = 0;
   /** True while TransformControls owns the current left-button gesture. */
   private gizmoGesture = false;
   private transformMode: TransformMode = "translate";
@@ -353,6 +372,7 @@ export class InteractViewport {
     viewer: EmbedViewer,
     options: {
       onPick?: (path: string | null) => void;
+      onTransformPreview?: (payload: TransformCommitPayload) => void;
       onTransformCommit?: (payload: TransformCommitPayload) => void;
       onDrillChange?: (crumbs: DrillCrumb[]) => void;
     } = {}
@@ -361,6 +381,7 @@ export class InteractViewport {
     this.viewer.viewer.includeDefsWorld = true;
     this.viewer.viewer.buildHooks = studioSceneBuildHooks();
     this.onPick = options.onPick;
+    this.onTransformPreview = options.onTransformPreview;
     this.onTransformCommit = options.onTransformCommit;
     this.onDrillChange = options.onDrillChange;
     // Meshes → OutlinePass; curve wires (line/arc/path) get color highlight inside SelectionHighlight.
@@ -398,8 +419,10 @@ export class InteractViewport {
     });
     this.transform.addEventListener("objectChange", () => {
       this.transformDirty = true;
+      this.scheduleTransformPreview();
     });
     this.transform.addEventListener("mouseUp", () => {
+      this.cancelTransformPreview();
       if (this.transformDirty) {
         this.transformDirty = false;
         this.commitTransform();
@@ -1001,6 +1024,7 @@ export class InteractViewport {
   }
 
   dispose(): void {
+    this.cancelTransformPreview();
     const el = this.viewer.renderer.domElement;
     el.removeEventListener("pointerdown", this.onPointerDown);
     el.removeEventListener("pointerup", this.onPointerUp);
@@ -1171,10 +1195,11 @@ export class InteractViewport {
     finish();
   }
 
-  private commitTransform(): void {
+  /** Serialize the current gizmo target as `s3dx:transform` (or null if none). */
+  private readTransformPayload(): TransformCommitPayload | null {
     const path = this.highlightPath;
     const obj = this.transform.object;
-    if (!path || !obj || !this.onTransformCommit) return;
+    if (!path || !obj) return null;
     const form = detectTransformForm(
       this.document
         ? (readAttrsAtPath(this.document, path)?.["s3dx:transform"] ?? "")
@@ -1182,11 +1207,7 @@ export class InteractViewport {
     );
     const section = this.sectionProxies.get(path);
     if (section && obj === section.root) {
-      this.onTransformCommit({
-        path,
-        transform: section.commitTransformAttr(form),
-      });
-      return;
+      return { path, transform: section.commitTransformAttr(form) };
     }
     obj.updateMatrix();
     let matrix = obj.matrix.clone();
@@ -1205,11 +1226,32 @@ export class InteractViewport {
         matrix = groupMatrixFromUseClone(matrix, useMat);
       }
     }
-    const m = matrix4ToMat4x3(matrix);
-    this.onTransformCommit({
+    return {
       path,
-      transform: matrix12ToTransformAttr(m, form),
+      transform: matrix12ToTransformAttr(matrix4ToMat4x3(matrix), form),
+    };
+  }
+
+  private scheduleTransformPreview(): void {
+    if (!this.onTransformPreview) return;
+    if (this.transformPreviewRaf) return;
+    this.transformPreviewRaf = requestAnimationFrame(() => {
+      this.transformPreviewRaf = 0;
+      const payload = this.readTransformPayload();
+      if (payload) this.onTransformPreview?.(payload);
     });
+  }
+
+  private cancelTransformPreview(): void {
+    if (!this.transformPreviewRaf) return;
+    cancelAnimationFrame(this.transformPreviewRaf);
+    this.transformPreviewRaf = 0;
+  }
+
+  private commitTransform(): void {
+    if (!this.onTransformCommit) return;
+    const payload = this.readTransformPayload();
+    if (payload) this.onTransformCommit(payload);
   }
 
   /** Evaluated `<s3dx:use>` transform for `model:id.N`, or identity if unset. */

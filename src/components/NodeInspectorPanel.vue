@@ -992,6 +992,20 @@ function applyTransformDraft(attr: string, commit: "field" | "model"): void {
   else commitField("s3dx:transform");
 }
 
+/**
+ * Live gizmo preview: refresh inspector fields without writing XML / undo.
+ * Mirrors Three.js editor `objectChange` → sidebar refresh.
+ */
+function applyTransformPreview(path: string, transform: string): void {
+  if (!path || draftPath !== path) return;
+  if (!("s3dx:transform" in draft)) return;
+  const display = transform ? transformToDisplay(transform) : "";
+  draft["s3dx:transform"] = display;
+  // Keep the user's matrix/TRS mode; only refresh numeric channels.
+  Object.assign(transformParts, syncTransformPartsFromDisplay(display));
+  Object.assign(transformTrs, syncTransformTrsFromDisplay(display));
+}
+
 function onTransformFormRadio(value: unknown): void {
   const next: TransformForm = value === "trs" ? "trs" : "matrix";
   requestSwitchTransformForm(next);
@@ -1449,6 +1463,8 @@ function commitStyleCategoryName(): void {
   }
   emit("styleCategoryRename", { from, to });
 }
+
+defineExpose({ applyTransformPreview });
 </script>
 
 <template>

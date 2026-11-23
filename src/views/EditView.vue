@@ -159,6 +159,9 @@ const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
   exitDrill: (options?: { select?: string | null }) => void;
 } | null>(null);
+const inspectorPanel = ref<{
+  applyTransformPreview: (path: string, transform: string) => void;
+} | null>(null);
 const sourcePanel = ref<{
   revealPath: (
     path: string | null | undefined,
@@ -821,10 +824,20 @@ function onViewportPick(path: string | null): void {
   treePanel.value?.selectPath(path);
 }
 
+/** Live gizmo → inspector only (no document / undo). */
+function onViewportTransformPreview(payload: {
+  path: string;
+  transform: string;
+}): void {
+  inspectorPanel.value?.applyTransformPreview(payload.path, payload.transform);
+}
+
 async function onViewportTransform(payload: {
   path: string;
   transform: string;
 }): Promise<void> {
+  // Keep inspector in sync if the last preview frame was cancelled on mouseUp.
+  inspectorPanel.value?.applyTransformPreview(payload.path, payload.transform);
   await onNodeAttrsChange({
     path: payload.path,
     updates: { "s3dx:transform": payload.transform },
@@ -1191,6 +1204,7 @@ onBeforeUnmount(() => {
             @result="onResult"
             @error="(m) => MessagePlugin.error(m)"
             @pick="onViewportPick"
+            @transform-preview="onViewportTransformPreview"
             @transform="onViewportTransform"
             @drill="onDrillCrumbs"
           />
@@ -1212,6 +1226,7 @@ onBeforeUnmount(() => {
         <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
         <NodeInspectorPanel
           v-else
+          ref="inspectorPanel"
           :selected="selected"
           :content="draftContent"
           @style-params-change="onStyleParamsChange"

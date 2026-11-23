@@ -51,6 +51,8 @@ const emit = defineEmits<{
   ready: [InteractViewport];
   /** Viewport pick → Studio tree path (null = empty click). */
   pick: [path: string | null];
+  /** Live gizmo values while dragging (inspector preview only). */
+  transformPreview: [payload: TransformCommitPayload];
   /** TransformControls drag finished → write `s3dx:transform`. */
   transform: [payload: TransformCommitPayload];
   /** Selection breadcrumb. Empty when nothing is selected and not drilled in. */
@@ -122,6 +124,7 @@ async function ensureInteract(): Promise<InteractViewport | null> {
       emit("pick", path);
       syncGizmoUi();
     },
+    onTransformPreview: (payload) => emit("transformPreview", payload),
     onTransformCommit: (payload) => emit("transform", payload),
     onDrillChange: (crumbs: DrillCrumb[]) => {
       drillCrumbs.value = crumbs.map((c) => ({
