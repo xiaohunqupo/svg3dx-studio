@@ -1,8 +1,7 @@
 {
   "name": "svg3dx-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "svg3dx Studio — embeddable Vue page library (browse / edit) + demo SPA",
-  "private": true,
   "type": "module",
   "main": "./dist-lib/index.js",
   "types": "./dist-lib/index.d.ts",
@@ -33,7 +32,7 @@
   },
   "peerDependencies": {
     "pinia": "^2.2.0",
-    "svg3dx-viewer": "*",
+    "svg3dx-viewer": "^0.1.1",
     "tdesign-icons-vue-next": "^0.3.0",
     "tdesign-vue-next": "^1.10.0",
     "three": ">=0.160.0",
@@ -54,14 +53,14 @@
     "@prettier/plugin-xml": "^3.4.2",
     "@svgedit/svgcanvas": "^7.4.2",
     "codemirror": "^6.0.2",
-    "pinia": "^2.2.0",
+    "pinia": "^2.3.0",
     "prettier": "^3.10.1",
-    "svg3dx-viewer": "*",
-    "tdesign-icons-vue-next": "^0.3.0",
-    "tdesign-vue-next": "^1.10.0",
-    "three": ">=0.160.0",
-    "vue": "^3.5.0",
-    "vue-router": "^4.4.0"
+    "svg3dx-viewer": "^0.1.1",
+    "tdesign-icons-vue-next": "^0.3.6",
+    "tdesign-vue-next": "^1.20.11",
+    "three": "^0.170.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@tdesign-vue-next/auto-import-resolver": "^0.1.2",
