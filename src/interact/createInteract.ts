@@ -38,6 +38,7 @@ import {
   sectionAncestorPath,
   SectionProxy,
 } from "./sectionProxy";
+import { attachPointBillboard } from "./pointMarker";
 
 // Match viewer: Z-up before any studio Object3D / raycast helpers.
 applyWorldUp();
@@ -82,6 +83,10 @@ function studioSceneBuildHooks() {
     afterObjectBuilt: (obj: THREE.Object3D, inst: GeometryInstruction) => {
       if (inst.type === "group" && inst.inactive) {
         stampConditionInactive(obj, true);
+      }
+      // Viewer leaves point hosts empty; editor draws billboard circles only.
+      if (inst.type === "primitive" && inst.kind === "point") {
+        attachPointBillboard(obj);
       }
     },
     afterGltfHydrated: (
@@ -412,14 +417,21 @@ export class InteractViewport {
     this.transform.addEventListener("dragging-changed", (event) => {
       const dragging = Boolean((event as { value?: boolean }).value);
       this.viewer.controls.enabled = !dragging;
+      this.viewer.invalidate();
     });
     this.transform.addEventListener("mouseDown", () => {
       // Click on a gizmo handle (even without a drag) must not clear selection.
       this.gizmoGesture = true;
+      this.viewer.invalidate();
+    });
+    // Hover highlight + drag both dispatch `change`; keep on-demand paint alive.
+    this.transform.addEventListener("change", () => {
+      this.viewer.invalidate();
     });
     this.transform.addEventListener("objectChange", () => {
       this.transformDirty = true;
       this.scheduleTransformPreview();
+      this.viewer.invalidate();
     });
     this.transform.addEventListener("mouseUp", () => {
       this.cancelTransformPreview();
@@ -431,6 +443,7 @@ export class InteractViewport {
       queueMicrotask(() => {
         this.gizmoGesture = false;
       });
+      this.viewer.invalidate();
     });
 
     this.onPointerDown = (event: PointerEvent) => {
@@ -475,6 +488,7 @@ export class InteractViewport {
         this.viewer.viewHelper.handleClick(event)
       ) {
         this.lastClickAt = 0;
+        this.viewer.invalidate();
         return;
       }
       const now = performance.now();
@@ -1122,6 +1136,7 @@ export class InteractViewport {
     const finish = (): void => {
       // Keep plane/axes on the parent even when only the gizmo target changes.
       this.syncHelperFrame();
+      this.viewer.invalidate();
     };
     if (!isTransformablePath(path)) {
       this.transform.detach();
@@ -1905,6 +1920,7 @@ export class InteractViewport {
       }
     }
     controls.update();
+    this.viewer.invalidate();
   }
 
   /** True when the object's bounds center projects near the view center. */
