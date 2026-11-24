@@ -21,6 +21,7 @@ declare module 'vue' {
     NodeInspectorPanel: typeof import('./components/NodeInspectorPanel.vue')['default']
     NodeTreePanel: typeof import('./components/NodeTreePanel.vue')['default']
     PanelSkeleton: typeof import('./components/skeletons/PanelSkeleton.vue')['default']
+    PointAttrInput: typeof import('./components/PointAttrInput.vue')['default']
     ReposMenu: typeof import('./components/ReposMenu.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

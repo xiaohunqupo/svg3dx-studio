@@ -171,7 +171,11 @@ const interactHost = ref<{
 } | null>(null);
 const inspectorPanel = ref<{
   applyTransformPreview: (path: string, transform: string) => void;
+  applyPointPick: (pointId: string) => void;
+  clearPointPick: () => void;
 } | null>(null);
+/** When set, next viewport pick of an `<s3dx:point>` writes `ref(#id)`. */
+const pointPickTarget = ref<{ path: string; attr: string } | null>(null);
 const sourcePanel = ref<{
   revealPath: (
     path: string | null | undefined,
@@ -824,7 +828,29 @@ function onDrillCrumbs(crumbs: DrillCrumb[]): void {
     .map((c, i) => ({ path: c.nodePath, n: i + 1 }));
 }
 
+function onArmPointPick(payload: { path: string; attr: string } | null): void {
+  pointPickTarget.value = payload;
+  if (payload) {
+    MessagePlugin.info(t("app.pickPointArmed"));
+  }
+}
+
 function onViewportPick(path: string | null): void {
+  if (pointPickTarget.value) {
+    if (!path) {
+      inspectorPanel.value?.clearPointPick();
+      pointPickTarget.value = null;
+      return;
+    }
+    const info = nodeKindAtPath(draftContent.value, path);
+    if (info?.kind === "point" && info.id) {
+      inspectorPanel.value?.applyPointPick(info.id);
+      pointPickTarget.value = null;
+      return;
+    }
+    MessagePlugin.warning(t("app.pickPointArmed"));
+    return;
+  }
   if (!path) {
     // Viewport already cleared the entity pick and kept the drill level.
     selected.value = null;
@@ -1256,6 +1282,7 @@ onBeforeUnmount(() => {
             @node-attrs-change="onNodeAttrsChange"
             @edit-section="onEditSection"
             @pick-gltf-href="onPickGltfHref"
+            @arm-point-pick="onArmPointPick"
           />
         </slot>
       </aside>

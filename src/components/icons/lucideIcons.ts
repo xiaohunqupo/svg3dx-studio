@@ -9,6 +9,7 @@ export {
   Cable as PipeIcon,
   ChartPie as SectorCylinderIcon,
   Circle as SphereIcon,
+  CircleDot as PointIcon,
   SquareLetterN as IfNotIcon,
   SquareLetterY as IfIcon,
   Cone as ConeIcon,

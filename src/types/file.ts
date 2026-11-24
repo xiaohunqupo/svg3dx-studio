@@ -14,6 +14,7 @@ export type GeometryKind =
   | "pyramid"
   | "prism"
   | "sector-cylinder"
+  | "point"
   | "line"
   | "arc"
   | "path"

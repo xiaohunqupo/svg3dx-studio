@@ -25,6 +25,7 @@ export type MaterialKey = keyof typeof MATERIAL_LABELS;
 
 /** Element / type official names (§3.2). */
 export const ELEMENT_LABELS = {
+  point: { zh: "定位点", en: "Point" },
   line: { zh: "直线", en: "Line" },
   arc: { zh: "圆弧", en: "Arc" },
   path: { zh: "路径", en: "Path" },
@@ -119,6 +120,7 @@ export const ATTR_LABELS = {
   topLength: { zh: "顶边长度", en: "topLength" },
   topWidth: { zh: "顶边宽度", en: "topWidth" },
   points: { zh: "点列", en: "points" },
+  at: { zh: "位置", en: "at" },
   from: { zh: "起点", en: "from" },
   to: { zh: "终点", en: "to" },
   xDir: { zh: "X 方向", en: "xDir" },

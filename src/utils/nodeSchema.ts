@@ -18,6 +18,11 @@ export type AttrField = {
   /** Boolean attr — inspector shows a checkbox (`"true"` / `"false"`). */
   boolean?: boolean;
   /**
+   * Point-typed attr: literals / var / calc, or live `ref(#id)` to an
+   * `<s3dx:point>` (draft 0.2). Inspector offers a point picker.
+   */
+  pointAttr?: boolean;
+  /**
    * Only show this field when another attr’s current value is in `values`.
    * Empty / unset `name` is treated as `whenEmpty` (if provided).
    */
@@ -889,24 +894,24 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
   ],
   cylinder: [
     { name: "diameter", placeholder: "100" },
-    { name: "bottomCenterPt", placeholder: "0 0 0" },
-    { name: "topCenterPt", placeholder: "0 0 100" },
+    { name: "bottomCenterPt", placeholder: "0 0 0", pointAttr: true },
+    { name: "topCenterPt", placeholder: "0 0 100", pointAttr: true },
   ],
   sphere: [
     { name: "radius", placeholder: "50" },
-    { name: "center", placeholder: "0 0 0" },
+    { name: "center", placeholder: "0 0 0", pointAttr: true },
   ],
   cone: [
     { name: "bottomDiameter", placeholder: "100" },
     { name: "topDiameter", placeholder: "40" },
-    { name: "bottomCenterPt", placeholder: "0 0 0" },
-    { name: "topCenterPt", placeholder: "0 0 100" },
+    { name: "bottomCenterPt", placeholder: "0 0 0", pointAttr: true },
+    { name: "topCenterPt", placeholder: "0 0 100", pointAttr: true },
   ],
   torus: [
     { name: "diameter1", placeholder: "100" },
     { name: "diameter2", placeholder: "25" },
     { name: "angle", placeholder: "360" },
-    { name: "torusCenterPt", placeholder: "0 0 0" },
+    { name: "torusCenterPt", placeholder: "0 0 0", pointAttr: true },
     { name: "normal", placeholder: "0 0 1" },
   ],
   wedge: [
@@ -933,13 +938,17 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
   ],
   "sector-cylinder": [
     { name: "diameter", placeholder: "100" },
-    { name: "bottomCenterPt", placeholder: "0 0 0" },
-    { name: "topCenterPt", placeholder: "0 0 100" },
+    { name: "bottomCenterPt", placeholder: "0 0 0", pointAttr: true },
+    { name: "topCenterPt", placeholder: "0 0 100", pointAttr: true },
     { name: "angle", placeholder: "90" },
   ],
+  point: [
+    { name: "id", placeholder: "point-1" },
+    { name: "at", placeholder: "0 0 0" },
+  ],
   line: [
-    { name: "from", placeholder: "0 0 0" },
-    { name: "to", placeholder: "100 0 0" },
+    { name: "from", placeholder: "0 0 0", pointAttr: true },
+    { name: "to", placeholder: "100 0 0", pointAttr: true },
   ],
   arc: [
     {
@@ -947,7 +956,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
       placeholder: "angles",
       enumValues: ["angles", "ends"],
     },
-    { name: "center", placeholder: "0 0 0" },
+    { name: "center", placeholder: "0 0 0", pointAttr: true },
     { name: "normal", placeholder: "0 0 1" },
     { name: "radius", placeholder: "100" },
     {
@@ -980,6 +989,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     {
       name: "from",
       placeholder: "0 0 0",
+      pointAttr: true,
       visibleWhen: {
         name: "form",
         values: ["ends"],
@@ -989,6 +999,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     {
       name: "to",
       placeholder: "100 0 0",
+      pointAttr: true,
       visibleWhen: {
         name: "form",
         values: ["ends"],
@@ -1013,7 +1024,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     },
   ],
   extrude: [
-    { name: "origin", placeholder: "0 0 0" },
+    { name: "origin", placeholder: "0 0 0", pointAttr: true },
     { name: "normal", placeholder: "0 0 1" },
     { name: "xDir", placeholder: "1 0 0" },
     { name: "dir", placeholder: "0 0 1" },

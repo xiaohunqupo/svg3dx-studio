@@ -44,6 +44,7 @@ import {
   ModelingCategoryIcon,
   PathIcon,
   PipeIcon,
+  PointIcon,
   PrismIcon,
   PyramidIcon,
   RevolveIcon,
@@ -81,6 +82,7 @@ import {
   LOGIC_MENU,
   LOOP_MENU,
   MODELING_MENU,
+  POINT_MENU,
   PRIMITIVE_MENU,
   SOLID_MENU,
   type AddChildMenuItem,
@@ -646,6 +648,8 @@ function kindIcon(kind: string): Component {
       return PyramidIcon;
     case "pipe":
       return PipeIcon;
+    case "point":
+      return PointIcon;
     case "line":
       return LineIcon;
     case "arc":
@@ -796,6 +800,7 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
     value: "group",
     prefixIcon: () => h(GroupIcon),
   },
+  categoryOption("app.addPoint", "__add-point", PointIcon, POINT_MENU),
   categoryOption("app.addCurve", "__add-curve", CurveCategoryIcon, CURVE_MENU),
   categoryOption("app.addSolid", "__add-solid", SolidCategoryIcon, SOLID_MENU),
   categoryOption("app.addModeling", "__add-modeling", ModelingCategoryIcon, MODELING_MENU),
@@ -1763,9 +1768,11 @@ function groupIdOf(item: TreeItem): string | undefined {
 }
 
 const MENU_CATEGORY_VALUES = new Set([
+  "__add-point",
   "__add-curve",
   "__add-solid",
   "__add-modeling",
+  "__add-asset",
   "__add-bool",
   "__add-logic",
   "__add-loop",

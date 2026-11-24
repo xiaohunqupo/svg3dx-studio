@@ -14,8 +14,10 @@ import CornerAttrSelect from "@/components/CornerAttrSelect.vue";
 import VecRgbInput from "@/components/VecRgbInput.vue";
 import ExprAttrInput from "@/components/ExprAttrInput.vue";
 import HrefRefInput from "@/components/HrefRefInput.vue";
+import PointAttrInput from "@/components/PointAttrInput.vue";
 import { PenToolIcon } from "@/components/icons/lucideIcons";
 import { useI18n } from "@/i18n";
+import { collectPointIds } from "@/utils/documentPoints";
 import { isSectionEditable } from "@/utils/shapeSvgEditor";
 import {
   APPEARANCE_ATTR_NAMES,
@@ -93,7 +95,22 @@ const emit = defineEmits<{
   nodeAttrsChange: [payload: { path: string; updates: Record<string, string> }];
   editSection: [payload: { path: string }];
   pickGltfHref: [payload: { path: string }];
+  /** Arm / disarm viewport pick that writes `ref(#id)` into a point attr. */
+  armPointPick: [payload: { path: string; attr: string } | null];
 }>();
+
+/** Attr currently waiting for a viewport point pick. */
+const pointPickAttr = ref<string | null>(null);
+
+watch(
+  () => props.selected,
+  () => {
+    if (pointPickAttr.value) {
+      pointPickAttr.value = null;
+      emit("armPointPick", null);
+    }
+  }
+);
 
 const canEditSectionProfile = computed(() => {
   const sel = props.selected;
@@ -1249,10 +1266,46 @@ function rowsForSection(fields: FieldRow[]): InspectorRow[] {
 
 /** Points / vectors / matrices whose numbers should render as R·G·B segments. */
 function isVecRgbField(field: AttrField): boolean {
+  if (field.pointAttr) return false;
   if (field.name === "s3dx:transform") {
     return detectTransformForm(draft["s3dx:transform"] ?? "") === "matrix";
   }
   return looksLikeVecRgbText(field.placeholder ?? "");
+}
+
+const pointIdOptions = computed(() =>
+  props.content ? collectPointIds(props.content) : []
+);
+
+function armPointPickFor(attr: string): void {
+  const sel = props.selected;
+  if (!sel || sel.kind !== "geometry") return;
+  if (pointPickAttr.value === attr) {
+    pointPickAttr.value = null;
+    emit("armPointPick", null);
+    return;
+  }
+  pointPickAttr.value = attr;
+  emit("armPointPick", { path: sel.path, attr });
+}
+
+/** Host calls after a successful viewport point pick. */
+function applyPointPick(pointId: string): void {
+  const attr = pointPickAttr.value;
+  const sel = props.selected;
+  if (!attr || !sel || sel.kind !== "geometry") return;
+  const bare = pointId.trim().replace(/^#/, "");
+  if (!bare) return;
+  draft[attr] = `ref(#${bare})`;
+  commitField(attr);
+  pointPickAttr.value = null;
+  emit("armPointPick", null);
+}
+
+function clearPointPick(): void {
+  if (!pointPickAttr.value) return;
+  pointPickAttr.value = null;
+  emit("armPointPick", null);
 }
 
 /** Scalar geometry attrs that accept literals / var / calc. */
@@ -1464,7 +1517,7 @@ function commitStyleCategoryName(): void {
   emit("styleCategoryRename", { from, to });
 }
 
-defineExpose({ applyTransformPreview });
+defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
 </script>
 
 <template>
@@ -2131,6 +2184,29 @@ defineExpose({ applyTransformPreview });
                     @blur="commitTransformCompact"
                     @enter="commitTransformCompact"
                     @clear="clearTransform"
+                  />
+                  <PointAttrInput
+                    v-else-if="row.field.pointAttr"
+                    v-model="draft[row.field.name]"
+                    clearable
+                    class="value-input"
+                    :placeholder="
+                      row.field.placeholder || t('app.unsetHint')
+                    "
+                    :point-ids="pointIdOptions"
+                    :pick-armed="pointPickAttr === row.field.name"
+                    :param-groups="paramSourceGroups"
+                    :effective-names="effectiveParamNames"
+                    :param-values="effectiveParamValues"
+                    @blur="commitField(row.field.name)"
+                    @enter="commitField(row.field.name)"
+                    @pick-viewport="armPointPickFor(row.field.name)"
+                    @clear="
+                      () => {
+                        draft[row.field.name] = '';
+                        commitField(row.field.name);
+                      }
+                    "
                   />
                   <VecRgbInput
                     v-else-if="isVecRgbField(row.field)"

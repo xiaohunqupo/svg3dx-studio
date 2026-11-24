@@ -4,7 +4,8 @@ import type {
   GeometryKind,
 } from "@/types/file";
 
-const NS = "urn:s3dx:draft:0.1";
+/** New documents default to draft 0.2 (point + ref). Opening 0.1 files stays supported. */
+const NS = "urn:s3dx:draft:0.2";
 
 export type AddChildMenuItem = {
   kind: Exclude<AddChildKind, "group">;
@@ -22,6 +23,7 @@ const GEOMETRY_SNIPPETS: Record<GeometryKind, string> = {
   pyramid: `<s3dx:pyramid length="100" width="100" height="100" lengthVec="1 0 0" widthVec="0 1 0"/>`,
   prism: `<s3dx:prism points="0 0 0  100 0 0  100 100 0  0 100 0" height="100"/>`,
   "sector-cylinder": `<s3dx:sector-cylinder diameter="100" bottomCenterPt="0 0 0" topCenterPt="0 0 100" angle="90"/>`,
+  point: `<s3dx:point id="point-1" at="0 0 0"/>`,
   line: `<s3dx:line from="0 0 0" to="100 0 0"/>`,
   arc: `<s3dx:arc form="angles" center="0 0 0" normal="0 0 1" radius="100" xDir="1 0 0" startAngle="0" angle="90"/>`,
   path: `<s3dx:path form="segments">
@@ -163,6 +165,17 @@ function nextGroupId(content: string, kind: string): string {
     if (Number.isFinite(n) && n > max) max = n;
   }
   return `group-${kind}-${max + 1}`;
+}
+
+/** Next free `point-N` id for `<s3dx:point>`. */
+function nextPointId(content: string): string {
+  const re = /\bid="(point-\d+)"/g;
+  let max = 0;
+  for (const m of content.matchAll(re)) {
+    const n = Number(m[1].split("-").pop());
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return `point-${max + 1}`;
 }
 
 function insertGroupIntoDefs(svg: string, groupXml: string): string {
@@ -486,14 +499,23 @@ export function insertChildIntoGroup(
     };
   }
 
-  const body = opts?.snippet ?? DEFAULT_SNIPPETS[kind];
+  let body = opts?.snippet ?? DEFAULT_SNIPPETS[kind];
   if (!body) {
     return { content: svg, kind };
+  }
+  let childId: string | undefined;
+  if (kind === "point") {
+    childId = nextPointId(svg);
+    body = body.replace(/\bid="[^"]*"/, `id="${childId}"`);
+    if (!/\bid=/.test(body)) {
+      body = body.replace(/<s3dx:point\b/, `<s3dx:point id="${childId}"`);
+    }
   }
   const child = `      ${body}${nl}`;
   return {
     content: insertXmlIntoGroup(svg, parentGroupId, child),
     kind,
+    childId,
   };
 }
 
@@ -565,6 +587,11 @@ export function removeGroupById(content: string, groupId: string): string {
   return svg;
 }
 
+/** Positioning points — draft 0.2 §3.2.2 (menu: 定位点). */
+export const POINT_MENU: AddChildMenuItem[] = [
+  { kind: "point", labelZh: "定位点", labelEn: "Point" },
+];
+
 /** Curves / wire — draft §3.2.3 (menu: 二维图元). */
 export const CURVE_MENU: AddChildMenuItem[] = [
   { kind: "line", labelZh: "直线", labelEn: "Line" },
@@ -616,8 +643,9 @@ export const LOOP_MENU: AddChildMenuItem[] = [
   { kind: "loop-range", labelZh: "范围循环", labelEn: "Loop range" },
 ];
 
-/** All insertable geometry kinds (curves + solids + modeling + assets). */
+/** All insertable geometry kinds (points + curves + solids + modeling + assets). */
 export const PRIMITIVE_MENU: AddChildMenuItem[] = [
+  ...POINT_MENU,
   ...CURVE_MENU,
   ...SOLID_MENU,
   ...MODELING_MENU,
