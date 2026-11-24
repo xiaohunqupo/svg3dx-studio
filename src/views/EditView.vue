@@ -170,7 +170,11 @@ const interactHost = ref<{
   exitDrill: (options?: { select?: string | null }) => void;
 } | null>(null);
 const inspectorPanel = ref<{
-  applyTransformPreview: (path: string, transform: string) => void;
+  applyTransformPreview: (
+    path: string,
+    transform: string,
+    attrs?: Record<string, string>
+  ) => void;
   applyPointPick: (pointId: string) => void;
   clearPointPick: () => void;
 } | null>(null);
@@ -864,19 +868,32 @@ function onViewportPick(path: string | null): void {
 function onViewportTransformPreview(payload: {
   path: string;
   transform: string;
+  attrs?: Record<string, string>;
 }): void {
-  inspectorPanel.value?.applyTransformPreview(payload.path, payload.transform);
+  inspectorPanel.value?.applyTransformPreview(
+    payload.path,
+    payload.transform,
+    payload.attrs
+  );
 }
 
 async function onViewportTransform(payload: {
   path: string;
   transform: string;
+  attrs?: Record<string, string>;
 }): Promise<void> {
   // Keep inspector in sync if the last preview frame was cancelled on mouseUp.
-  inspectorPanel.value?.applyTransformPreview(payload.path, payload.transform);
+  inspectorPanel.value?.applyTransformPreview(
+    payload.path,
+    payload.transform,
+    payload.attrs
+  );
   await onNodeAttrsChange({
     path: payload.path,
-    updates: { "s3dx:transform": payload.transform },
+    updates: {
+      "s3dx:transform": payload.transform,
+      ...(payload.attrs ?? {}),
+    },
   });
 }
 

@@ -4,6 +4,7 @@ import {
   applyWorldUp,
   createViewer,
   getPickData,
+  matchesHighlight,
   pickPathFromObject,
   SelectionHighlight,
   type CreateViewerOptions,
@@ -78,7 +79,10 @@ function stampConditionInactive(obj: THREE.Object3D, hideRoot = false): void {
 }
 
 /** Tag retained inactive branches for Studio ghost reveal. */
-function studioSceneBuildHooks() {
+function studioSceneBuildHooks(viewport: {
+  camera: THREE.Camera;
+  renderer: { domElement: HTMLElement };
+}) {
   return {
     afterObjectBuilt: (obj: THREE.Object3D, inst: GeometryInstruction) => {
       if (inst.type === "group" && inst.inactive) {
@@ -86,7 +90,10 @@ function studioSceneBuildHooks() {
       }
       // Viewer leaves point hosts empty; editor draws billboard circles only.
       if (inst.type === "primitive" && inst.kind === "point") {
-        attachPointBillboard(obj);
+        attachPointBillboard(obj, {
+          getCamera: () => viewport.camera,
+          getViewHeight: () => viewport.renderer.domElement.clientHeight || 1,
+        });
       }
     },
     afterGltfHydrated: (
@@ -112,6 +119,11 @@ export type TransformCommitPayload = {
   path: string;
   /** `s3dx:transform` attr value (`matrix(...)` or `""` to clear). */
   transform: string;
+  /**
+   * Extra attribute writes in the same commit (e.g. positioning points fold
+   * pose into `at` and clear `s3dx:transform` so eval does not double-apply).
+   */
+  attrs?: Record<string, string>;
 };
 
 /**
@@ -255,6 +267,37 @@ function isShown(obj: THREE.Object3D): boolean {
   return true;
 }
 
+function isPointBillboard(obj: THREE.Object3D): boolean {
+  return Boolean(obj.userData?.pointBillboard);
+}
+
+/**
+ * Local-space visual center of a drawable whose geometry was baked away from
+ * the Object3D origin (e.g. cylinder/line from point refs). Groups / empties
+ * keep the gizmo on the node origin so container transforms stay editable.
+ */
+function visualLocalCenter(obj: THREE.Object3D): THREE.Vector3 | null {
+  const mesh = obj as THREE.Mesh;
+  if (mesh.isMesh && mesh.geometry) {
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const bb = mesh.geometry.boundingBox;
+    if (!bb || bb.isEmpty()) return null;
+    const c = new THREE.Vector3();
+    bb.getCenter(c);
+    return c.lengthSq() > 1e-8 ? c : null;
+  }
+  const line = obj as THREE.Line;
+  if (line.isLine && line.geometry) {
+    if (!line.geometry.boundingBox) line.geometry.computeBoundingBox();
+    const bb = line.geometry.boundingBox;
+    if (!bb || bb.isEmpty()) return null;
+    const c = new THREE.Vector3();
+    bb.getCenter(c);
+    return c.lengthSq() > 1e-8 ? c : null;
+  }
+  return null;
+}
+
 /** Loop copies drawn faded are marked so picks pass through them. */
 function isGhost(obj: THREE.Object3D): boolean {
   // Profile wires stay pickable even when the parent solid is ghosted.
@@ -370,6 +413,13 @@ export class InteractViewport {
   /** True while TransformControls owns the current left-button gesture. */
   private gizmoGesture = false;
   private transformMode: TransformMode = "translate";
+  /**
+   * When geometry is baked off-origin (ref-based cylinder/line/…), TransformControls
+   * attaches to this pivot at the visual center; the real node is reparented under it.
+   */
+  private gizmoPivot: THREE.Object3D | null = null;
+  private gizmoPivotHost: THREE.Object3D | null = null;
+  private gizmoPivotParent: THREE.Object3D | null = null;
   /** Light-green XOY plane proxies for visible `<s3dx:section>` nodes. */
   private sectionProxies = new Map<string, SectionProxy>();
 
@@ -384,7 +434,7 @@ export class InteractViewport {
   ) {
     this.viewer = viewer;
     this.viewer.viewer.includeDefsWorld = true;
-    this.viewer.viewer.buildHooks = studioSceneBuildHooks();
+    this.viewer.viewer.buildHooks = studioSceneBuildHooks(this.viewer);
     this.onPick = options.onPick;
     this.onTransformPreview = options.onTransformPreview;
     this.onTransformCommit = options.onTransformCommit;
@@ -586,6 +636,7 @@ export class InteractViewport {
       resetExtraDefs?: boolean;
     } = {}
   ): Promise<EvaluationResult> {
+    this.releaseGizmoPivot();
     this.transform.detach();
     this.clearSectionProxies();
     this.restoreGhosts();
@@ -613,6 +664,7 @@ export class InteractViewport {
       documentAssetUrls?: Record<string, string>;
     } = {}
   ): Promise<EvaluationResult> {
+    this.releaseGizmoPivot();
     this.transform.detach();
     this.clearSectionProxies();
     this.restoreGhosts();
@@ -627,6 +679,7 @@ export class InteractViewport {
   }
 
   async setParams(params: ParamMap): Promise<EvaluationResult | null> {
+    this.releaseGizmoPivot();
     this.transform.detach();
     this.clearSectionProxies();
     this.restoreGhosts();
@@ -1033,8 +1086,19 @@ export class InteractViewport {
   }
 
   setTransformMode(mode: TransformMode): void {
+    // Positioning-point markers are billboards — only translation is meaningful.
+    if (this.isPointSelection() && mode !== "translate") {
+      mode = "translate";
+    }
     this.transformMode = mode;
     this.transform.setMode(mode);
+  }
+
+  /** True when the current highlight is an `<s3dx:point>`. */
+  isPointSelection(): boolean {
+    const path = this.highlightPath;
+    if (!path || !this.document) return false;
+    return nodeKindAtPath(this.document, path)?.kind === "point";
   }
 
   dispose(): void {
@@ -1045,6 +1109,7 @@ export class InteractViewport {
     el.removeEventListener("contextmenu", this.onContextMenu);
     window.removeEventListener("keydown", this.onKeyDown);
     this.clearSectionProxies();
+    this.releaseGizmoPivot();
     this.transform.detach();
     this.transform.dispose();
     this.overlayScene.remove(this.transformHelper);
@@ -1129,6 +1194,78 @@ export class InteractViewport {
     for (const path of want) this.ensureSectionProxy(path, true);
   }
 
+  /** Drop a visual-center pivot and restore the host under its original parent. */
+  private releaseGizmoPivot(): void {
+    if (!this.gizmoPivot) return;
+    const host = this.gizmoPivotHost;
+    const parent = this.gizmoPivotParent;
+    const pivot = this.gizmoPivot;
+    if (this.transform.object === pivot) this.transform.detach();
+    if (host && parent) {
+      // Preserve world pose while collapsing the pivot out of the graph.
+      parent.attach(host);
+    }
+    pivot.removeFromParent();
+    this.gizmoPivot = null;
+    this.gizmoPivotHost = null;
+    this.gizmoPivotParent = null;
+  }
+
+  /**
+   * Attach TransformControls to `target`, or to a pivot at the drawable's
+   * visual center when geometry is baked far from the local origin (ref pts).
+   */
+  private attachTransformTarget(target: THREE.Object3D): void {
+    this.releaseGizmoPivot();
+    const center = visualLocalCenter(target);
+    const parent = target.parent;
+    if (!center || !parent) {
+      this.transform.attach(target);
+      return;
+    }
+    target.updateWorldMatrix(true, true);
+    const worldCenter = center.clone().applyMatrix4(target.matrixWorld);
+    parent.updateWorldMatrix(true, false);
+    const localCenter = worldCenter.clone();
+    localCenter.applyMatrix4(parent.matrixWorld.clone().invert());
+
+    const pivot = new THREE.Object3D();
+    pivot.name = "studio-gizmo-pivot";
+    parent.add(pivot);
+    pivot.position.copy(localCenter);
+    pivot.quaternion.identity();
+    pivot.scale.set(1, 1, 1);
+    pivot.updateMatrixWorld(true);
+
+    this.gizmoPivot = pivot;
+    this.gizmoPivotHost = target;
+    this.gizmoPivotParent = parent;
+    // Keep the host's world pose; gizmo now rotates/translates about the visual center.
+    pivot.attach(target);
+    this.transform.attach(pivot);
+  }
+
+  /**
+   * Local matrix of the edited node under its document parent — even when the
+   * gizmo is attached to a visual-center pivot.
+   */
+  private matrixForTransformCommit(obj: THREE.Object3D): THREE.Matrix4 {
+    if (
+      this.gizmoPivot &&
+      obj === this.gizmoPivot &&
+      this.gizmoPivotHost &&
+      this.gizmoPivotParent
+    ) {
+      const host = this.gizmoPivotHost;
+      const parent = this.gizmoPivotParent;
+      host.updateWorldMatrix(true, false);
+      parent.updateWorldMatrix(true, false);
+      return parent.matrixWorld.clone().invert().multiply(host.matrixWorld);
+    }
+    obj.updateMatrix();
+    return obj.matrix.clone();
+  }
+
   private syncTransformTarget(): void {
     const path = this.highlightPath;
     // Do not syncSectionProxies here — that rebuilds profile Lines and clears
@@ -1139,6 +1276,7 @@ export class InteractViewport {
       this.viewer.invalidate();
     };
     if (!isTransformablePath(path)) {
+      this.releaseGizmoPivot();
       this.transform.detach();
       this.transform.enabled = false;
       finish();
@@ -1147,6 +1285,7 @@ export class InteractViewport {
 
     // Section has no evaluated mesh — attach gizmo to its XOY plane proxy.
     if (isSectionPath(this.document, path)) {
+      this.releaseGizmoPivot();
       const proxy =
         this.sectionProxies.get(path!)?.root ??
         this.ensureSectionProxy(path!, false);
@@ -1166,6 +1305,7 @@ export class InteractViewport {
 
     // Section 2D children are attr-driven overlays — no Object3D transform gizmo.
     if (sectionAncestorPath(this.document, path)) {
+      this.releaseGizmoPivot();
       this.transform.detach();
       this.transform.enabled = false;
       finish();
@@ -1199,6 +1339,7 @@ export class InteractViewport {
       if (target && !isShown(target)) target = null;
     }
     if (!target) {
+      this.releaseGizmoPivot();
       this.transform.detach();
       this.transform.enabled = false;
       finish();
@@ -1206,7 +1347,12 @@ export class InteractViewport {
     }
     this.transform.setSpace("world");
     this.transform.enabled = true;
-    this.transform.attach(target);
+    // Points: translate only — scale would compound with the billboard size.
+    if (path && nodeKindAtPath(this.document, path)?.kind === "point") {
+      this.transformMode = "translate";
+      this.transform.setMode("translate");
+    }
+    this.attachTransformTarget(target);
     finish();
   }
 
@@ -1224,13 +1370,13 @@ export class InteractViewport {
     if (section && obj === section.root) {
       return { path, transform: section.commitTransformAttr(form) };
     }
-    obj.updateMatrix();
-    let matrix = obj.matrix.clone();
+    let matrix = this.matrixForTransformCommit(obj);
     // Soft-selecting `defs:id` while the model use is still showing attaches
     // the gizmo to the use clone (`matrix ≈ use × group`). Strip the use
     // placement before writing the named group's `s3dx:transform`, or the
     // next bind applies use again and the solid flies away / vanishes.
-    const pick = getPickData(obj);
+    const host = this.gizmoPivotHost ?? obj;
+    const pick = getPickData(host);
     if (
       isBareDefsGroupPath(path) &&
       pick?.treePath?.startsWith("model:") &&
@@ -1240,6 +1386,23 @@ export class InteractViewport {
       if (useMat) {
         matrix = groupMatrixFromUseClone(matrix, useMat);
       }
+    }
+    // Positioning point: scene matrix is already `xf · T(at)`. Persist pose as
+    // `at` only and clear `s3dx:transform`, or the next eval stacks them again.
+    if (nodeKindAtPath(this.document, path)?.kind === "point") {
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scl = new THREE.Vector3();
+      matrix.decompose(pos, quat, scl);
+      const fmt = (n: number) => {
+        const t = Math.round(n * 1e6) / 1e6;
+        return Object.is(t, -0) ? "0" : String(t);
+      };
+      return {
+        path,
+        transform: "",
+        attrs: { at: `${fmt(pos.x)} ${fmt(pos.y)} ${fmt(pos.z)}` },
+      };
     }
     return {
       path,
@@ -1400,7 +1563,8 @@ export class InteractViewport {
     );
     let profile: THREE.Object3D | null = null;
     let sectionPlane: THREE.Object3D | null = null;
-    let fallback: THREE.Object3D | null = null;
+    let fallback: { obj: THREE.Object3D; dist: number } | null = null;
+    let billboard: { obj: THREE.Object3D; dist: number } | null = null;
     for (const hit of hits) {
       if (!isShown(hit.object) || isGhost(hit.object)) continue;
       // Prefer 2D profile wires over the large section fill plane.
@@ -1412,9 +1576,22 @@ export class InteractViewport {
         if (!sectionPlane) sectionPlane = hit.object;
         continue;
       }
-      if (!fallback) fallback = hit.object;
+      // Screen-sized point markers often sit on solid endpoints. Keep them
+      // pickable when clearly in front; otherwise prefer the solid/curve so
+      // gizmo positioning of normal nodes is not stolen by the marker.
+      if (isPointBillboard(hit.object)) {
+        if (!billboard) billboard = { obj: hit.object, dist: hit.distance };
+        continue;
+      }
+      if (!fallback) fallback = { obj: hit.object, dist: hit.distance };
     }
-    return profile ?? sectionPlane ?? fallback;
+    if (profile || sectionPlane) return profile ?? sectionPlane;
+    if (billboard && fallback) {
+      const POINT_AHEAD = 1;
+      if (billboard.dist + POINT_AHEAD < fallback.dist) return billboard.obj;
+      return fallback.obj;
+    }
+    return fallback?.obj ?? billboard?.obj ?? null;
   }
 
   private showAll(): void {
@@ -1754,10 +1931,16 @@ export class InteractViewport {
       }
 
       // Prefer the live scene-graph parent of the gizmo target.
+      // When a visual-center pivot is active, skip it — helpers follow the
+      // document parent, not the temporary pivot.
       const target =
         this.objectFor(sel) ?? findTransformTarget(root, sel);
-      if (target?.parent && target.parent !== root) {
-        return target.parent;
+      let frameParent = target?.parent ?? null;
+      if (frameParent && this.gizmoPivot && frameParent === this.gizmoPivot) {
+        frameParent = this.gizmoPivotParent;
+      }
+      if (frameParent && frameParent !== root) {
+        return frameParent;
       }
 
       const parent = parentTreePath(sel);
@@ -2001,22 +2184,17 @@ export class InteractViewport {
         }
         return { kind: "ghost", depth: 1 };
       }
-      // Model `<s3dx:use>`: child geometry is tagged with defs paths, not
-      // `model:id.N.*` — keep the whole referenced body solid.
-      if (scope.startsWith("model:") && scope.includes(".")) {
-        return { kind: "solid" };
-      }
-      // defs drill: only direct children of scope are the current level.
-      if (parentTreePath(last) === scope) return { kind: "solid" };
-      return { kind: "hidden" };
+      // Whole subtree under the entered / soft-level node stays solid —
+      // nested groups (e.g. transform wrappers) are siblings of A/B/C and
+      // must not vanish as "grandchildren".
+      return { kind: "solid" };
     }
 
-    // Current-level child by path prefix (scope not present on mesh chains,
-    // e.g. section / 2D under revolve).
-    if (parentTreePath(last) === scope) return { kind: "solid" };
-
-    // Deeper than current level under a defs path scope.
-    if (last.startsWith(`${scope}.`)) return { kind: "hidden" };
+    // Scope missing from the mesh chain (remapped uses / section overlays):
+    // still treat path descendants of scope as current-level content.
+    if (last.startsWith(`${scope}.`) || parentTreePath(last) === scope) {
+      return { kind: "solid" };
+    }
 
     // Entered node’s own drawable when chains use matching defs paths.
     if (last === scope) {
@@ -2175,11 +2353,15 @@ export class InteractViewport {
     this.viewer.viewer.root.traverse((obj) => {
       if (obj.userData?.sectionProxy) return;
       const chain = this.chainFor(obj);
-      if (!this.includeInHighlight(chain, path)) return;
+      const pick = getPickData(obj);
+      const byChain = !!chain.length && this.includeInHighlight(chain, path);
+      // Remapped model uses keep defsPath — catch curves if chain mapping misses.
+      const byPick = !!pick && matchesHighlight(pick, path);
+      if (!byChain && !byPick) return;
       // Inactive if branch: outline only while revealed (selected ghost).
       if (
         isConditionInactive(obj) &&
-        !this.shouldRevealInactive(chain)
+        !this.shouldRevealInactive(chain.length ? chain : [{ path }])
       ) {
         return;
       }

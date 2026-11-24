@@ -1013,8 +1013,17 @@ function applyTransformDraft(attr: string, commit: "field" | "model"): void {
  * Live gizmo preview: refresh inspector fields without writing XML / undo.
  * Mirrors Three.js editor `objectChange` → sidebar refresh.
  */
-function applyTransformPreview(path: string, transform: string): void {
+function applyTransformPreview(
+  path: string,
+  transform: string,
+  attrs?: Record<string, string>
+): void {
   if (!path || draftPath !== path) return;
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k in draft) draft[k] = v;
+    }
+  }
   if (!("s3dx:transform" in draft)) return;
   const display = transform ? transformToDisplay(transform) : "";
   draft["s3dx:transform"] = display;

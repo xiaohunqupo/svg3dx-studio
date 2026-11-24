@@ -61,6 +61,8 @@ const emit = defineEmits<{
 
 const host = ref<HTMLElement | null>(null);
 const gizmoActive = ref(false);
+/** Positioning points only support translate (billboard markers). */
+const pointGizmo = ref(false);
 const transformMode = ref<TransformMode>("translate");
 const frameOnHighlight = ref(true);
 const drillCrumbs = ref<{ path: string; label: string; pending?: boolean }[]>([]);
@@ -78,6 +80,7 @@ function syncBackground(): void {
 
 function syncGizmoUi(): void {
   gizmoActive.value = Boolean(interact?.hasTransformGizmo());
+  pointGizmo.value = Boolean(interact?.isPointSelection());
   if (interact) transformMode.value = interact.getTransformMode();
 }
 
@@ -291,12 +294,14 @@ defineExpose({
         <TransformMoveIcon />
       </t-radio-button>
       <t-radio-button
+        v-if="!pointGizmo"
         value="rotate"
         :title="`${t('app.transformRotate')} (${t('app.transformRotateHint')})`"
       >
         <TransformRotateIcon />
       </t-radio-button>
       <t-radio-button
+        v-if="!pointGizmo"
         value="scale"
         :title="`${t('app.transformScale')} (${t('app.transformScaleHint')})`"
       >
