@@ -34,21 +34,32 @@ import {
   type TextRange,
 } from "@/utils/nodeXmlEdit";
 
-const props = defineProps<{
-  modelValue: string;
-  /** Panel header label (already translated). */
-  heading?: string;
-  /** Active format style (mutually exclusive). */
-  formatMode?: FormatXmlMode;
-  /** Show code-line skeleton while the document is evaluating. */
-  loading?: boolean;
-}>();
+export type SourceDock = "left" | "right" | "top" | "bottom";
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: string;
+    /** Panel header label (already translated). */
+    heading?: string;
+    /** Active format style (mutually exclusive). */
+    formatMode?: FormatXmlMode;
+    /** Dock relative to the model pane. */
+    dock?: SourceDock;
+    /** Show code-line skeleton while the document is evaluating. */
+    loading?: boolean;
+  }>(),
+  {
+    dock: "left",
+  }
+);
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   "update:formatMode": [mode: FormatXmlMode];
+  "update:dock": [dock: SourceDock];
   /** Deepest tree path under the caret (null when outside known nodes). */
   cursorPath: [path: string | null];
+  hide: [];
 }>();
 
 const { t } = useI18n();
@@ -73,6 +84,41 @@ const moreOptions = computed<DropdownOption[]>(() => [
         active: activeFormatMode.value === "compact",
       },
     ],
+  },
+  {
+    content: t("app.dock"),
+    value: "dock",
+    children: [
+      {
+        content: t("app.dockLeft"),
+        value: "dock-left",
+        active: props.dock === "left",
+      },
+      {
+        content: t("app.dockRight"),
+        value: "dock-right",
+        active: props.dock === "right",
+      },
+      {
+        content: t("app.dockTop"),
+        value: "dock-top",
+        active: props.dock === "top",
+      },
+      {
+        content: t("app.dockBottom"),
+        value: "dock-bottom",
+        active: props.dock === "bottom",
+      },
+    ],
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.hide"),
+    value: "hide",
   },
 ]);
 
@@ -371,6 +417,11 @@ async function onFormatModePick(mode: FormatXmlMode): Promise<void> {
 function onMoreClick(item: DropdownOption): void {
   if (item.value === "format-pretty") void onFormatModePick("pretty");
   else if (item.value === "format-compact") void onFormatModePick("compact");
+  else if (item.value === "dock-left") emit("update:dock", "left");
+  else if (item.value === "dock-right") emit("update:dock", "right");
+  else if (item.value === "dock-top") emit("update:dock", "top");
+  else if (item.value === "dock-bottom") emit("update:dock", "bottom");
+  else if (item.value === "hide") emit("hide");
 }
 
 function applyRevealRanges(
@@ -472,7 +523,10 @@ defineExpose({
 </script>
 
 <template>
-  <aside class="source-editor-panel">
+  <aside
+    class="source-editor-panel"
+    :class="`source-editor-panel--${dock}`"
+  >
     <div class="panel-head">
       <span class="panel-head-title">{{ heading || t("app.sourceCode") }}</span>
       <t-dropdown
@@ -512,6 +566,21 @@ defineExpose({
   overflow: hidden;
   background: var(--td-bg-color-container);
   border-right: 1px solid var(--td-component-border);
+}
+
+.source-editor-panel--right {
+  border-right: none;
+  border-left: 1px solid var(--td-component-border);
+}
+
+.source-editor-panel--top {
+  border-right: none;
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.source-editor-panel--bottom {
+  border-right: none;
+  border-top: 1px solid var(--td-component-border);
 }
 
 .editor-body {

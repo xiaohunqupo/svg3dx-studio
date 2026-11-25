@@ -9,22 +9,28 @@ import {
   FilterClearIcon,
   ForwardIcon,
   RollbackIcon,
+  RootListIcon,
   SaveIcon,
   ViewListIcon,
 } from "tdesign-icons-vue-next";
 import type { HeadMenuProps } from "tdesign-vue-next";
+import { AnimateIcon } from "@/components/icons/lucideIcons";
 import { useI18n } from "@/i18n";
 
 const props = withDefaults(
   defineProps<{
     showModel?: boolean;
     showSource?: boolean;
+    showAnimTools?: boolean;
+    showNodeParams?: boolean;
     canUndo?: boolean;
     canRedo?: boolean;
   }>(),
   {
     showModel: true,
     showSource: false,
+    showAnimTools: true,
+    showNodeParams: true,
     canUndo: false,
     canRedo: false,
   }
@@ -41,6 +47,8 @@ const emit = defineEmits<{
   optimize: [];
   "toggle-model": [];
   "toggle-source": [];
+  "toggle-anim-tools": [];
+  "toggle-node-params": [];
 }>();
 
 const { t } = useI18n();
@@ -59,6 +67,8 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
   else if (key === "optimize") emit("optimize");
   else if (key === "view-model") emit("toggle-model");
   else if (key === "view-source") emit("toggle-source");
+  else if (key === "view-anim-tools") emit("toggle-anim-tools");
+  else if (key === "view-node-params") emit("toggle-node-params");
 };
 </script>
 
@@ -128,6 +138,22 @@ const onChange: HeadMenuProps["onChange"] = (active) => {
           <CheckIcon v-if="showSource" class="menu-check" size="16px" />
           <span v-else class="menu-check-slot" />
           {{ t("app.viewSource") }}
+        </span>
+      </t-menu-item>
+      <t-menu-item value="view-anim-tools">
+        <template #icon><AnimateIcon /></template>
+        <span class="menu-check-row">
+          <CheckIcon v-if="showAnimTools" class="menu-check" size="16px" />
+          <span v-else class="menu-check-slot" />
+          {{ t("app.viewAnimTools") }}
+        </span>
+      </t-menu-item>
+      <t-menu-item value="view-node-params">
+        <template #icon><RootListIcon /></template>
+        <span class="menu-check-row">
+          <CheckIcon v-if="showNodeParams" class="menu-check" size="16px" />
+          <span v-else class="menu-check-slot" />
+          {{ t("app.viewNodeParams") }}
         </span>
       </t-menu-item>
     </t-submenu>

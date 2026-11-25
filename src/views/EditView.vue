@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { MoreIcon } from "tdesign-icons-vue-next";
+import { MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import { clearGltfCache, type EvaluationResult } from "svg3dx-viewer";
 import AppMenus from "@/components/AppMenus.vue";
 import ReposMenu from "@/components/ReposMenu.vue";
@@ -91,14 +92,52 @@ const SOURCE_W_KEY = "svg3dx.studio.sourceWidth";
 const SOURCE_H_KEY = "svg3dx.studio.sourceHeight";
 const SHOW_MODEL_KEY = "svg3dx.studio.showModel";
 const SHOW_SOURCE_KEY = "svg3dx.studio.showSource";
+const SOURCE_DOCK_KEY = "svg3dx.studio.sourceDock";
+/** Legacy key — migrated into SOURCE_DOCK_KEY. */
+const SOURCE_SIDE_KEY_LEGACY = "svg3dx.studio.sourceSide";
+const SHOW_ANIM_TOOLS_KEY = "svg3dx.studio.showAnimTools";
+const SHOW_NODE_PARAMS_KEY = "svg3dx.studio.showNodeParams";
+const NODE_PARAMS_DOCK_KEY = "svg3dx.studio.nodeParamsDock";
+/** Legacy key — migrated into NODE_PARAMS_DOCK_KEY. */
+const NODE_PARAMS_SIDE_KEY_LEGACY = "svg3dx.studio.nodeParamsSide";
 const TREE_W_MIN = 180;
 const TREE_W_MAX = 480;
 const INSPECTOR_W_MIN = 220;
 const INSPECTOR_W_MAX = 520;
+const INSPECTOR_H_KEY = "svg3dx.studio.inspectorHeight";
+const INSPECTOR_H_MIN = 140;
+const INSPECTOR_H_DEFAULT = 280;
+/** Keep at least this much for the tree when inspector docks under it. */
+const TREE_H_MIN = 120;
 const SOURCE_W_MIN = 240;
 const SOURCE_W_MAX = 720;
 const SOURCE_H_MIN = 120;
 const SOURCE_H_DEFAULT = 280;
+
+type DockEdge = "left" | "right" | "top" | "bottom";
+
+function readStoredDockWithLegacy(
+  key: string,
+  legacyKey: string,
+  fallback: DockEdge
+): DockEdge {
+  try {
+    const raw = localStorage.getItem(key);
+    if (
+      raw === "left" ||
+      raw === "right" ||
+      raw === "top" ||
+      raw === "bottom"
+    ) {
+      return raw;
+    }
+    const legacy = localStorage.getItem(legacyKey);
+    if (legacy === "left" || legacy === "right") return legacy;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
 /** Mid pane (source+viewport) narrower than this → stack vertically. */
 const MID_STACK_BREAKPOINT = 680;
 const TREE_W_DEFAULT = 260;
@@ -142,9 +181,71 @@ let historyReady = false;
 const activeModelId = ref("");
 const showModel = ref(readStoredBool(SHOW_MODEL_KEY, true));
 const showSource = ref(readStoredBool(SHOW_SOURCE_KEY, false));
+const sourceDock = ref<DockEdge>(
+  readStoredDockWithLegacy(SOURCE_DOCK_KEY, SOURCE_SIDE_KEY_LEGACY, "left")
+);
+const showAnimTools = ref(readStoredBool(SHOW_ANIM_TOOLS_KEY, true));
+const showNodeParams = ref(readStoredBool(SHOW_NODE_PARAMS_KEY, true));
+const nodeParamsDock = ref<DockEdge>(
+  readStoredDockWithLegacy(
+    NODE_PARAMS_DOCK_KEY,
+    NODE_PARAMS_SIDE_KEY_LEGACY,
+    "right"
+  )
+);
+
+const nodeParamsMoreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.dock"),
+    value: "dock",
+    children: [
+      {
+        content: t("app.dockLeft"),
+        value: "dock-left",
+        active: nodeParamsDock.value === "left",
+      },
+      {
+        content: t("app.dockRight"),
+        value: "dock-right",
+        active: nodeParamsDock.value === "right",
+      },
+      {
+        content: t("app.dockTop"),
+        value: "dock-top",
+        active: nodeParamsDock.value === "top",
+      },
+      {
+        content: t("app.dockBottom"),
+        value: "dock-bottom",
+        active: nodeParamsDock.value === "bottom",
+      },
+    ],
+  },
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.hide"),
+    value: "hide",
+  },
+]);
+
+function onNodeParamsMoreClick(item: DropdownOption): void {
+  if (item.value === "dock-left") setNodeParamsDock("left");
+  else if (item.value === "dock-right") setNodeParamsDock("right");
+  else if (item.value === "dock-top") setNodeParamsDock("top");
+  else if (item.value === "dock-bottom") setNodeParamsDock("bottom");
+  else if (item.value === "hide") setShowNodeParams(false);
+}
+
 const treeWidth = ref(readStoredWidth(TREE_W_KEY, TREE_W_DEFAULT, TREE_W_MIN, TREE_W_MAX));
 const inspectorWidth = ref(
   readStoredWidth(INSPECTOR_W_KEY, INSPECTOR_W_DEFAULT, INSPECTOR_W_MIN, INSPECTOR_W_MAX)
+);
+const inspectorHeight = ref(
+  readStoredWidth(INSPECTOR_H_KEY, INSPECTOR_H_DEFAULT, INSPECTOR_H_MIN, 800)
 );
 const sourceWidth = ref(
   readStoredWidth(SOURCE_W_KEY, SOURCE_W_DEFAULT, SOURCE_W_MIN, SOURCE_W_MAX)
@@ -152,10 +253,46 @@ const sourceWidth = ref(
 const sourceHeight = ref(
   readStoredWidth(SOURCE_H_KEY, SOURCE_H_DEFAULT, SOURCE_H_MIN, 800)
 );
-const resizing = ref<"tree" | "inspector" | "source" | null>(null);
+const resizing = ref<"tree" | "inspector" | "inspector-row" | "source" | null>(
+  null
+);
 const midEl = ref<HTMLElement | null>(null);
-/** Source + model both on; mid pane too narrow → stack source above viewport. */
-const midStacked = ref(false);
+const leftRailEl = ref<HTMLElement | null>(null);
+const inspectorMountLeft = ref<HTMLElement | null>(null);
+const inspectorMountRight = ref<HTMLElement | null>(null);
+
+const inspectorOnRight = computed(
+  () => showNodeParams.value && nodeParamsDock.value === "right"
+);
+/** Left-rail docks: left / top / bottom (right is its own column). */
+const inspectorOnLeft = computed(
+  () => showNodeParams.value && nodeParamsDock.value !== "right"
+);
+const inspectorAboveTree = computed(() => nodeParamsDock.value === "top");
+
+const inspectorMountEl = computed(() => {
+  if (!showNodeParams.value) return null;
+  return inspectorOnLeft.value
+    ? inspectorMountLeft.value
+    : inspectorMountRight.value;
+});
+
+const leftRailStyle = computed(() => {
+  if (!inspectorOnLeft.value) return undefined;
+  if (inspectorAboveTree.value) {
+    return {
+      gridTemplateRows: `${inspectorHeight.value}px 0px minmax(0, 1fr)`,
+      gridTemplateAreas: `"inspector" "handle" "tree"`,
+    };
+  }
+  return {
+    gridTemplateRows: `minmax(0, 1fr) 0px ${inspectorHeight.value}px`,
+    gridTemplateAreas: `"tree" "handle" "inspector"`,
+  };
+});
+
+/** Mid pane too narrow → auto-stack when source dock is left/right. */
+const midNarrow = ref(false);
 const treePanel = ref<{
   syncAfterEdit: (
     parentPath?: string,
@@ -224,48 +361,85 @@ async function formatDraftContent(content: string): Promise<string> {
 }
 
 const workspaceEl = ref<HTMLElement | null>(null);
-const workspaceStyle = computed(() => ({
-  gridTemplateColumns: [
+const workspaceStyle = computed(() => {
+  const cols = [
     `${treeWidth.value}px`,
     "0px",
     "minmax(0, 1fr)",
-    "0px",
-    `${inspectorWidth.value}px`,
-  ].join(" "),
-}));
+  ];
+  if (inspectorOnRight.value) {
+    cols.push("0px", `${inspectorWidth.value}px`);
+  }
+  return { gridTemplateColumns: cols.join(" ") };
+});
 
 const midBoth = computed(() => showSource.value && showModel.value);
+
+/** Explicit top/bottom, or auto-stack when left/right and mid is narrow. */
+const midStacked = computed(() => {
+  if (!midBoth.value) return false;
+  const dock = sourceDock.value;
+  if (dock === "top" || dock === "bottom") return true;
+  return midNarrow.value;
+});
+
+/** Source comes before the model in reading order (left/top). */
+const sourceFirst = computed(() => {
+  const dock = sourceDock.value;
+  if (midStacked.value) {
+    return dock === "top" || dock === "left";
+  }
+  return dock === "left" || dock === "top";
+});
 
 const midStyle = computed(() => {
   if (!midBoth.value) return undefined;
   if (midStacked.value) {
-    return {
-      gridTemplateColumns: "minmax(0, 1fr)",
-      // Cap source row so it cannot shove the viewport (and outer inspector) away.
-      gridTemplateRows: `minmax(0, ${sourceHeight.value}px) 0px minmax(0, 1fr)`,
-    };
+    // Cap source row so it cannot shove the viewport (and outer inspector) away.
+    return sourceFirst.value
+      ? {
+          gridTemplateColumns: "minmax(0, 1fr)",
+          gridTemplateRows: `minmax(0, ${sourceHeight.value}px) 0px minmax(0, 1fr)`,
+          gridTemplateAreas: `"source" "handle" "viewport"`,
+        }
+      : {
+          gridTemplateColumns: "minmax(0, 1fr)",
+          gridTemplateRows: `minmax(0, 1fr) 0px minmax(0, ${sourceHeight.value}px)`,
+          gridTemplateAreas: `"viewport" "handle" "source"`,
+        };
   }
   // minmax(0, Npx): source may shrink — fixed Npx was expanding mid and
   // pushing the inspector off-screen when the window was only moderately wide.
-  return {
-    gridTemplateColumns: `minmax(0, ${sourceWidth.value}px) 0px minmax(0, 1fr)`,
-    gridTemplateRows: "minmax(0, 1fr)",
-  };
+  return sourceFirst.value
+    ? {
+        gridTemplateColumns: `minmax(0, ${sourceWidth.value}px) 0px minmax(0, 1fr)`,
+        gridTemplateRows: "minmax(0, 1fr)",
+        gridTemplateAreas: `"source handle viewport"`,
+      }
+    : {
+        gridTemplateColumns: `minmax(0, 1fr) 0px minmax(0, ${sourceWidth.value}px)`,
+        gridTemplateRows: "minmax(0, 1fr)",
+        gridTemplateAreas: `"viewport handle source"`,
+      };
 });
 
 function updateMidStack(): void {
   const el = midEl.value;
   if (!el || !midBoth.value) {
-    midStacked.value = false;
+    midNarrow.value = false;
     return;
   }
-  midStacked.value = el.clientWidth < MID_STACK_BREAKPOINT;
+  midNarrow.value = el.clientWidth < MID_STACK_BREAKPOINT;
 }
 
 function persistViewFlags(): void {
   try {
     localStorage.setItem(SHOW_MODEL_KEY, showModel.value ? "1" : "0");
     localStorage.setItem(SHOW_SOURCE_KEY, showSource.value ? "1" : "0");
+    localStorage.setItem(SOURCE_DOCK_KEY, sourceDock.value);
+    localStorage.setItem(SHOW_ANIM_TOOLS_KEY, showAnimTools.value ? "1" : "0");
+    localStorage.setItem(SHOW_NODE_PARAMS_KEY, showNodeParams.value ? "1" : "0");
+    localStorage.setItem(NODE_PARAMS_DOCK_KEY, nodeParamsDock.value);
   } catch {
     /* ignore */
   }
@@ -280,6 +454,28 @@ function setShowModel(next: boolean): void {
 function setShowSource(next: boolean): void {
   if (!next && !showModel.value) return;
   showSource.value = next;
+  persistViewFlags();
+}
+
+function setSourceDock(dock: DockEdge): void {
+  if (sourceDock.value === dock) return;
+  sourceDock.value = dock;
+  persistViewFlags();
+}
+
+function setShowAnimTools(next: boolean): void {
+  showAnimTools.value = next;
+  persistViewFlags();
+}
+
+function setShowNodeParams(next: boolean): void {
+  showNodeParams.value = next;
+  persistViewFlags();
+}
+
+function setNodeParamsDock(dock: DockEdge): void {
+  if (nodeParamsDock.value === dock) return;
+  nodeParamsDock.value = dock;
   persistViewFlags();
 }
 
@@ -1073,6 +1269,7 @@ function persistWidths(): void {
   try {
     localStorage.setItem(TREE_W_KEY, String(treeWidth.value));
     localStorage.setItem(INSPECTOR_W_KEY, String(inspectorWidth.value));
+    localStorage.setItem(INSPECTOR_H_KEY, String(inspectorHeight.value));
     localStorage.setItem(SOURCE_W_KEY, String(sourceWidth.value));
     localStorage.setItem(SOURCE_H_KEY, String(sourceHeight.value));
   } catch {
@@ -1095,17 +1292,37 @@ function onResizeMove(ev: PointerEvent): void {
     if (midStacked.value && mid) {
       const midRect = mid.getBoundingClientRect();
       const maxH = Math.max(SOURCE_H_MIN, midRect.height - SOURCE_H_MIN);
+      const nextH = sourceFirst.value
+        ? ev.clientY - midRect.top
+        : midRect.bottom - ev.clientY;
       sourceHeight.value = Math.min(
         maxH,
-        Math.max(SOURCE_H_MIN, ev.clientY - midRect.top)
+        Math.max(SOURCE_H_MIN, nextH)
       );
     } else {
-      const midLeft = mid?.getBoundingClientRect().left ?? rect.left + treeWidth.value;
+      const midRect = mid?.getBoundingClientRect();
+      const midLeft = midRect?.left ?? rect.left + treeWidth.value;
+      const midRight = midRect?.right ?? rect.right;
+      const nextW = sourceFirst.value
+        ? ev.clientX - midLeft
+        : midRight - ev.clientX;
       sourceWidth.value = Math.min(
         SOURCE_W_MAX,
-        Math.max(SOURCE_W_MIN, ev.clientX - midLeft)
+        Math.max(SOURCE_W_MIN, nextW)
       );
     }
+  } else if (side === "inspector-row") {
+    const rail = leftRailEl.value;
+    if (!rail) return;
+    const railRect = rail.getBoundingClientRect();
+    const maxH = Math.max(INSPECTOR_H_MIN, railRect.height - TREE_H_MIN);
+    const nextH = inspectorAboveTree.value
+      ? ev.clientY - railRect.top
+      : railRect.bottom - ev.clientY;
+    inspectorHeight.value = Math.min(
+      maxH,
+      Math.max(INSPECTOR_H_MIN, nextH)
+    );
   } else {
     inspectorWidth.value = Math.min(
       INSPECTOR_W_MAX,
@@ -1114,10 +1331,14 @@ function onResizeMove(ev: PointerEvent): void {
   }
 }
 
-function startResize(side: "tree" | "inspector" | "source", ev: PointerEvent): void {
+function startResize(
+  side: "tree" | "inspector" | "inspector-row" | "source",
+  ev: PointerEvent
+): void {
   ev.preventDefault();
   resizing.value = side;
-  const row = side === "source" && midStacked.value;
+  const row =
+    side === "inspector-row" || (side === "source" && midStacked.value);
   document.body.style.cursor = row ? "row-resize" : "col-resize";
   document.body.style.userSelect = "none";
   workspaceEl.value?.classList.toggle("row-resize", row);
@@ -1169,6 +1390,8 @@ onBeforeUnmount(() => {
       <AppMenus
         :show-model="showModel"
         :show-source="showSource"
+        :show-anim-tools="showAnimTools"
+        :show-node-params="showNodeParams"
         :can-undo="canUndo"
         :can-redo="canRedo"
         @save="onSave"
@@ -1181,6 +1404,8 @@ onBeforeUnmount(() => {
         @optimize="onOptimize"
         @toggle-model="setShowModel(!showModel)"
         @toggle-source="setShowSource(!showSource)"
+        @toggle-anim-tools="setShowAnimTools(!showAnimTools)"
+        @toggle-node-params="setShowNodeParams(!showNodeParams)"
       />
       <slot name="toolbar-extra" />
       <div class="right">
@@ -1197,36 +1422,56 @@ onBeforeUnmount(() => {
       :class="{ resizing: !!resizing }"
       :style="workspaceStyle"
     >
-      <slot name="tree">
-        <NodeTreePanel
-          ref="treePanel"
-          class="tree"
-          :result="result"
-          :content="draftContent"
-          :loading="contentLoading"
-          :file-name="file.name"
-          :dirty="dirty"
-          :drill-marks="drillMarks"
-          :asset-paths="documentAssetPaths"
-          :is-package="isPackageDocument"
-          @select="onSelect"
-          @add-group="onAddGroup"
-          @add-model="onAddModel"
-          @add-material="onAddMaterial"
-          @add-root-animate="onAddRootAnimate"
-          @add-style-category="onAddStyleCategory"
-          @add-use="onAddUse"
-          @add-child="onAddChild"
-          @insert-child-at-path="onInsertChildAtPath"
-          @edit-section="onEditSection"
-          @delete-node="onDeleteNode"
-          @delete-model="onDeleteModel"
-          @delete-use="onDeleteUse"
-          @delete-element="onDeleteUse"
-          @delete-style-category="onDeleteStyleCategory"
-          @optimize="onOptimize"
-        />
-      </slot>
+      <div
+        ref="leftRailEl"
+        class="left-rail"
+        :class="{ 'left-rail--with-inspector': inspectorOnLeft }"
+        :style="leftRailStyle"
+      >
+        <div class="left-rail-tree">
+          <slot name="tree">
+            <NodeTreePanel
+              ref="treePanel"
+              class="tree"
+              :result="result"
+              :content="draftContent"
+              :loading="contentLoading"
+              :file-name="file.name"
+              :dirty="dirty"
+              :drill-marks="drillMarks"
+              :asset-paths="documentAssetPaths"
+              :is-package="isPackageDocument"
+              @select="onSelect"
+              @add-group="onAddGroup"
+              @add-model="onAddModel"
+              @add-material="onAddMaterial"
+              @add-root-animate="onAddRootAnimate"
+              @add-style-category="onAddStyleCategory"
+              @add-use="onAddUse"
+              @add-child="onAddChild"
+              @insert-child-at-path="onInsertChildAtPath"
+              @edit-section="onEditSection"
+              @delete-node="onDeleteNode"
+              @delete-model="onDeleteModel"
+              @delete-use="onDeleteUse"
+              @delete-element="onDeleteUse"
+              @delete-style-category="onDeleteStyleCategory"
+              @optimize="onOptimize"
+            />
+          </slot>
+        </div>
+        <template v-if="inspectorOnLeft">
+          <div
+            class="resize-handle resize-handle--inspector-row"
+            role="separator"
+            aria-orientation="horizontal"
+            :aria-valuenow="inspectorHeight"
+            :title="t('app.resizePanel')"
+            @pointerdown="(e) => startResize('inspector-row', e)"
+          />
+          <div ref="inspectorMountLeft" class="inspector-mount" />
+        </template>
+      </div>
       <div
         class="resize-handle resize-handle--tree"
         role="separator"
@@ -1236,78 +1481,128 @@ onBeforeUnmount(() => {
         @pointerdown="(e) => startResize('tree', e)"
       />
 
-      <div
-        ref="midEl"
-        class="mid"
-        :class="{
-          'mid--both': midBoth,
-          'mid--stacked': midBoth && midStacked,
-          'mid--source-only': showSource && !showModel,
-          'mid--model-only': showModel && !showSource,
-        }"
-        :style="midStyle"
-      >
-        <slot name="source">
-          <SourceEditorPanel
-            v-if="showSource"
-            ref="sourcePanel"
-            class="source"
-            :heading="t('app.sourceCode')"
-            :model-value="draftContent"
-            :format-mode="sourceFormatMode"
-            :loading="contentLoading"
-            @update:model-value="onSourceContent"
-            @update:format-mode="onSourceFormatModeChange"
-            @cursor-path="onSourceCursorPath"
-          />
-        </slot>
+      <div class="mid">
         <div
-          v-if="midBoth"
-          class="resize-handle"
-          :class="
-            midStacked
-              ? 'resize-handle--source-row'
-              : 'resize-handle--source'
-          "
-          role="separator"
-          :aria-orientation="midStacked ? 'horizontal' : 'vertical'"
-          :aria-valuenow="midStacked ? sourceHeight : sourceWidth"
-          :title="t('app.resizePanel')"
-          @pointerdown="(e) => startResize('source', e)"
-        />
-        <main v-if="showModel" class="viewport">
-          <slot name="viewport-chrome">
-            <ViewportSkeleton v-if="contentLoading" />
-            <InteractHost
-              ref="interactHost"
-              :key="file.id"
-              :content="draftContent"
-              :model="activeModelId || undefined"
-              :document-base-url="file.documentBaseUrl"
-              :document-asset-urls="documentAssetUrls"
-              @result="onResult"
-              @error="(m) => MessagePlugin.error(m)"
-              @pick="onViewportPick"
-              @transform-preview="onViewportTransformPreview"
-              @transform="onViewportTransform"
-              @drill="onDrillCrumbs"
+          ref="midEl"
+          class="mid-panes"
+          :class="{
+            'mid-panes--both': midBoth,
+            'mid-panes--stacked': midBoth && midStacked,
+            'mid-panes--source-after': midBoth && !sourceFirst,
+            'mid-panes--source-only': showSource && !showModel,
+            'mid-panes--model-only': showModel && !showSource,
+          }"
+          :style="midStyle"
+        >
+          <slot name="source">
+            <SourceEditorPanel
+              v-if="showSource"
+              ref="sourcePanel"
+              class="source"
+              :heading="t('app.sourceCode')"
+              :model-value="draftContent"
+              :format-mode="sourceFormatMode"
+              :dock="sourceDock"
+              :loading="contentLoading"
+              @update:model-value="onSourceContent"
+              @update:format-mode="onSourceFormatModeChange"
+              @update:dock="setSourceDock"
+              @cursor-path="onSourceCursorPath"
+              @hide="setShowSource(false)"
             />
           </slot>
-        </main>
+          <div
+            v-if="midBoth"
+            class="resize-handle resize-handle--mid"
+            :class="
+              midStacked
+                ? 'resize-handle--source-row'
+                : 'resize-handle--source'
+            "
+            role="separator"
+            :aria-orientation="midStacked ? 'horizontal' : 'vertical'"
+            :aria-valuenow="midStacked ? sourceHeight : sourceWidth"
+            :title="t('app.resizePanel')"
+            @pointerdown="(e) => startResize('source', e)"
+          />
+          <main v-if="showModel" class="viewport">
+            <slot name="viewport-chrome">
+              <ViewportSkeleton v-if="contentLoading" />
+              <InteractHost
+                ref="interactHost"
+                :key="file.id"
+                :content="draftContent"
+                :model="activeModelId || undefined"
+                :document-base-url="file.documentBaseUrl"
+                :document-asset-urls="documentAssetUrls"
+                @result="onResult"
+                @error="(m) => MessagePlugin.error(m)"
+                @pick="onViewportPick"
+                @transform-preview="onViewportTransformPreview"
+                @transform="onViewportTransform"
+                @drill="onDrillCrumbs"
+              />
+            </slot>
+          </main>
+        </div>
+        <AnimationTimelineBar
+          v-if="showAnimTools"
+          class="anim-dock"
+          :get-viewer="getAnimViewer"
+          @hide="setShowAnimTools(false)"
+        />
       </div>
 
-      <div
-        class="resize-handle resize-handle--inspector"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-valuenow="inspectorWidth"
-        :title="t('app.resizePanel')"
-        @pointerdown="(e) => startResize('inspector', e)"
-      />
-      <aside class="inspector">
+      <template v-if="inspectorOnRight">
+        <div
+          class="resize-handle resize-handle--inspector"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-valuenow="inspectorWidth"
+          :title="t('app.resizePanel')"
+          @pointerdown="(e) => startResize('inspector', e)"
+        />
+        <div ref="inspectorMountRight" class="inspector-mount inspector-mount--right" />
+      </template>
+    </div>
+
+    <Teleport v-if="inspectorMountEl" :to="inspectorMountEl">
+      <aside
+        class="inspector"
+        :class="{
+          'inspector--left': inspectorOnLeft,
+          'inspector--left-top': inspectorOnLeft && inspectorAboveTree,
+        }"
+      >
         <slot name="inspector">
           <div class="panel-head">
-            {{ selected?.kind === "style" ? t("app.styleParams") : t("app.nodeParams") }}
+            <span class="panel-head-title">
+              {{
+                selected?.kind === "style"
+                  ? t("app.styleParams")
+                  : t("app.nodeParams")
+              }}
+            </span>
+            <t-dropdown
+              :options="nodeParamsMoreOptions"
+              :max-column-width="200"
+              :min-column-width="140"
+              trigger="click"
+              placement="bottom-right"
+              @click="onNodeParamsMoreClick"
+            >
+              <t-button
+                class="panel-more"
+                theme="default"
+                shape="square"
+                variant="text"
+                size="small"
+                :title="t('app.moreActions')"
+                :aria-label="t('app.moreActions')"
+              >
+                <template #icon><MoreIcon /></template>
+              </t-button>
+            </t-dropdown>
           </div>
           <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
           <NodeInspectorPanel
@@ -1324,9 +1619,7 @@ onBeforeUnmount(() => {
           />
         </slot>
       </aside>
-    </div>
-
-    <AnimationTimelineBar class="anim-dock" :get-viewer="getAnimViewer" />
+    </Teleport>
 
     <SectionProfileEditorDialog
       v-model:visible="sectionEditorOpen"
@@ -1398,21 +1691,77 @@ onBeforeUnmount(() => {
 }
 
 .workspace.resizing:has(.resize-handle--source-row:hover),
+.workspace.resizing:has(.resize-handle--inspector-row:hover),
 .workspace.resizing.row-resize {
   cursor: row-resize;
 }
 
+.left-rail {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left-rail--with-inspector > .left-rail-tree {
+  grid-area: tree;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left-rail--with-inspector > .resize-handle--inspector-row {
+  grid-area: handle;
+}
+
+.left-rail--with-inspector > .inspector-mount {
+  grid-area: inspector;
+}
+
+.left-rail-tree {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.left-rail-tree > .tree {
+  height: 100%;
+}
+
 .mid {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mid-panes {
+  flex: 1;
   display: grid;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.mid--source-only,
-.mid--model-only {
+.mid-panes--source-only,
+.mid-panes--model-only {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+}
+
+.mid-panes--both > .source {
+  grid-area: source;
+}
+
+.mid-panes--both > .resize-handle--mid {
+  grid-area: handle;
+}
+
+.mid-panes--both > .viewport {
+  grid-area: viewport;
 }
 
 .tree,
@@ -1425,6 +1774,19 @@ onBeforeUnmount(() => {
 
 .source {
   overflow: hidden;
+}
+
+.mid-panes--stacked > .source {
+  border-left: none;
+  border-right: none;
+}
+
+.mid-panes--stacked:not(.mid-panes--source-after) > .source {
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.mid-panes--stacked.mid-panes--source-after > .source {
+  border-top: 1px solid var(--td-component-border);
 }
 
 .viewport {
@@ -1458,7 +1820,8 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 
-.resize-handle--source-row {
+.resize-handle--source-row,
+.resize-handle--inspector-row {
   width: auto;
   height: 0;
   margin: -3px 0;
@@ -1476,7 +1839,8 @@ onBeforeUnmount(() => {
   transition: background 0.12s ease;
 }
 
-.resize-handle--source-row::after {
+.resize-handle--source-row::after,
+.resize-handle--inspector-row::after {
   top: -3px;
   bottom: auto;
   left: 0;
@@ -1490,20 +1854,73 @@ onBeforeUnmount(() => {
   background: var(--td-brand-color-light);
 }
 
+.inspector-mount {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector-mount--right {
+  height: 100%;
+}
+
 .inspector {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   background: var(--td-bg-color-container);
   border-left: 1px solid var(--td-component-border);
-  padding: 10px 12px;
+  overflow: hidden;
+}
+
+.inspector--left {
+  border-left: none;
+  border-top: 1px solid var(--td-component-border);
+}
+
+.inspector--left-top {
+  border-top: none;
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.inspector :deep(.node-inspector),
+.inspector > :not(.panel-head) {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 10px 12px;
 }
 
 .panel-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.panel-head-title {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--td-text-color-secondary);
-  margin-bottom: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-more {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
 }
 
 /* Keep inspector visible; narrow mid panes stack via midStacked instead.
@@ -1513,10 +1930,10 @@ onBeforeUnmount(() => {
   .workspace {
     grid-template-columns: minmax(0, 1fr) !important;
   }
-  .tree,
+  .left-rail,
   .resize-handle--tree,
   .resize-handle--inspector,
-  .inspector {
+  .inspector-mount {
     display: none;
   }
 }

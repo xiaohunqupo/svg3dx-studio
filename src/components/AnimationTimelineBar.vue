@@ -2,10 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   BackwardIcon,
+  MoreIcon,
   PauseIcon,
   PlayIcon,
   StopIcon,
 } from "tdesign-icons-vue-next";
+import { type DropdownOption } from "tdesign-vue-next";
 import {
   parseDurationSecs,
   parseRepeat,
@@ -37,7 +39,23 @@ type TrackRow = {
   to: string;
 };
 
+const emit = defineEmits<{
+  hide: [];
+}>();
+
 const hasAnim = ref(false);
+
+const moreOptions = computed<DropdownOption[]>(() => [
+  {
+    content: t("app.hide"),
+    value: "hide",
+  },
+]);
+
+function onMoreClick(item: DropdownOption): void {
+  if (item.value === "hide") emit("hide");
+}
+
 const playing = ref(false);
 const time = ref(0);
 const duration = ref(1);
@@ -288,6 +306,26 @@ function keyStyle(secs: number): Record<string, string> {
       <span class="anim-track-count">
         {{ t("app.animTracks", { n: tracks.length }) }}
       </span>
+      <t-dropdown
+        :options="moreOptions"
+        :max-column-width="200"
+        :min-column-width="120"
+        trigger="click"
+        placement="bottom-right"
+        @click="onMoreClick"
+      >
+        <t-button
+          class="anim-more"
+          theme="default"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.moreActions')"
+          :aria-label="t('app.moreActions')"
+        >
+          <template #icon><MoreIcon /></template>
+        </t-button>
+      </t-dropdown>
     </div>
 
     <div class="anim-body">
@@ -420,6 +458,12 @@ function keyStyle(secs: number): Record<string, string> {
 .anim-track-count {
   color: var(--td-text-color-secondary);
   white-space: nowrap;
+  margin-right: 4px;
+}
+
+.anim-more {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
 }
 
 .anim-body {
