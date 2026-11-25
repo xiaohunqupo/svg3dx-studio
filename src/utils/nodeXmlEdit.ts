@@ -32,6 +32,11 @@ export type PathLocator =
   | {
       kind: "material";
       materialId: string;
+    }
+  | {
+      /** Direct root `<s3dx:animate>` child (`anim:0`); document-global params. */
+      kind: "anim";
+      index: number;
     };
 
 /**
@@ -46,7 +51,7 @@ export function isSyntheticTreePath(path: string): boolean {
   return head.startsWith(SYNTHETIC_TREE_PATH_PREFIX);
 }
 
-/** Parse `defs:groupId`, `defs:groupId.0.1`, `model:solid-view` / `model:solid-view.0`, or `material:id`. */
+/** Parse `defs:groupId`, `defs:groupId.0.1`, `model:…`, `material:id`, or `anim:N`. */
 export function parseTreePath(path: string): PathLocator | null {
   if (path.startsWith("model:")) {
     const rest = path.slice(6);
@@ -64,6 +69,12 @@ export function parseTreePath(path: string): PathLocator | null {
     const materialId = path.slice("material:".length).trim();
     if (!materialId) return null;
     return { kind: "material", materialId };
+  }
+
+  if (path.startsWith("anim:")) {
+    const index = Number(path.slice("anim:".length));
+    if (!Number.isInteger(index) || index < 0) return null;
+    return { kind: "anim", index };
   }
 
   if (isSyntheticTreePath(path)) return null;
@@ -113,6 +124,31 @@ function findGroupOpen(svg: string, groupId: string): OpenTag | null {
     };
   }
   return null;
+}
+
+/** Root `<svg …>` open tag (first match). */
+function findRootSvgOpen(svg: string): OpenTag | null {
+  const m = /<svg\b([^>]*)\/?>/i.exec(svg);
+  if (!m) return null;
+  const full = m[0];
+  return {
+    start: m.index,
+    end: m.index + full.length,
+    attrs: m[1] ?? "",
+    selfClosing: /\/\s*>$/.test(full),
+    local: "svg",
+  };
+}
+
+/**
+ * Direct root `<svg>` children that are parameter `<s3dx:animate>`
+ * (document-global scope, §10.2). `animateTransform` belongs on transform
+ * hosts and is not listed here.
+ */
+export function listRootAnimOpens(svg: string): OpenTag[] {
+  const root = findRootSvgOpen(svg);
+  if (!root) return [];
+  return childOpens(svg, root).filter((c) => c.local === "animate");
 }
 
 /** Find `<s3dx:model id="modelId">` open tag. */
@@ -586,6 +622,9 @@ export function findOpenTagAtPath(
   if (locator.kind === "material") {
     return findMaterialOpen(content, locator.materialId);
   }
+  if (locator.kind === "anim") {
+    return listRootAnimOpens(content)[locator.index] ?? null;
+  }
   let cur = findGroupOpen(content, locator.groupId);
   if (!cur) return null;
   for (const idx of locator.indices) {
@@ -649,7 +688,9 @@ export function nodeKindAtPath(
   const open = findOpenTagAtPath(content, path);
   if (!open) return null;
   const id = (parseAttrMap(open.attrs).id ?? "").trim();
-  const kind = open.local === "g" ? "group" : open.local;
+  // XML local names are lowercased in OpenTag; animateTransform → animatetransform.
+  let kind = open.local === "g" ? "group" : open.local;
+  if (kind === "animatetransform") kind = "animateTransform";
   return { kind, id };
 }
 

@@ -57,6 +57,8 @@ export const ELEMENT_LABELS = {
   material: { zh: "材质", en: "Material" },
   materials: { zh: "材质集", en: "Materials" },
   exp: { zh: "表达式", en: "Expression" },
+  animate: { zh: "动画", en: "Animate" },
+  animateTransform: { zh: "变换动画", en: "Animate transform" },
   group: { zh: "组", en: "Group" },
 } as const satisfies Record<string, LocalePair>;
 
@@ -121,8 +123,8 @@ export const ATTR_LABELS = {
   topWidth: { zh: "顶边宽度", en: "topWidth" },
   points: { zh: "点列", en: "points" },
   at: { zh: "位置", en: "at" },
-  from: { zh: "起点", en: "from" },
-  to: { zh: "终点", en: "to" },
+  from: { zh: "起始", en: "from" },
+  to: { zh: "终止", en: "to" },
   xDir: { zh: "X 方向", en: "xDir" },
   startAngle: { zh: "起始角", en: "startAngle" },
   origin: { zh: "原点", en: "origin" },
@@ -141,6 +143,20 @@ export const ATTR_LABELS = {
   start: { zh: "起点值", en: "start" },
   end: { zh: "终点值", en: "end" },
   step: { zh: "步长", en: "step" },
+
+  // animation §10
+  attributeName: { zh: "参数", en: "attributeName" },
+  dur: { zh: "时长", en: "dur" },
+  repeat: { zh: "重复", en: "repeat" },
+  begin: { zh: "开始时间", en: "begin" },
+  calcMode: { zh: "计算模式", en: "calcMode" },
+  /**
+   * Animation-element overrides — shared `from`/`to` stay 起点/终点 for curves;
+   * `fill` on anim is freeze|remove (not appearance fill).
+   */
+  animFrom: { zh: "起始值", en: "From" },
+  animTo: { zh: "终止值", en: "To" },
+  animFill: { zh: "结束后", en: "After end" },
 } as const satisfies Record<string, LocalePair>;
 
 export type AttrKey = keyof typeof ATTR_LABELS;
@@ -179,7 +195,7 @@ export const FORM_VALUE_LABELS = {
 
 export type FormValueKey = keyof typeof FORM_VALUE_LABELS;
 
-/** `blend` enum values (§3.2 loft approach law). */
+/** `blend` / animation `calcMode` enum values (§3.2 loft approach law / §10). */
 export const BLEND_VALUE_LABELS = {
   linear: { zh: "线性", en: "Linear" },
   sine: { zh: "正弦", en: "Sine" },
@@ -189,3 +205,11 @@ export const BLEND_VALUE_LABELS = {
 } as const satisfies Record<string, LocalePair>;
 
 export type BlendValueKey = keyof typeof BLEND_VALUE_LABELS;
+
+/** Animation-element `fill` values (§10.1) — not drawable fill. */
+export const ANIM_FILL_VALUE_LABELS = {
+  remove: { zh: "恢复", en: "Remove" },
+  freeze: { zh: "保持", en: "Freeze" },
+} as const satisfies Record<string, LocalePair>;
+
+export type AnimFillValueKey = keyof typeof ANIM_FILL_VALUE_LABELS;

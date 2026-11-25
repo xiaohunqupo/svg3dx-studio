@@ -407,6 +407,8 @@ export class InteractViewport {
   private transformHelper: THREE.Object3D;
   /** Separate from main scene so OutlinePass does not outline the gizmo. */
   private overlayScene: THREE.Scene;
+  /** Remember animation play state across a gizmo drag. */
+  private animWasPlaying = false;
   private transformDirty = false;
   /** Coalesce objectChange → inspector preview to one emit per frame. */
   private transformPreviewRaf = 0;
@@ -467,6 +469,15 @@ export class InteractViewport {
     this.transform.addEventListener("dragging-changed", (event) => {
       const dragging = Boolean((event as { value?: boolean }).value);
       this.viewer.controls.enabled = !dragging;
+      // Pause document animation while the gizmo owns the transform (avoids fighting
+      // s3dx:animateTransform). Resume when the drag ends if the document has animations.
+      if (dragging) {
+        this.animWasPlaying = this.viewer.getAnimationPlaying();
+        this.viewer.setAnimationPlaying(false);
+      } else if (this.animWasPlaying) {
+        this.viewer.setAnimationPlaying(true);
+        this.animWasPlaying = false;
+      }
       this.viewer.invalidate();
     });
     this.transform.addEventListener("mouseDown", () => {

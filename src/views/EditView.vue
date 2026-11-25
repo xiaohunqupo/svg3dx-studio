@@ -15,9 +15,11 @@ import EditPageSkeleton from "@/components/skeletons/EditPageSkeleton.vue";
 import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
+import AnimationTimelineBar from "@/components/AnimationTimelineBar.vue";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
-import type { DrillCrumb } from "@/interact";
+import type { DrillCrumb, InteractViewport } from "@/interact";
+import type { EmbedViewer } from "svg3dx-viewer";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
@@ -33,6 +35,7 @@ import {
   insertEmptyGroup,
   insertEmptyMaterial,
   insertEmptyModel,
+  insertRootAnimate,
   insertUseIntoModel,
   removeGroupById,
   removeModelById,
@@ -168,7 +171,12 @@ const sectionEditorXml = ref("");
 const interactHost = ref<{
   setHighlight: (path: string | null | undefined) => void;
   exitDrill: (options?: { select?: string | null }) => void;
+  getInteract: () => InteractViewport | null;
 } | null>(null);
+
+function getAnimViewer(): EmbedViewer | null {
+  return interactHost.value?.getInteract()?.viewer ?? null;
+}
 const inspectorPanel = ref<{
   applyTransformPreview: (
     path: string,
@@ -545,6 +553,18 @@ async function onAddMaterial(): Promise<void> {
   await nextTick();
   treePanel.value?.syncAfterEdit("materials");
   MessagePlugin.success(`${t("app.addedMaterial")} ${id}`);
+}
+
+async function onAddRootAnimate(): Promise<void> {
+  if (!file.value) return;
+  const { content, attributeName } = insertRootAnimate(draftContent.value);
+  draftContent.value = content;
+  await store.updateContent(file.value.id, content, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("animations");
+  MessagePlugin.success(
+    `${t("app.addedRootAnimate")} ${attributeName}`
+  );
 }
 
 async function onAddStyleCategory(): Promise<void> {
@@ -1193,6 +1213,7 @@ onBeforeUnmount(() => {
           @add-group="onAddGroup"
           @add-model="onAddModel"
           @add-material="onAddMaterial"
+          @add-root-animate="onAddRootAnimate"
           @add-style-category="onAddStyleCategory"
           @add-use="onAddUse"
           @add-child="onAddChild"
@@ -1305,6 +1326,8 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
+    <AnimationTimelineBar class="anim-dock" :get-viewer="getAnimViewer" />
+
     <SectionProfileEditorDialog
       v-model:visible="sectionEditorOpen"
       :section-xml="sectionEditorXml"
@@ -1410,6 +1433,20 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   background: var(--td-bg-color-page);
+}
+
+/** Editor-shell animation dock (not viewer chrome). */
+.anim-dock {
+  flex-shrink: 0;
+  z-index: 4;
+}
+.anim-dock :deep(.anim-editor) {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  border-top: 1px solid var(--td-component-border);
+  box-shadow: none;
 }
 
 .resize-handle {

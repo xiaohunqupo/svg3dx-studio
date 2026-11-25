@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AnimationTimelineBar: typeof import('./components/AnimationTimelineBar.vue')['default']
     AppMenus: typeof import('./components/AppMenus.vue')['default']
     BlendAttrSelect: typeof import('./components/BlendAttrSelect.vue')['default']
     BrowsePageSkeleton: typeof import('./components/skeletons/BrowsePageSkeleton.vue')['default']

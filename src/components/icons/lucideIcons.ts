@@ -38,6 +38,8 @@ export {
   SquaresUnite as BoolUnionIcon,
   Torus as TorusIcon,
   Triangle as WedgeIcon,
+  Timer as AnimateIcon,
+  RotateCcw as AnimateTransformIcon,
 } from "@lucide/vue";
 
 import { Box, CircleQuestionMark, SquaresUnite } from "@lucide/vue";

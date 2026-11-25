@@ -24,6 +24,11 @@ const SKIP_DEFAULT_BLANK = new Set([
   "material",
   "selector",
   "label",
+  // Animation §10 — required / semantic; placeholders are examples, not omit-defaults.
+  "attributeName",
+  "from",
+  "to",
+  "dur",
 ]);
 
 function bothNumericEqual(a: string, b: string): boolean {

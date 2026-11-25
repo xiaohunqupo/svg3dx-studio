@@ -55,6 +55,8 @@ import {
   SweepIcon,
   TorusIcon,
   WedgeIcon,
+  AnimateIcon,
+  AnimateTransformIcon,
 } from "@/components/icons/lucideIcons";
 import { DialogPlugin, MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import {
@@ -76,6 +78,8 @@ import type { AddChildKind, GeometryKind } from "@/types/file";
 import { extractDocumentMaterials } from "@/utils/documentMaterials";
 import {
   ADD_CHILD_MENU,
+  ANIM_MENU,
+  ANIM_TRANSFORM_MENU,
   ASSET_MENU,
   BOOL_MENU,
   CURVE_MENU,
@@ -90,6 +94,7 @@ import {
 } from "@/utils/svgEdit";
 import {
   listChildOpensAtPath,
+  listRootAnimOpens,
   readAttrsAtPath,
   SYNTHETIC_TREE_PATH_PREFIX,
 } from "@/utils/nodeXmlEdit";
@@ -168,6 +173,8 @@ const emit = defineEmits<{
   addGroup: [];
   addModel: [];
   addMaterial: [];
+  /** Document-global `<s3dx:animate>` under root `<svg>` (§10.2). */
+  addRootAnimate: [];
   addStyleCategory: [];
   addUse: [payload: { modelId?: string; path: string; href?: string }];
   addChild: [payload: { parentPath: string; parentGroupId: string; kind: AddChildKind }];
@@ -224,6 +231,7 @@ type TreeItem = {
       | "add-child"
       | "add-model"
       | "add-material"
+      | "add-animate"
       | "add-style"
       | "model-more"
       | "use-more"
@@ -247,6 +255,11 @@ type TreeItem = {
     hrefGroupId?: string;
     /** Label is only the href target (no own id) — render muted. */
     useTargetLabel?: boolean;
+    /**
+     * Secondary tree text for animation rows (param name without `--`, or
+     * `animateTransform` `type`) — same role as `:root` under 全局.
+     */
+    animHint?: string;
   };
 };
 
@@ -257,6 +270,7 @@ const expanded = ref<string[]>([
   "defs",
   "materials",
   "style",
+  "animations",
   "resources",
 ]);
 
@@ -319,6 +333,28 @@ const CONTROL_FLOW_KIND_SET = new Set([
   "loop-points",
   "loop-range",
 ]);
+/** SMIL-shaped animation elements (draft §10). */
+const ANIM_KIND_SET = new Set(["animate", "animatetransform", "animateTransform"]);
+
+function normalizeAnimKind(local: string): "animate" | "animateTransform" | null {
+  const l = local.toLowerCase();
+  if (l === "animate") return "animate";
+  if (l === "animatetransform") return "animateTransform";
+  return null;
+}
+
+/** Tree secondary text for anim rows — strip leading `--` on param names. */
+function animTreeHint(
+  animKind: "animate" | "animateTransform",
+  attrs: string
+): string | undefined {
+  if (animKind === "animateTransform") {
+    return attrOf(attrs, "type") ?? undefined;
+  }
+  const raw = attrOf(attrs, "attributeName");
+  if (!raw) return undefined;
+  return raw.startsWith("--") ? raw.slice(2) : raw;
+}
 
 function attrOf(attrs: string, name: string): string | null {
   const re = new RegExp(
@@ -410,10 +446,10 @@ function childrenFromPathMarkup(
       const kind = local as GeometryKind;
       const elemId = attrOf(attrs, "id") ?? undefined;
       const classAttr = attrOf(attrs, "class");
-      const kids =
-        SECTION_PARENT_KINDS.has(kind) && !open.selfClosing
-          ? childrenFromPathMarkup(content, path, classById, kind)
-          : undefined;
+      // Include markup kids (section / path / nested animate*) whenever open.
+      const kids = !open.selfClosing
+        ? childrenFromPathMarkup(content, path, classById, kind)
+        : undefined;
       const isSweepPath = parentKind === "sweep" && kind === "path";
       return {
         value: path,
@@ -447,6 +483,22 @@ function childrenFromPathMarkup(
           icon: kindIcon(local),
           node: syntheticPrimitive(local, parentPath),
           className: classAttr?.split(/\s+/).filter(Boolean).join(" "),
+          action: "geom-more" as const,
+        },
+      };
+    }
+    const animKind = normalizeAnimKind(local);
+    if (animKind) {
+      const elemId = attrOf(attrs, "id") ?? undefined;
+      return {
+        value: path,
+        label: elemId ?? "",
+        children: undefined,
+        meta: {
+          kind: "geometry" as const,
+          icon: kindIcon(animKind),
+          node: syntheticPrimitive(animKind, parentPath),
+          animHint: animTreeHint(animKind, attrs),
           action: "geom-more" as const,
         },
       };
@@ -529,6 +581,7 @@ function ancestorPaths(path: string): string[] {
   }
   if (path.startsWith("style:")) return ["style"];
   if (path.startsWith("material:")) return ["materials"];
+  if (path.startsWith("anim:")) return ["animations"];
   if (path === "resources" || path.startsWith("resource:")) {
     const parts: string[] = ["resources"];
     if (!path.startsWith("resource:")) return parts;
@@ -604,6 +657,7 @@ function focusAfterEdit(
     "defs",
     "materials",
     "style",
+    "animations",
     ...ancestorPaths(parentPath),
     parentPath,
   ]);
@@ -683,6 +737,10 @@ function kindIcon(kind: string): Component {
     case "loop-points":
     case "loop-range":
       return LoopIcon;
+    case "animate":
+      return AnimateIcon;
+    case "animateTransform":
+      return AnimateTransformIcon;
     default:
       return WidgetIcon;
   }
@@ -808,6 +866,7 @@ const groupMoreOptions = computed<DropdownOption[]>(() => [
   categoryOption("app.addBool", "__add-bool", BoolCategoryIcon, BOOL_MENU),
   categoryOption("app.addLogic", "__add-logic", LogicCategoryIcon, LOGIC_MENU),
   categoryOption("app.addLoop", "__add-loop", LoopIcon, LOOP_MENU),
+  categoryOption("app.addAnim", "__add-anim", AnimateIcon, ANIM_MENU),
   {
     content: "",
     value: "__divider",
@@ -865,8 +924,8 @@ function useMoreOptions(item: TreeItem): DropdownOption[] {
   ];
 }
 
-/** Primitive / bool / other geometry “more” menu: delete. */
-const geomMoreOptions = computed<DropdownOption[]>(() => [
+/** Delete-only menu for animation leaves (no nested children). */
+const animLeafMoreOptions = computed<DropdownOption[]>(() => [
   {
     content: t("app.deleteNode"),
     value: "delete",
@@ -874,6 +933,39 @@ const geomMoreOptions = computed<DropdownOption[]>(() => [
     prefixIcon: () => h(DeleteIcon),
   },
 ]);
+
+/**
+ * Primitive / bool / other geometry “more” menu.
+ * Transform hosts may nest `animateTransform` (§10.3); delete always available.
+ */
+const geomMoreOptions = computed<DropdownOption[]>(() => [
+  categoryOption(
+    "app.addAnim",
+    "__add-anim",
+    AnimateIcon,
+    ANIM_TRANSFORM_MENU
+  ),
+  {
+    content: "",
+    value: "__divider",
+    divider: true,
+  },
+  {
+    content: t("app.deleteNode"),
+    value: "delete",
+    theme: "error",
+    prefixIcon: () => h(DeleteIcon),
+  },
+]);
+
+function geomMoreOptionsFor(item: TreeItem): DropdownOption[] {
+  const kind =
+    item.meta.node?.type === "primitive" ? item.meta.node.kind : "";
+  if (kind === "animate" || kind === "animateTransform") {
+    return animLeafMoreOptions.value;
+  }
+  return geomMoreOptions.value;
+}
 
 function pathInsertMenuOptions(items: PathInsertMenuItem[]): DropdownOption[] {
   return items.map((p) => ({
@@ -1086,7 +1178,9 @@ function mapGeometry(
   if (content) {
     const markupKids = childrenFromPathMarkup(content, path, classById);
     const evalKids = childrenOf(inst);
-    children = markupKids.map((item, i) => {
+    // Eval skips animate* / control-flow; walk eval kids only for geometry rows.
+    let evalIdx = 0;
+    children = markupKids.map((item) => {
       // Never replace a markup `<s3dx:use>` with the inlined eval group.
       if (
         item.meta.action === "use-more" ||
@@ -1094,14 +1188,15 @@ function mapGeometry(
       ) {
         return item;
       }
-      // if / loop expand away in eval — keep the control node for editing.
+      // if / loop / animate* expand away or are omitted in eval — keep markup.
       if (
         item.meta.node?.type === "primitive" &&
-        CONTROL_FLOW_KIND_SET.has(item.meta.node.kind)
+        (CONTROL_FLOW_KIND_SET.has(item.meta.node.kind) ||
+          ANIM_KIND_SET.has(item.meta.node.kind))
       ) {
         return item;
       }
-      const ev = evalKids[i];
+      const ev = evalKids[evalIdx++];
       if (!ev) return item;
       return {
         ...item,
@@ -1357,6 +1452,33 @@ function buildTree(
       ],
     },
   ];
+  const rootAnims = content ? listRootAnimOpens(content) : [];
+  sections.push({
+    value: "animations",
+    label: tagLabel("animations"),
+    meta: {
+      kind: "section",
+      icon: AnimateIcon,
+      action: "add-animate",
+    },
+    children: rootAnims.map((open, i) => {
+      const animKind =
+        normalizeAnimKind(open.local) ?? ("animate" as const);
+      const elemId = attrOf(open.attrs, "id") ?? undefined;
+      const path = `anim:${i}`;
+      return {
+        value: path,
+        label: elemId ?? "",
+        meta: {
+          kind: "geometry" as const,
+          icon: kindIcon(animKind),
+          node: syntheticPrimitive(animKind, "animations"),
+          animHint: animTreeHint(animKind, open.attrs),
+          action: "geom-more" as const,
+        },
+      };
+    }),
+  });
   const resources = buildResourcesSection();
   if (resources) sections.push(resources);
   return sections;
@@ -1382,6 +1504,13 @@ function defsStructureKey(content: string): string {
         .trim();
       return `${g.id}#${inner}`;
     })
+    .join("\n");
+}
+
+/** Rebuild when root `<s3dx:animate>` children appear/disappear or change. */
+function rootAnimsStructureKey(content: string): string {
+  return listRootAnimOpens(content)
+    .map((o) => `${o.local}@${o.start}:${o.attrs}`)
     .join("\n");
 }
 
@@ -1447,6 +1576,7 @@ watch(
         "defs",
         "materials",
         "style",
+        "animations",
         "resources",
         ...resourceKeys,
         ...r.models.map((m) => `model:${m.id}`),
@@ -1469,6 +1599,7 @@ watch(
       styleCategoriesKey(prev) === styleCategoriesKey(content) &&
       styleAttachmentKey(prev) === styleAttachmentKey(content) &&
       defsStructureKey(prev) === defsStructureKey(content) &&
+      rootAnimsStructureKey(prev) === rootAnimsStructureKey(content) &&
       materialsStructureKey(prev) === materialsStructureKey(content)
     ) {
       return;
@@ -1574,6 +1705,7 @@ function labelHint(item: TreeItem | undefined): string {
     if (meta.styleScope === "root") return ":root";
     return "";
   }
+  if (meta.animHint) return meta.animHint;
   if (meta.className) return meta.className;
   if (meta.kind === "model" && meta.modelMode) {
     return KNOWN_MODES.has(meta.modelMode)
@@ -1609,6 +1741,12 @@ function onAddMaterial(ev: Event): void {
   ev.preventDefault();
   ev.stopPropagation();
   emit("addMaterial");
+}
+
+function onAddRootAnimate(ev: Event): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  emit("addRootAnimate");
 }
 
 function onAddStyleCategory(ev: Event): void {
@@ -1658,8 +1796,18 @@ function onGeomMoreClick(
   geom: TreeItem,
   item: { value?: string | number | object }
 ): void {
-  if (item?.value === "delete") {
+  const value = item?.value;
+  if (typeof value === "string" && MENU_CATEGORY_VALUES.has(value)) return;
+  if (value === "delete") {
     emit("deleteElement", { path: geom.value });
+    return;
+  }
+  // Transform animation under figure / bool / logic hosts (§10.3).
+  if (value === "animateTransform") {
+    emit("insertChildAtPath", {
+      parentPath: geom.value,
+      kind: "animateTransform",
+    });
   }
 }
 
@@ -1776,6 +1924,7 @@ const MENU_CATEGORY_VALUES = new Set([
   "__add-bool",
   "__add-logic",
   "__add-loop",
+  "__add-anim",
   "__divider",
   "__divider-use",
   /** Parent of「添加引用到」submenu — expand only, no action. */
@@ -1991,6 +2140,22 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
         </t-button>
         <t-button
           v-else-if="
+            (node.data as TreeItem | undefined)?.meta?.action === 'add-animate'
+          "
+          class="tree-action"
+          theme="default"
+          shape="square"
+          variant="text"
+          size="small"
+          :title="t('app.addRootAnimate')"
+          :aria-label="t('app.addRootAnimate')"
+          @click="onAddRootAnimate"
+          @mousedown.stop
+        >
+          <template #icon><AddIcon /></template>
+        </t-button>
+        <t-button
+          v-else-if="
             (node.data as TreeItem | undefined)?.meta?.action === 'add-style'
           "
           class="tree-action"
@@ -2170,7 +2335,7 @@ defineExpose({ syncAfterEdit, selectPath, resyncAfterHistory });
         </t-dropdown>
         <t-dropdown
           v-else-if="(node.data as TreeItem | undefined)?.meta?.action === 'geom-more'"
-          :options="geomMoreOptions"
+          :options="geomMoreOptionsFor(node.data as TreeItem)"
           :max-column-width="160"
           :min-column-width="120"
           trigger="click"

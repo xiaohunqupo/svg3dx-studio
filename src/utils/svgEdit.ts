@@ -1,8 +1,10 @@
 import type {
   AddChildKind,
+  AnimationKind,
   ContainerKind,
   GeometryKind,
 } from "@/types/file";
+import { extractRootProps } from "@/utils/styleClasses";
 
 /** New documents default to draft 0.2 (point + ref). Opening 0.1 files stays supported. */
 const NS = "urn:s3dx:draft:0.2";
@@ -78,9 +80,16 @@ const CONTAINER_SNIPPETS: Record<ContainerKind, string> = {
       </s3dx:loop-range>`,
 };
 
+/** Animation snippets (draft §10) — `repeat="0"` = indefinite loop. */
+const ANIMATION_SNIPPETS: Record<AnimationKind, string> = {
+  animate: `<s3dx:animate attributeName="--H" from="0" to="100" dur="2s" repeat="0"/>`,
+  animateTransform: `<s3dx:animateTransform attributeName="transform" type="rotate" from="0 0 0" to="0 0 90" dur="2s" repeat="0"/>`,
+};
+
 const DEFAULT_SNIPPETS: Record<Exclude<AddChildKind, "group">, string> = {
   ...GEOMETRY_SNIPPETS,
   ...CONTAINER_SNIPPETS,
+  ...ANIMATION_SNIPPETS,
 };
 
 /** Exactly one section under revolve (XY→XOZ default orientation). */
@@ -320,6 +329,27 @@ function nextMaterialId(content: string): string {
   let n = 1;
   while (used.has(`material-${n}`)) n += 1;
   return `material-${n}`;
+}
+
+/**
+ * Insert a document-global `<s3dx:animate>` as a direct child of root `<svg>`
+ * (§10.2). Prefers the first `:root` dashed custom property for `attributeName`.
+ */
+export function insertRootAnimate(
+  content: string
+): { content: string; attributeName: string } {
+  let svg = ensureSvgShell(content);
+  const rootProps = extractRootProps(svg);
+  const attributeName =
+    Object.keys(rootProps).find((k) => k.startsWith("--")) ?? "--H";
+  const nl = lineEnding(svg);
+  const snip = `  <s3dx:animate attributeName="${attributeName}" from="0" to="100" dur="2s" repeat="0"/>${nl}`;
+  if (/<\/svg>/i.test(svg)) {
+    svg = svg.replace(/<\/svg>/i, `${snip}</svg>`);
+  } else {
+    svg = `${svg}${nl}${snip}`;
+  }
+  return { content: svg, attributeName };
 }
 
 /** Insert an empty `<s3dx:material>` into `<s3dx:materials>` (creates the block if needed). */
@@ -643,6 +673,20 @@ export const LOOP_MENU: AddChildMenuItem[] = [
   { kind: "loop-range", labelZh: "范围循环", labelEn: "Loop range" },
 ];
 
+/** Parameter + transform animation — draft §10 (menu: 动画). */
+export const ANIM_MENU: AddChildMenuItem[] = [
+  { kind: "animate", labelZh: "参数动画", labelEn: "Animate" },
+  { kind: "animateTransform", labelZh: "变换动画", labelEn: "Animate transform" },
+];
+
+/**
+ * Transform animation only — for figure / bool hosts that are not parameter
+ * scope (`<g>` / root `<svg>`). Spec §10.3.
+ */
+export const ANIM_TRANSFORM_MENU: AddChildMenuItem[] = [
+  { kind: "animateTransform", labelZh: "变换动画", labelEn: "Animate transform" },
+];
+
 /** All insertable geometry kinds (points + curves + solids + modeling + assets). */
 export const PRIMITIVE_MENU: AddChildMenuItem[] = [
   ...POINT_MENU,
@@ -658,6 +702,7 @@ export const ADD_CHILD_MENU: AddChildMenuItem[] = [
   ...BOOL_MENU,
   ...LOGIC_MENU,
   ...LOOP_MENU,
+  ...ANIM_MENU,
 ];
 
 /** @deprecated Prefer SOLID_MENU; kept for callers expecting solid list. */

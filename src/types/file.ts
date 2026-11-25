@@ -35,4 +35,11 @@ export type ContainerKind =
   | "loop-points"
   | "loop-range";
 
-export type AddChildKind = "group" | GeometryKind | ContainerKind;
+/** SMIL-shaped animation (draft §10) — insertable under groups / transform hosts. */
+export type AnimationKind = "animate" | "animateTransform";
+
+export type AddChildKind =
+  | "group"
+  | GeometryKind
+  | ContainerKind
+  | AnimationKind;

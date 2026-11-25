@@ -73,6 +73,7 @@ import {
 } from "@/utils/paramScope";
 import {
   extractDefsGroups,
+  extractRootProps,
   isValidStyleCategoryName,
   listStyleCategories,
 } from "@/utils/styleClasses";
@@ -221,8 +222,19 @@ function withTypeTip(row: FieldRow, raw: string): FieldRow {
   return row;
 }
 
-function fieldDisplayName(name: string): string {
+function fieldDisplayName(name: string, field?: AttrField): string {
+  if (field?.labelKey) return attrLabel(field.labelKey);
   return attrLabel(name);
+}
+
+/** `:root` custom props as `attributeName` choices (`--H`, …). */
+function rootParamAttrNames(content: string): string[] {
+  const names = new Set<string>();
+  for (const key of Object.keys(extractRootProps(content))) {
+    const dashed = key.startsWith("--") ? key : `--${key}`;
+    names.add(dashed);
+  }
+  return [...names].sort();
 }
 
 function attrLookup(
@@ -294,7 +306,10 @@ function seedDraft(fields: FieldRow[], path: string): void {
       transformForm.value = detectTransformForm(f.value || draft[f.name]);
       Object.assign(transformParts, syncTransformPartsFromDisplay(draft[f.name]));
       Object.assign(transformTrs, syncTransformTrsFromDisplay(draft[f.name]));
-    } else if (f.name === "fill" || f.name === "color") {
+    } else if (
+      (f.name === "fill" || f.name === "color") &&
+      !f.enumValues?.length
+    ) {
       draft[f.name] = f.value;
       fillHexUi.value = fillToHex8(f.value);
     } else {
@@ -526,6 +541,8 @@ const geometryView = computed(() => {
     /** Control-flow assembly nodes: params + transform; no appearance cascade. */
     const isControlFlow =
       node.kind === "if" || node.kind === "if-not";
+    const isAnimation =
+      node.kind === "animate" || node.kind === "animateTransform";
     const idVal = attrLookup(xmlAttrs, "id");
     const classVal = attrLookup(xmlAttrs, "class") || sel.className || "";
     sections.push({
@@ -537,11 +554,23 @@ const geometryView = computed(() => {
           nodeTypeRaw(node)
         ),
         pushField("basic", { name: "id" }, idVal),
-        pushField("basic", classFieldWithCategories(classVal), classVal),
+        ...(isAnimation
+          ? []
+          : [pushField("basic", classFieldWithCategories(classVal), classVal)]),
       ],
     });
 
-    const schema = primitiveAttrFields(node.kind);
+    const schema = primitiveAttrFields(node.kind).map((f) => {
+      // Param animation: attributeName picks a `:root` custom property.
+      if (node.kind === "animate" && f.name === "attributeName") {
+        const opts = rootParamAttrNames(props.content ?? "");
+        const cur = attrLookup(xmlAttrs, "attributeName");
+        const enumValues =
+          cur && !opts.includes(cur) ? [...opts, cur] : opts;
+        return { ...f, enumValues };
+      }
+      return f;
+    });
     const inferredForm = primitiveFormSpec(node.kind)
       ? inferPrimitiveForm(node.kind, xmlAttrs ?? {})
       : "";
@@ -572,7 +601,7 @@ const geometryView = computed(() => {
       fields: paramFields,
     });
 
-    if (!isControlFlow) {
+    if (!isControlFlow && !isAnimation) {
       sections.push({
         id: "appearance",
         title: t("app.appearance"),
@@ -582,19 +611,20 @@ const geometryView = computed(() => {
       });
     }
 
-    // All 3D assembly nodes in the tree (incl. if / if-not / section) expose
-    // s3dx:transform. Profile SVG under <s3dx:section> is not listed in the tree.
-    const xformVal =
-      node.kind === "section"
-        ? sectionTransformDisplay(props.content ?? "", path, xmlAttrs)
-        : attrLookup(xmlAttrs, "s3dx:transform");
-    sections.push({
-      id: "transform",
-      title: t("app.transform"),
-      fields: TRANSFORM_FIELDS.map((f) =>
-        pushField("transform", f, f.name === "s3dx:transform" ? xformVal : "")
-      ),
-    });
+    // Animation elements have no s3dx:transform; control-flow / geometry do.
+    if (!isAnimation) {
+      const xformVal =
+        node.kind === "section"
+          ? sectionTransformDisplay(props.content ?? "", path, xmlAttrs)
+          : attrLookup(xmlAttrs, "s3dx:transform");
+      sections.push({
+        id: "transform",
+        title: t("app.transform"),
+        fields: TRANSFORM_FIELDS.map((f) =>
+          pushField("transform", f, f.name === "s3dx:transform" ? xformVal : "")
+        ),
+      });
+    }
   } else if (node.type === "instance") {
     const idVal = attrLookup(xmlAttrs, "id") || sel.className || "";
     // Prefer XML href only — do not fall back to node.group_id, or clearing
@@ -1988,13 +2018,14 @@ defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
                   }"
                   :title="
                     row.field.description ||
-                    (fieldDisplayName(row.field.name) !== row.field.name
+                    (fieldDisplayName(row.field.name, row.field) !==
+                    row.field.name
                       ? row.field.name
                       : undefined)
                   "
                 >
                   <span class="name-label">{{
-                    fieldDisplayName(row.field.name)
+                    fieldDisplayName(row.field.name, row.field)
                   }}</span>
                   <t-button
                     v-if="row.field.name === 's3dx:transform'"
@@ -2023,7 +2054,7 @@ defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
                 >
                 <div v-else class="value-cell">
                   <div
-                    v-if="row.field.name === 'fill'"
+                    v-if="row.field.name === 'fill' && !row.field.enumValues"
                     class="fill-color-field"
                   >
                     <t-popup
@@ -2070,16 +2101,20 @@ defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
                     @change="(v: unknown) => onBoolAttrChange(row.field, v)"
                   />
                   <BlendAttrSelect
-                    v-else-if="row.field.name === 'blend'"
+                    v-else-if="
+                      row.field.name === 'blend' || row.field.name === 'calcMode'
+                    "
                     :model-value="draft[row.field.name]"
                     clearable
                     :placeholder="
                       row.field.placeholder
-                        ? attrValueLabel('blend', row.field.placeholder)
+                        ? attrValueLabel(row.field.name, row.field.placeholder)
                         : t('app.unsetHint')
                     "
-                    @change="(v: string) => onEnumAttrChange('blend', v)"
-                    @clear="() => onEnumAttrChange('blend', '')"
+                    @change="
+                      (v: string) => onEnumAttrChange(row.field.name, v)
+                    "
+                    @clear="() => onEnumAttrChange(row.field.name, '')"
                   />
                   <CornerAttrSelect
                     v-else-if="

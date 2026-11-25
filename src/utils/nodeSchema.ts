@@ -9,6 +9,11 @@ import { DEFAULT_FILL_HEX8 } from "@/utils/fillColor";
 
 export type AttrField = {
   name: string;
+  /**
+   * Optional ATTR_LABELS key for the inspector title when it should differ
+   * from `name` (e.g. animation `fill` → `animFill`).
+   */
+  labelKey?: string;
   /** Placeholder / default hint when unset. */
   placeholder?: string;
   /** Short help under the input (enum meaning, units, etc.). */
@@ -1144,6 +1149,59 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
   /** Control-flow containers — draft §5. */
   if: [{ name: "test", placeholder: "true" }],
   "if-not": [{ name: "test", placeholder: "true" }],
+  /** Animation (SMIL-shaped subset — draft §10). */
+  animate: [
+    {
+      name: "attributeName",
+      placeholder: "--H",
+      // enumValues filled at inspect time from `:root` params
+    },
+    { name: "from", labelKey: "animFrom", placeholder: "0" },
+    { name: "to", labelKey: "animTo", placeholder: "100" },
+    { name: "begin", placeholder: "0s" },
+    { name: "dur", placeholder: "2s" },
+    // Spec default is `1` (omit). `0` = indefinite — keep explicit when set.
+    { name: "repeat", placeholder: "1" },
+    {
+      name: "fill",
+      labelKey: "animFill",
+      placeholder: "remove",
+      enumValues: ["remove", "freeze"],
+    },
+    {
+      name: "calcMode",
+      placeholder: "linear",
+      enumValues: BLEND_VALUES,
+    },
+  ],
+  animateTransform: [
+    {
+      name: "attributeName",
+      placeholder: "transform",
+      enumValues: ["transform"],
+    },
+    {
+      name: "type",
+      placeholder: "rotate",
+      enumValues: ["translate", "rotate", "scale"],
+    },
+    { name: "from", labelKey: "animFrom", placeholder: "0 0 0" },
+    { name: "to", labelKey: "animTo", placeholder: "0 0 90" },
+    { name: "begin", placeholder: "0s" },
+    { name: "dur", placeholder: "2s" },
+    { name: "repeat", placeholder: "1" },
+    {
+      name: "fill",
+      labelKey: "animFill",
+      placeholder: "remove",
+      enumValues: ["remove", "freeze"],
+    },
+    {
+      name: "calcMode",
+      placeholder: "linear",
+      enumValues: BLEND_VALUES,
+    },
+  ],
 };
 
 export const GROUP_BASIC_FIELDS: AttrField[] = [

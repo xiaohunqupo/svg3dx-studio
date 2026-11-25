@@ -62,7 +62,13 @@ export {
   type TransformMode,
 } from "@/interact";
 
-export type { StudioFile, AddChildKind, GeometryKind, ContainerKind } from "@/types/file";
+export type {
+  StudioFile,
+  AddChildKind,
+  GeometryKind,
+  ContainerKind,
+  AnimationKind,
+} from "@/types/file";
 export { downloadBlob, downloadText } from "@/utils/storage";
 export {
   defaultAssetHref,

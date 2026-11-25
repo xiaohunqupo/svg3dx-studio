@@ -7,6 +7,7 @@ import {
   type TagKey,
 } from "./messages";
 import {
+  ANIM_FILL_VALUE_LABELS,
   ATTR_LABELS,
   BLEND_VALUE_LABELS,
   CORNER_VALUE_LABELS,
@@ -14,6 +15,7 @@ import {
   FORM_VALUE_LABELS,
   MATERIAL_LABELS,
   ORIENT_VALUE_LABELS,
+  type AnimFillValueKey,
   type AttrKey,
   type BlendValueKey,
   type CornerValueKey,
@@ -149,9 +151,13 @@ export function attrValueLabel(attr: string, value: string): string {
     const hit = FORM_VALUE_LABELS[v as FormValueKey];
     return hit ? hit[locale.value] : v;
   }
-  if (attr === "blend") {
+  if (attr === "blend" || attr === "calcMode") {
     const hit = BLEND_VALUE_LABELS[v as BlendValueKey];
     return hit ? hit[locale.value] : v;
+  }
+  if (attr === "fill") {
+    const hit = ANIM_FILL_VALUE_LABELS[v as AnimFillValueKey];
+    if (hit) return hit[locale.value];
   }
   return v;
 }
