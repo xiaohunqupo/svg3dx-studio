@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { BuiltInAgent, CopilotRuntime } from "@copilotkit/runtime/v2";
 import { createCopilotNodeListener } from "@copilotkit/runtime/v2/node";
 
@@ -24,6 +25,19 @@ const PLACEHOLDER_KEYS = new Set([
   "your-key-here",
   "changeme",
 ]);
+
+const STUDIO_PROMPT = [
+  "You are the svg3dx Studio assistant inside a 3D SVG (.svg3dx) editor.",
+  "Be concise; prefer tools over guessing; use markdown when useful.",
+  "CRITICAL: When context.page is \"edit\" (or edit snapshot is present), work ONLY on that active document.",
+  "Do NOT call list_files, go_edit, go_browse, rename_file, or remove_file for content edits — those are for switching/managing files when the user asks.",
+  "Edit workflow: get_source / get_selection on the current doc → change via replace_in_source, update_node_attrs, add_*, insert_at_path, delete_at_path → save_document if the user wants persistence.",
+  "Use get_edit_state only if you need selection/panel/undo info not already in context. Prefer replace_in_source over set_source for partial edits.",
+  "Other tools: format_document, optimize_document, export_document, export_package, set_panel, undo, redo, select_node, read_node_attrs,",
+  "add_group, add_model, add_material, add_root_animate, add_style_category, add_child, add_use.",
+  "Tree paths: model:main, model:main.g1, material:mat1, style:.foo, defs:…. Empty attr values remove attributes. gltf inserts need href.",
+  "Attachments: analyze images/documents when the user provides them.",
+].join(" ");
 
 /**
  * @returns {{ baseUrl: string, apiKey: string, model: string } | null}
@@ -62,31 +76,58 @@ function readLlmConfig() {
 }
 
 /**
+ * @param {string} baseUrl
+ */
+function isOfficialOpenAIHost(baseUrl) {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === "api.openai.com" || host.endsWith(".api.openai.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {{ baseUrl: string, apiKey: string, model: string } | null} cfg
  */
 function applyEnvFromConfig(cfg) {
   if (!cfg) return;
   process.env.OPENAI_API_KEY = cfg.apiKey;
   process.env.OPENAI_BASE_URL = cfg.baseUrl;
-  const host = (() => {
-    try {
-      return new URL(cfg.baseUrl).hostname;
-    } catch {
-      return "";
-    }
-  })();
-  const isOfficialOpenAI =
-    host === "api.openai.com" || host.endsWith(".api.openai.com");
-  if (!isOfficialOpenAI) {
-    process.env.COPILOTKIT_OPENAI_API = "chat";
+  // Official OpenAI keeps Responses (reasoning summaries). Compatible hosts
+  // no longer need this override — they use @ai-sdk/openai-compatible below.
+  if (!isOfficialOpenAIHost(cfg.baseUrl)) {
+    delete process.env.COPILOTKIT_OPENAI_API;
   }
+}
+
+/**
+ * Resolve the BuiltInAgent model.
+ * Compatible endpoints (DeepSeek, etc.) use @ai-sdk/openai-compatible so
+ * `reasoning_content` streams become CopilotKit reasoning messages.
+ * Official OpenAI keeps string specs for the Responses API.
+ *
+ * @param {{ baseUrl: string, apiKey: string, model: string } | null} cfg
+ */
+function resolveAgentModel(cfg) {
+  const modelId = cfg?.model || "gpt-4o-mini";
+  if (cfg && !isOfficialOpenAIHost(cfg.baseUrl)) {
+    const provider = createOpenAICompatible({
+      name: "studio-llm",
+      baseURL: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      includeUsage: true,
+    });
+    return provider.chatModel(modelId);
+  }
+  if (modelId.includes(":") || modelId.includes("/")) return modelId;
+  return `openai/${modelId}`;
 }
 
 function createRuntime() {
   const cfg = readLlmConfig();
   applyEnvFromConfig(cfg);
-  const modelId = cfg?.model || "gpt-4o-mini";
-  const model = modelId.includes(":") ? modelId : `openai:${modelId}`;
+  const model = resolveAgentModel(cfg);
 
   return new CopilotRuntime({
     // Local single-user Studio — share threads without identity.
@@ -95,18 +136,7 @@ function createRuntime() {
       default: new BuiltInAgent({
         model,
         apiKey: cfg?.apiKey,
-        prompt: [
-          "You are the svg3dx Studio assistant inside a 3D SVG (.svg3dx) editor.",
-          "Be concise; prefer tools over guessing; use markdown when useful.",
-          "CRITICAL: When context.page is \"edit\" (or edit snapshot is present), work ONLY on that active document.",
-          "Do NOT call list_files, go_edit, go_browse, rename_file, or remove_file for content edits — those are for switching/managing files when the user asks.",
-          "Edit workflow: get_source / get_selection on the current doc → change via replace_in_source, update_node_attrs, add_*, insert_at_path, delete_at_path → save_document if the user wants persistence.",
-          "Use get_edit_state only if you need selection/panel/undo info not already in context. Prefer replace_in_source over set_source for partial edits.",
-          "Other tools: format_document, optimize_document, export_document, export_package, set_panel, undo, redo, select_node, read_node_attrs,",
-          "add_group, add_model, add_material, add_root_animate, add_style_category, add_child, add_use.",
-          "Tree paths: model:main, model:main.g1, material:mat1, style:.foo, defs:…. Empty attr values remove attributes. gltf inserts need href.",
-          "Attachments: analyze images/documents when the user provides them.",
-        ].join(" "),
+        prompt: STUDIO_PROMPT,
       }),
     },
   });
@@ -229,10 +259,16 @@ createServer((req, res) => {
   copilotListener(req, res);
 }).listen(port, () => {
   const cfg = readLlmConfig();
+  const via =
+    cfg && !isOfficialOpenAIHost(cfg.baseUrl)
+      ? "openai-compatible+reasoning"
+      : cfg
+        ? "openai"
+        : null;
   console.log(
     `[copilot-runtime] http://127.0.0.1:${port}/api/copilotkit` +
       (cfg
-        ? ` (${cfg.model} @ ${cfg.baseUrl})`
+        ? ` (${cfg.model} @ ${cfg.baseUrl}, ${via})`
         : " — waiting for Settings / OPENAI_API_KEY")
   );
 });
