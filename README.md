@@ -59,15 +59,26 @@ installStudio(app, {
     goBrowse: () => router.push("/studio"),
     goEdit: (id) => router.push(`/studio/edit/${id}`),
   },
+  // Hosts with their own AI assistant should disable Studio's built-in one:
+  // showAiAssistant: false,
 });
 app.use(TDesign);
 ```
 
 Mount `BrowsePage` / `EditPage` on your routes (`EditPage` needs `props: true` for `id`).
 
+### AI assistant
+
+Studio ships a CopilotKit-based assistant as part of the page library (`AiChatPanel` + Browse/Edit dock chrome).
+
+- **Default on**: `installStudio` uses `showAiAssistant: true`. Prefer this flag for hosts — it gates both app-root `AiChatPanel` mounting and page chrome.
+- **Host AI**: `installStudio(app, { showAiAssistant: false })` and do not mount `AiChatPanel`.
+- **Per-page chrome only**: `BrowsePage` / `EditPage` `showAiAssistant` overrides the install default for the header button + dock column (does not unmount a root `AiChatPanel`).
+- **Enable Studio AI in a host**: keep install `showAiAssistant` true, mount `<AiChatPanel />` once at the app root, import `@copilotkit/vue/styles.css`, and proxy/run the Copilot runtime (`npm run copilot` / `/api/copilotkit`).
+
 ### Three openness levels
 
-1. **Full pages**: mount as-is; tweak with props (`showOfficialSamples`, …) and slots.
+1. **Full pages**: mount as-is; tweak with props (`showOfficialSamples`, `showAiAssistant`, …) and slots.
 2. **Custom storage**: implement `DocumentRepository` / `AssetRepository`.
 3. **Compose UI**: use only `ViewerHost` / `InteractHost` / panels as building blocks.
 

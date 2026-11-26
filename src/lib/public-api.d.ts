@@ -50,12 +50,19 @@ export type InstallStudioOptions = {
   documents?: DocumentRepository;
   assets?: AssetRepository;
   navigation?: StudioNavigation;
+  /**
+   * Built-in Copilot AI assistant. Default `true`.
+   * Set `false` when the host embeds Studio and supplies its own assistant.
+   * BrowsePage / EditPage `showAiAssistant` overrides this when set.
+   */
+  showAiAssistant?: boolean;
 };
 
 export type StudioRuntime = {
   documents: DocumentRepository;
   assets: AssetRepository;
   navigation: StudioNavigation;
+  showAiAssistant: boolean;
 };
 
 export declare const STUDIO_DOCUMENTS_KEY: unique symbol;
@@ -97,12 +104,14 @@ export declare function useDocumentAssets(fileId: Ref<string | null | undefined>
   >;
 };
 export declare function useFilesStore(): unknown;
+export declare function useChatStore(): unknown;
 
 export declare const BrowsePage: DefineComponent<
   {
     showOfficialSamples?: boolean;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
+    showAiAssistant?: boolean;
   },
   object,
   unknown
@@ -112,6 +121,7 @@ export declare const EditPage: DefineComponent<
     id: string;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
+    showAiAssistant?: boolean;
   },
   object,
   unknown
@@ -127,6 +137,7 @@ export declare const SourceEditorPanel: DefineComponent<object, object, unknown>
 export declare const AppMenus: DefineComponent<object, object, unknown>;
 export declare const SettingsMenu: DefineComponent<object, object, unknown>;
 export declare const ReposMenu: DefineComponent<object, object, unknown>;
+export declare const AiChatPanel: DefineComponent<object, object, unknown>;
 
 export type TransformMode = string;
 export type DrillCrumb = unknown;

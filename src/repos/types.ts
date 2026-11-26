@@ -54,4 +54,10 @@ export type InstallStudioOptions = {
   documents?: DocumentRepository;
   assets?: AssetRepository;
   navigation?: StudioNavigation;
+  /**
+   * Built-in Copilot AI assistant chrome (header button + dock column).
+   * Default `true`. Set `false` when the host embeds Studio and supplies its own assistant.
+   * BrowsePage / EditPage `showAiAssistant` prop overrides this when set.
+   */
+  showAiAssistant?: boolean;
 };

@@ -19,6 +19,7 @@ import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
 import AnimationTimelineBar from "@/components/AnimationTimelineBar.vue";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
+import { useStudioAiAssistantEnabled } from "@/composables/useStudioAiAssistant";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import type { DrillCrumb, InteractViewport } from "@/interact";
 import type { EmbedViewer } from "svg3dx-viewer";
@@ -77,6 +78,8 @@ const props = withDefaults(
     id: string;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
+    /** Override `installStudio({ showAiAssistant })`; omit to follow install default. */
+    showAiAssistant?: boolean;
   }>(),
   {
     showReposMenu: true,
@@ -86,6 +89,7 @@ const props = withDefaults(
 
 const store = useFilesStore();
 const chatStore = useChatStore();
+const showAiAssistant = useStudioAiAssistantEnabled(() => props.showAiAssistant);
 const nav = useStudioNavigation();
 const { t } = useI18n();
 
@@ -377,9 +381,13 @@ const workspaceStyle = computed(() => {
   return { gridTemplateColumns: cols.join(" ") };
 });
 
+const aiDockOpen = computed(
+  () => showAiAssistant.value && chatStore.open
+);
+
 /** Match Browse: AI column sits under the topbar, not full-page height. */
 const editBodyStyle = computed(() => {
-  if (!chatStore.open) return undefined;
+  if (!aiDockOpen.value) return undefined;
   return {
     gridTemplateColumns: `minmax(0, 1fr) 0px ${chatStore.width}px`,
   };
@@ -388,7 +396,7 @@ const editBodyStyle = computed(() => {
 const editBodyEl = ref<HTMLElement | null>(null);
 
 watch(
-  [aiMountEl, () => chatStore.open],
+  [aiMountEl, aiDockOpen],
   ([el, open]) => {
     chatStore.setMountEl(open && el ? el : null);
   },
@@ -1440,7 +1448,7 @@ onBeforeUnmount(() => {
       <slot name="toolbar-extra" />
       <div class="right">
         <slot name="topbar-end">
-          <AiChatHeaderButton />
+          <AiChatHeaderButton v-if="showAiAssistant" />
           <ReposMenu v-if="showReposMenu" />
           <SettingsMenu v-if="showSettingsMenu" />
         </slot>
@@ -1674,7 +1682,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
-      <template v-if="chatStore.open">
+      <template v-if="aiDockOpen">
         <div
           class="resize-handle resize-handle--ai"
           role="separator"

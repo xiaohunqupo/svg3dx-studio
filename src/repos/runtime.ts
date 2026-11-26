@@ -14,6 +14,8 @@ export type StudioRuntime = {
   documents: DocumentRepository;
   assets: AssetRepository;
   navigation: StudioNavigation;
+  /** Effective default for page chrome; pages may still override via prop. */
+  showAiAssistant: boolean;
 };
 
 export const STUDIO_DOCUMENTS_KEY: InjectionKey<DocumentRepository> =
@@ -42,6 +44,7 @@ export function configureStudio(options: InstallStudioOptions = {}): StudioRunti
     documents: options.documents ?? createIndexedDbDocumentRepository(),
     assets: options.assets ?? createIndexedDbAssetRepository(),
     navigation: options.navigation ?? noopNav,
+    showAiAssistant: options.showAiAssistant !== false,
   };
   return runtime;
 }

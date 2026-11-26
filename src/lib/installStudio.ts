@@ -5,7 +5,8 @@ import type { InstallStudioOptions } from "@/repos/types";
 export type { InstallStudioOptions };
 
 /**
- * Install Studio runtime on a Vue app: document/asset repositories + navigation.
+ * Install Studio runtime on a Vue app: document/asset repositories + navigation
+ * (+ optional `showAiAssistant` for the built-in Copilot chrome).
  * Call after `app.use(createPinia())`. Hosts supply custom repos for DB/FTP/etc.
  */
 export function installStudio(

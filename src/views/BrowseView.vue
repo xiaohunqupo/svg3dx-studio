@@ -11,6 +11,7 @@ import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
+import { useStudioAiAssistantEnabled } from "@/composables/useStudioAiAssistant";
 import { useI18n } from "@/i18n";
 import { useChatStore } from "@/stores/chat";
 import { useFilesStore } from "@/stores/files";
@@ -27,12 +28,14 @@ import {
 } from "@/utils/officialSamples";
 import { clearGltfCache } from "svg3dx-viewer";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** Show official-samples fetch UI. */
     showOfficialSamples?: boolean;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
+    /** Override `installStudio({ showAiAssistant })`; omit to follow install default. */
+    showAiAssistant?: boolean;
   }>(),
   {
     showOfficialSamples: true,
@@ -63,6 +66,7 @@ function readStoredWidth(
 
 const store = useFilesStore();
 const chatStore = useChatStore();
+const showAiAssistant = useStudioAiAssistantEnabled(() => props.showAiAssistant);
 const { t } = useI18n();
 const dragOverMain = ref(false);
 const previewReady = ref(false);
@@ -92,8 +96,12 @@ const workspaceStyle = computed(() => ({
   gridTemplateColumns: `${sidebarWidth.value}px 0px minmax(0, 1fr)`,
 }));
 
+const aiDockOpen = computed(
+  () => showAiAssistant.value && chatStore.open
+);
+
 const browseBodyStyle = computed(() => {
-  if (!chatStore.open) return undefined;
+  if (!aiDockOpen.value) return undefined;
   return {
     gridTemplateColumns: `minmax(0, 1fr) 0px ${chatStore.width}px`,
   };
@@ -147,7 +155,7 @@ function startAiResize(ev: PointerEvent): void {
 }
 
 watch(
-  [aiMountEl, () => chatStore.open],
+  [aiMountEl, aiDockOpen],
   ([el, open]) => {
     chatStore.setMountEl(open && el ? el : null);
   },
@@ -276,7 +284,7 @@ function onMainDrop(e: DragEvent): void {
       </slot>
       <div class="right">
         <slot name="topbar-end">
-          <AiChatHeaderButton />
+          <AiChatHeaderButton v-if="showAiAssistant" />
           <ReposMenu v-if="showReposMenu" />
           <SettingsMenu v-if="showSettingsMenu" />
         </slot>
@@ -364,7 +372,7 @@ function onMainDrop(e: DragEvent): void {
         </div>
       </div>
 
-      <template v-if="chatStore.open">
+      <template v-if="aiDockOpen">
         <div
           class="resize-handle resize-handle--ai"
           role="separator"
