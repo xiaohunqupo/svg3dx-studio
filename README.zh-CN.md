@@ -59,7 +59,7 @@ installStudio(app, {
     goBrowse: () => router.push("/studio"),
     goEdit: (id) => router.push(`/studio/edit/${id}`),
   },
-  // 宿主已有 AI 助手时请关闭 Studio 内置助手：
+  // AI 工具/界面默认开启。仅当宿主自带助手时关闭：
   // showAiAssistant: false,
 });
 app.use(TDesign);
@@ -69,12 +69,11 @@ app.use(TDesign);
 
 ### AI 助手
 
-Studio 内置基于 CopilotKit 的助手，属于页面库的一部分（`AiChatPanel` + Browse/Edit 停靠栏）。
+Studio 内置基于 CopilotKit 的助手，属于页面库的一部分。**默认开启**（`showAiAssistant: true`）。
 
-- **默认开启**：`installStudio` 的 `showAiAssistant: true`。宿主侧优先用该选项，同时约束根上 `AiChatPanel` 与页面 chrome。
-- **宿主自带 AI**：`installStudio(app, { showAiAssistant: false })`，且不要挂载 `AiChatPanel`。
-- **仅关某页 chrome**：`BrowsePage` / `EditPage` 的 `showAiAssistant` 可覆盖安装默认（顶栏按钮 + 停靠列）；不会卸载根上已挂的 `AiChatPanel`。
-- **在宿主中启用 Studio AI**：保持 install `showAiAssistant` 为 true，根上挂一次 `<AiChatPanel />`，引入 `@copilotkit/vue/styles.css`，并代理/运行 Copilot Runtime（`npm run copilot` / `/api/copilotkit`）。
+- **演示 / 常规宿主**：根上挂 `<AiChatPanel />`，引入 `@copilotkit/vue/styles.css`，并运行/代理 Copilot Runtime（`npm run copilot` / `/api/copilotkit`）。
+- **宿主自带 AI**：`installStudio(app, { showAiAssistant: false })`，且不要挂载 `AiChatPanel`（全局总开关）。
+- **仅关某页 chrome**：`:show-ai-assistant="false"`（不会卸载根上已挂的 `AiChatPanel`）。
 
 ### 三层开放度
 

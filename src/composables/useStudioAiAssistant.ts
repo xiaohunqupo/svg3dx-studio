@@ -3,18 +3,19 @@ import { getStudioRuntime } from "@/repos";
 import { useChatStore } from "@/stores/chat";
 
 /**
- * Resolve whether Studio's built-in AI assistant chrome should be shown.
- * Page prop wins when explicitly set; otherwise `installStudio({ showAiAssistant })`.
- * When disabled, clears persisted open state so a later re-enable does not pop the dock.
+ * Whether Studio's built-in AI (tools + chrome) is enabled.
+ *
+ * - `installStudio({ showAiAssistant: false })` is a host kill-switch (always off).
+ * - Page prop defaults to `true`; set `:show-ai-assistant="false"` to hide chrome on one page.
+ * - When disabled, clears persisted open state so re-enable does not pop the dock.
  */
 export function useStudioAiAssistantEnabled(
   pageProp?: MaybeRefOrGetter<boolean | undefined>
 ) {
   const chatStore = useChatStore();
   const enabled = computed(() => {
-    const fromPage = toValue(pageProp);
-    if (typeof fromPage === "boolean") return fromPage;
-    return getStudioRuntime().showAiAssistant;
+    if (getStudioRuntime().showAiAssistant === false) return false;
+    return toValue(pageProp) !== false;
   });
 
   watch(

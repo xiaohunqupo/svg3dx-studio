@@ -34,13 +34,14 @@ const props = withDefaults(
     showOfficialSamples?: boolean;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
-    /** Override `installStudio({ showAiAssistant })`; omit to follow install default. */
+    /** Hide built-in AI chrome on this page. Install `showAiAssistant: false` disables globally. */
     showAiAssistant?: boolean;
   }>(),
   {
     showOfficialSamples: true,
     showReposMenu: true,
     showSettingsMenu: true,
+    showAiAssistant: true,
   }
 );
 

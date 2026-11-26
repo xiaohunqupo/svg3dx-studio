@@ -59,7 +59,7 @@ installStudio(app, {
     goBrowse: () => router.push("/studio"),
     goEdit: (id) => router.push(`/studio/edit/${id}`),
   },
-  // Hosts with their own AI assistant should disable Studio's built-in one:
+  // AI tools/chrome default to on. Only disable when the host has its own assistant:
   // showAiAssistant: false,
 });
 app.use(TDesign);
@@ -69,12 +69,11 @@ Mount `BrowsePage` / `EditPage` on your routes (`EditPage` needs `props: true` f
 
 ### AI assistant
 
-Studio ships a CopilotKit-based assistant as part of the page library (`AiChatPanel` + Browse/Edit dock chrome).
+Studio ships a CopilotKit-based assistant as part of the page library. **Enabled by default** (`showAiAssistant: true`).
 
-- **Default on**: `installStudio` uses `showAiAssistant: true`. Prefer this flag for hosts — it gates both app-root `AiChatPanel` mounting and page chrome.
-- **Host AI**: `installStudio(app, { showAiAssistant: false })` and do not mount `AiChatPanel`.
-- **Per-page chrome only**: `BrowsePage` / `EditPage` `showAiAssistant` overrides the install default for the header button + dock column (does not unmount a root `AiChatPanel`).
-- **Enable Studio AI in a host**: keep install `showAiAssistant` true, mount `<AiChatPanel />` once at the app root, import `@copilotkit/vue/styles.css`, and proxy/run the Copilot runtime (`npm run copilot` / `/api/copilotkit`).
+- **Demo / typical host**: mount `<AiChatPanel />` at the app root, import `@copilotkit/vue/styles.css`, and run/proxy the Copilot runtime (`npm run copilot` / `/api/copilotkit`).
+- **Host has its own AI**: `installStudio(app, { showAiAssistant: false })` and do not mount `AiChatPanel` (global kill-switch).
+- **Hide chrome on one page**: `:show-ai-assistant="false"` (does not unmount a root `AiChatPanel`).
 
 ### Three openness levels
 

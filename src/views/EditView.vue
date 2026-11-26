@@ -18,6 +18,10 @@ import PanelSkeleton from "@/components/skeletons/PanelSkeleton.vue";
 import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import InteractHost from "@/components/InteractHost.vue";
 import AnimationTimelineBar from "@/components/AnimationTimelineBar.vue";
+import {
+  registerStudioEditBridge,
+  type StudioEditToolResult,
+} from "@/chat/editBridge";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
 import { useStudioAiAssistantEnabled } from "@/composables/useStudioAiAssistant";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
@@ -65,6 +69,7 @@ import {
   insertXmlAtPath,
   nodeKindAtPath,
   normalizeXmlNewlines,
+  readAttrsAtPath,
   removeElementAtPath,
   replaceChildrenAtPath,
 } from "@/utils/nodeXmlEdit";
@@ -78,12 +83,13 @@ const props = withDefaults(
     id: string;
     showReposMenu?: boolean;
     showSettingsMenu?: boolean;
-    /** Override `installStudio({ showAiAssistant })`; omit to follow install default. */
+    /** Hide built-in AI chrome on this page. Install `showAiAssistant: false` disables globally. */
     showAiAssistant?: boolean;
   }>(),
   {
     showReposMenu: true,
     showSettingsMenu: true,
+    showAiAssistant: true,
   }
 );
 
@@ -582,6 +588,54 @@ const contentLoading = computed(
     !result.value
 );
 
+function editOk(
+  message: string,
+  data?: unknown
+): StudioEditToolResult {
+  return data === undefined ? { ok: true, message } : { ok: true, message, data };
+}
+
+function editFail(message: string): StudioEditToolResult {
+  return { ok: false, message };
+}
+
+function getEditSnapshot() {
+  const sel = selected.value;
+  return {
+    fileId: file.value?.id ?? null,
+    fileName: file.value?.name ?? null,
+    dirty: dirty.value,
+    canUndo: canUndo.value,
+    canRedo: canRedo.value,
+    selectedPath: sel?.path ?? null,
+    selectedKind: sel?.kind ?? null,
+    activeModelId: activeModelId.value,
+    sourceLength: draftContent.value.length,
+    panels: {
+      model: showModel.value,
+      source: showSource.value,
+      animTools: showAnimTools.value,
+      nodeParams: showNodeParams.value,
+    },
+  };
+}
+
+async function applyBridgeSource(
+  next: string,
+  message: string
+): Promise<StudioEditToolResult> {
+  if (!file.value) return editFail("no active file");
+  const normalized = normalizeXmlNewlines(next);
+  if (normalized === draftContent.value) return editOk("unchanged");
+  draftContent.value = normalized;
+  selected.value = null;
+  interactHost.value?.setHighlight(null);
+  await store.updateContent(file.value.id, normalized, true);
+  await nextTick();
+  treePanel.value?.syncAfterEdit("models", { select: "self" });
+  return editOk(message, { length: normalized.length });
+}
+
 onMounted(async () => {
   window.addEventListener("pointermove", onResizeMove);
   window.addEventListener("pointerup", stopResize);
@@ -592,6 +646,246 @@ onMounted(async () => {
   syncFromStore();
   await refreshDocumentAssetUrls();
   bootstrapping.value = false;
+
+  registerStudioEditBridge({
+    getSnapshot: getEditSnapshot,
+    getSource: (opts = {}) => {
+      const full = draftContent.value;
+      const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+      const maxChars = Math.max(1, Math.floor(opts.maxChars ?? 120_000));
+      const slice = full.slice(offset, offset + maxChars);
+      return {
+        content: slice,
+        truncated: offset + slice.length < full.length || offset > 0,
+        length: full.length,
+        offset,
+      };
+    },
+    setSource: (content) => applyBridgeSource(content, "source updated"),
+    replaceInSource: async ({ find, replace, all }) => {
+      const before = draftContent.value;
+      if (!before.includes(find)) return editFail("find string not found");
+      const parts = before.split(find);
+      const count = all ? parts.length - 1 : 1;
+      const next = all ? parts.join(replace) : before.replace(find, replace);
+      const result = await applyBridgeSource(next, "source replaced");
+      if (!result.ok) return result;
+      return editOk(result.message, {
+        ...(result.data as object),
+        replacements: count,
+      });
+    },
+    save: async () => {
+      if (!file.value) return editFail("no active file");
+      await onSave();
+      return editOk("saved", { id: file.value.id });
+    },
+    undo: async () => {
+      if (!canUndo.value) return editFail("nothing to undo");
+      await onUndo();
+      return editOk("undone", getEditSnapshot());
+    },
+    redo: async () => {
+      if (!canRedo.value) return editFail("nothing to redo");
+      await onRedo();
+      return editOk("redone", getEditSnapshot());
+    },
+    format: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onFormatMenu();
+      if (draftContent.value === before) return editOk("format unchanged");
+      return editOk("formatted", { length: draftContent.value.length });
+    },
+    optimize: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onOptimize();
+      if (draftContent.value === before) return editOk("optimize unchanged");
+      return editOk("optimized", { length: draftContent.value.length });
+    },
+    exportDocument: async () => {
+      if (!file.value) return editFail("no active file");
+      onDownload();
+      return editOk("exported svg3dx", { name: file.value.name });
+    },
+    exportPackage: async () => {
+      if (!file.value) return editFail("no active file");
+      await onDownloadPackage();
+      return editOk("exported package", {
+        name: packageDownloadName(file.value.name),
+      });
+    },
+    getSelection: () => {
+      const sel = selected.value;
+      if (!sel) return editOk("no selection", null);
+      return editOk("selection", {
+        kind: sel.kind,
+        path: sel.path,
+        ...(sel.kind === "geometry"
+          ? { className: sel.className }
+          : sel.kind === "model"
+            ? { modelId: sel.modelId }
+            : sel.kind === "material"
+              ? { materialId: sel.materialId }
+              : { name: sel.name, groupId: sel.groupId, scope: sel.scope }),
+      });
+    },
+    selectPath: async (path) => {
+      if (!path) {
+        selected.value = null;
+        interactHost.value?.setHighlight(null);
+        treePanel.value?.selectPath(null);
+        return editOk("cleared selection", null);
+      }
+      treePanel.value?.selectPath(path);
+      await nextTick();
+      const sel = selected.value;
+      if (!sel || sel.path !== path) {
+        interactHost.value?.setHighlight(path);
+      }
+      return editOk("selected", { path, kind: selected.value?.kind ?? null });
+    },
+    readNodeAttrs: (path) => {
+      const attrs = readAttrsAtPath(draftContent.value, path);
+      if (!attrs) return editFail(`path not found: ${path}`);
+      const kind = nodeKindAtPath(draftContent.value, path);
+      return editOk("attrs", { path, kind, attrs });
+    },
+    updateNodeAttrs: async (path, updates) => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onNodeAttrsChange({ path, updates });
+      if (draftContent.value === before) {
+        return editFail("attrs unchanged or path not found");
+      }
+      return editOk("attrs updated", {
+        path,
+        attrs: readAttrsAtPath(draftContent.value, path),
+      });
+    },
+    addGroup: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onAddGroup();
+      if (draftContent.value === before) return editFail("add group failed");
+      return editOk("group added");
+    },
+    addModel: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onAddModel();
+      if (draftContent.value === before) return editFail("add model failed");
+      return editOk("model added");
+    },
+    addMaterial: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onAddMaterial();
+      if (draftContent.value === before) return editFail("add material failed");
+      return editOk("material added");
+    },
+    addRootAnimate: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onAddRootAnimate();
+      if (draftContent.value === before) return editFail("add animate failed");
+      return editOk("root animate added");
+    },
+    addStyleCategory: async () => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      await onAddStyleCategory();
+      if (draftContent.value === before) {
+        return editFail("add style category failed");
+      }
+      return editOk("style category added");
+    },
+    addChild: async (opts) => {
+      if (!file.value) return editFail("no active file");
+      if (opts.kind === "gltf" && !opts.href?.trim()) {
+        return editFail("gltf add_child requires href");
+      }
+      const before = draftContent.value;
+      await onAddChild(opts);
+      if (draftContent.value === before) return editFail("add child failed");
+      return editOk("child added", opts);
+    },
+    addUse: async (opts) => {
+      if (!file.value) return editFail("no active file");
+      const modelId = opts.modelId || activeModelId.value;
+      if (!modelId) return editFail("no active model");
+      const before = draftContent.value;
+      await onAddUse({
+        modelId,
+        path: `model:${modelId}`,
+        href: opts.href,
+      });
+      if (draftContent.value === before) return editFail("add use failed");
+      return editOk("use added", { modelId, href: opts.href ?? "" });
+    },
+    insertAtPath: async (opts) => {
+      if (!file.value) return editFail("no active file");
+      if (opts.kind === "gltf" && !opts.href?.trim()) {
+        return editFail("gltf insert_at_path requires href");
+      }
+      const before = draftContent.value;
+      await onInsertChildAtPath(opts);
+      if (draftContent.value === before) return editFail("insert failed");
+      return editOk("inserted", opts);
+    },
+    deleteAtPath: async (path) => {
+      if (!file.value) return editFail("no active file");
+      const before = draftContent.value;
+      if (path.startsWith("style:")) {
+        const name = path.slice("style:".length).replace(/^\./, "");
+        await onDeleteStyleCategory({ path, name });
+      } else if (path.startsWith("model:") && !path.includes(".")) {
+        await onDeleteModel({
+          path,
+          modelId: path.slice("model:".length),
+        });
+      } else if (path.startsWith("material:")) {
+        const content = removeElementAtPath(draftContent.value, path);
+        if (!content || content === before) {
+          return editFail(`delete failed: ${path}`);
+        }
+        draftContent.value = content;
+        if (selected.value?.path === path) {
+          selected.value = null;
+          interactHost.value?.setHighlight(null);
+        }
+        await store.updateContent(file.value.id, content, true);
+        await nextTick();
+        treePanel.value?.syncAfterEdit("materials", { select: "self" });
+      } else {
+        const info = nodeKindAtPath(draftContent.value, path);
+        if (info?.kind === "group" && info.id) {
+          await onDeleteNode({ path, groupId: info.id });
+        } else {
+          await onDeleteUse({ path });
+        }
+      }
+      if (draftContent.value === before) {
+        return editFail(`delete failed: ${path}`);
+      }
+      return editOk("deleted", { path });
+    },
+    setPanel: (panel, visible) => {
+      if (panel === "model") setShowModel(visible);
+      else if (panel === "source") setShowSource(visible);
+      else if (panel === "animTools") setShowAnimTools(visible);
+      else setShowNodeParams(visible);
+      const snap = getEditSnapshot();
+      if (panel === "model" && snap.panels.model !== visible && !visible) {
+        return editFail("cannot hide model while source is hidden");
+      }
+      if (panel === "source" && snap.panels.source !== visible && !visible) {
+        return editFail("cannot hide source while model is hidden");
+      }
+      return editOk("panel updated", snap.panels);
+    },
+  });
 });
 
 // `props.id` is bound from the route (`props: true`); useDocumentAssets
@@ -832,11 +1126,13 @@ async function onAddChild(payload: {
   parentPath: string;
   parentGroupId: string;
   kind: AddChildKind;
+  /** When set (e.g. AI tools), skip the file picker for gltf. */
+  href?: string;
 }): Promise<void> {
   if (!file.value) return;
   let snippet: string | undefined;
   if (payload.kind === "gltf") {
-    const href = await pickAndAttachGltf();
+    const href = payload.href?.trim() || (await pickAndAttachGltf());
     if (!href) return;
     snippet = gltfSnippet(href);
   }
@@ -857,12 +1153,13 @@ async function onAddChild(payload: {
 async function onInsertChildAtPath(payload: {
   parentPath: string;
   kind: string;
+  href?: string;
 }): Promise<void> {
   if (!file.value) return;
   const parentKind = nodeKindAtPath(draftContent.value, payload.parentPath)?.kind;
   let snippet = snippetForPathInsert(payload.kind, parentKind);
   if (payload.kind === "gltf") {
-    const href = await pickAndAttachGltf();
+    const href = payload.href?.trim() || (await pickAndAttachGltf());
     if (!href) return;
     snippet = gltfSnippet(href);
   }
@@ -1405,6 +1702,7 @@ watch(midBoth, async () => {
 });
 
 onBeforeUnmount(() => {
+  registerStudioEditBridge(null);
   window.removeEventListener("pointermove", onResizeMove);
   window.removeEventListener("pointerup", stopResize);
   window.removeEventListener("pointercancel", stopResize);

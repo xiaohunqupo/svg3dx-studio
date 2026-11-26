@@ -55,9 +55,9 @@ export type InstallStudioOptions = {
   assets?: AssetRepository;
   navigation?: StudioNavigation;
   /**
-   * Built-in Copilot AI assistant chrome (header button + dock column).
-   * Default `true`. Set `false` when the host embeds Studio and supplies its own assistant.
-   * BrowsePage / EditPage `showAiAssistant` prop overrides this when set.
+   * Built-in Copilot AI (tools + chrome). **Default `true`.**
+   * Host kill-switch: set `false` when embedding with your own assistant.
+   * Pages default on; use `:show-ai-assistant="false"` to hide chrome on one page.
    */
   showAiAssistant?: boolean;
 };

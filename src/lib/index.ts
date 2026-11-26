@@ -5,10 +5,9 @@
  * ```ts
  * import { installStudio, BrowsePage, EditPage, AiChatPanel } from "svg3dx-studio";
  * import "svg3dx-studio/style.css";
- * // Hosts with their own AI: installStudio(app, { …, showAiAssistant: false })
  * installStudio(app, { documents, assets, navigation });
- * // When showAiAssistant is true, also mount <AiChatPanel /> at the app root
- * // and import "@copilotkit/vue/styles.css".
+ * // AI defaults on. Hosts with their own assistant: { showAiAssistant: false }
+ * // When enabled, mount <AiChatPanel /> at app root + import "@copilotkit/vue/styles.css".
  * ```
  */
 

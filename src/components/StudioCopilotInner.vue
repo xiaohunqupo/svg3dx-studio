@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { z } from "zod";
-import {
-  CopilotChat,
-  useAgentContext,
-  useFrontendTool,
-} from "@copilotkit/vue/v2";
-import { runStudioChatTool } from "@/chat/studioTools";
+import { CopilotChat, useAgentContext } from "@copilotkit/vue/v2";
+import { getStudioEditBridge } from "@/chat/editBridge";
+import { useStudioFrontendTools } from "@/chat/useStudioFrontendTools";
 import { useI18n } from "@/i18n";
 import { useFilesStore } from "@/stores/files";
 
@@ -31,47 +27,25 @@ const attachments = {
 };
 
 useAgentContext({
-  description: "svg3dx Studio page context (route, active file, file list)",
-  value: () => ({
-    locale: locale.value,
-    route: route.fullPath,
-    activeId: filesStore.activeId,
-    files: filesStore.files.map((f) => ({ id: f.id, name: f.name })),
-  }),
-});
-
-useFrontendTool({
-  name: "list_files",
-  description: "List cached svg3dx documents in the Studio file list",
-  handler: async () => {
-    const result = await runStudioChatTool({ name: "list_files" });
-    return JSON.stringify(result);
+  description:
+    "svg3dx Studio context: route, files, and live edit snapshot when editing",
+  value: () => {
+    const edit = getStudioEditBridge()?.getSnapshot() ?? null;
+    return {
+      locale: locale.value,
+      route: route.fullPath,
+      activeId: filesStore.activeId,
+      files: filesStore.files.map((f) => ({
+        id: f.id,
+        name: f.name,
+        dirty: !!f.dirty,
+      })),
+      edit,
+    };
   },
 });
 
-useFrontendTool({
-  name: "go_browse",
-  description: "Navigate to the Studio browse (file list) page",
-  handler: async () => {
-    const result = await runStudioChatTool({ name: "go_browse" });
-    return JSON.stringify(result);
-  },
-});
-
-useFrontendTool({
-  name: "go_edit",
-  description: "Open a document in the Studio editor by file id",
-  parameters: z.object({
-    id: z.string().describe("Document id from list_files"),
-  }),
-  handler: async ({ id }) => {
-    const result = await runStudioChatTool({
-      name: "go_edit",
-      args: { id },
-    });
-    return JSON.stringify(result);
-  },
-});
+useStudioFrontendTools();
 </script>
 
 <template>
