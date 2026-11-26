@@ -147,25 +147,31 @@ export async function runStudioChatTool(
     }
     case "get_edit_state": {
       const bridge = getStudioEditBridge();
+      const active = files.activeFile;
       if (!bridge) {
         return {
           ok: true,
           message: "browse",
           data: {
             page: "browse",
-            activeId: files.activeId,
-            files: files.files.map((f) => ({
-              id: f.id,
-              name: f.name,
-              dirty: !!f.dirty,
-            })),
+            activeFile: active
+              ? { id: active.id, name: active.name, dirty: !!active.dirty }
+              : null,
+            fileCount: files.files.length,
+            hint: "Call list_files only if the user needs the full library",
           },
         };
       }
       return {
         ok: true,
         message: "edit",
-        data: { page: "edit", ...bridge.getSnapshot() },
+        data: {
+          page: "edit",
+          activeFile: active
+            ? { id: active.id, name: active.name, dirty: !!active.dirty }
+            : null,
+          ...bridge.getSnapshot(),
+        },
       };
     }
     case "get_source":

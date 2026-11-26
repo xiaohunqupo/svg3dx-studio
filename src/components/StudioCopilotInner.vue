@@ -28,18 +28,19 @@ const attachments = {
 
 useAgentContext({
   description:
-    "svg3dx Studio context: route, files, and live edit snapshot when editing",
+    "Current Studio page and active document only (not the full file library)",
   value: () => {
     const edit = getStudioEditBridge()?.getSnapshot() ?? null;
+    const active = filesStore.activeFile;
     return {
       locale: locale.value,
       route: route.fullPath,
-      activeId: filesStore.activeId,
-      files: filesStore.files.map((f) => ({
-        id: f.id,
-        name: f.name,
-        dirty: !!f.dirty,
-      })),
+      page: edit ? "edit" : "browse",
+      activeFile: active
+        ? { id: active.id, name: active.name, dirty: !!active.dirty }
+        : null,
+      fileCount: filesStore.files.length,
+      // Live editor snapshot when on EditPage — edit this document, do not scan other files.
       edit,
     };
   },

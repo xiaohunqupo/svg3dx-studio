@@ -13,19 +13,22 @@ async function run(
 export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "list_files",
-    description: "List Studio documents (id, name, dirty)",
+    description:
+      "List all Studio documents. Use ONLY when the user asks which files exist or to find a file — not for editing the current document.",
     handler: async () => run("list_files"),
   });
 
   useFrontendTool({
     name: "go_browse",
-    description: "Navigate to the browse (file list) page",
+    description:
+      "Navigate to the browse page. Use only when the user asks to leave the editor / see the file list.",
     handler: async () => run("go_browse"),
   });
 
   useFrontendTool({
     name: "go_edit",
-    description: "Open a document in the editor by file id",
+    description:
+      "Open another document by id. Use only when the user asks to switch files — not needed if already editing.",
     parameters: z.object({
       id: z.string().describe("Document id from list_files"),
     }),
@@ -34,7 +37,7 @@ export function useStudioFrontendTools(): void {
 
   useFrontendTool({
     name: "rename_file",
-    description: "Rename a document in the file list",
+    description: "Rename a document in the file list (not a content edit)",
     parameters: z.object({
       id: z.string().describe("Document id"),
       name: z.string().describe("New file name (e.g. demo.svg3dx)"),
@@ -54,14 +57,14 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "get_edit_state",
     description:
-      "Get editor state: dirty, selection, panels, undo availability (or browse summary)",
+      "Current editor snapshot (selection, panels, undo). Prefer context.edit when present; do not use this to scan other files.",
     handler: async () => run("get_edit_state"),
   });
 
   useFrontendTool({
     name: "get_source",
     description:
-      "Read the current document XML source. Use maxChars/offset for large files.",
+      "Read the ACTIVE document XML only. Use maxChars/offset for large files. Do not list other files first.",
     parameters: z.object({
       maxChars: z.number().optional().describe("Max characters to return"),
       offset: z.number().optional().describe("Start offset in source"),
