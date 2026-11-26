@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import {
+  AddIcon,
   ClearIcon,
   DeleteIcon,
   Edit1Icon,
@@ -27,6 +28,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   select: [id: string];
   files: [FileList | File[]];
+  create: [];
   "fetch-samples": [];
   edit: [id: string];
 }>();
@@ -119,18 +121,31 @@ function onClearAll(): void {
         {{ t("browse.files") }}
         <t-tag size="small" variant="light">{{ files.length }}</t-tag>
       </span>
-      <t-tooltip :content="t('browse.clearCacheTooltip')">
-        <t-button
-          size="small"
-          variant="text"
-          theme="danger"
-          :disabled="!files.length"
-          @click="onClearAll"
-        >
-          <template #icon><ClearIcon /></template>
-          {{ t("browse.clearCache") }}
-        </t-button>
-      </t-tooltip>
+      <div class="panel-head-actions">
+        <t-tooltip :content="t('browse.createFileTooltip')">
+          <t-button
+            size="small"
+            variant="text"
+            theme="primary"
+            @click="emit('create')"
+          >
+            <template #icon><AddIcon /></template>
+            {{ t("browse.createFile") }}
+          </t-button>
+        </t-tooltip>
+        <t-tooltip :content="t('browse.clearCacheTooltip')">
+          <t-button
+            size="small"
+            variant="text"
+            theme="danger"
+            :disabled="!files.length"
+            @click="onClearAll"
+          >
+            <template #icon><ClearIcon /></template>
+            {{ t("browse.clearCache") }}
+          </t-button>
+        </t-tooltip>
+      </div>
     </div>
 
     <div class="add-row">
@@ -227,6 +242,13 @@ function onClearAll(): void {
   font-size: 13px;
   font-weight: 600;
   color: var(--td-text-color-primary);
+}
+
+.panel-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .add-row {

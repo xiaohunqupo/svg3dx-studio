@@ -246,6 +246,9 @@ export const messages: Record<Locale, MessageTree> = {
     browse: {
       editCurrent: "编辑当前文件",
       gltfNeedsDocument: "请先打开或选择一个 .svg3dx 文档，再挂接 .glb/.gltf",
+      createFile: "创建",
+      createFileTooltip: "用 box 模板新建空文档",
+      fileCreated: "已创建 {name}",
       fetchSamples: "获取官方示例",
       fetchingSamples: "正在获取…",
       fetchingSamplesStatus: "正在获取官方示例…",
@@ -496,6 +499,9 @@ export const messages: Record<Locale, MessageTree> = {
     },
     browse: {
       editCurrent: "Edit current",
+      createFile: "New",
+      createFileTooltip: "Create a blank document from the box template",
+      fileCreated: "Created {name}",
       fetchSamples: "Get official samples",
       fetchingSamples: "Fetching…",
       fetchingSamplesStatus: "Fetching official samples…",

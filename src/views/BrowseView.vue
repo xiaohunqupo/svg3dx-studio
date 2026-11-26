@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { FolderOpenIcon } from "tdesign-icons-vue-next";
+import { AddIcon, FolderOpenIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
@@ -21,6 +21,10 @@ import {
   isGltfFileName,
   putDocumentAsset,
 } from "@/utils/documentAssets";
+import {
+  EMPTY_DOCUMENT_TEMPLATE,
+  nextUntitledName,
+} from "@/utils/emptyDocument";
 import {
   fetchOfficialSamples,
   preferredSampleName,
@@ -231,6 +235,17 @@ async function onFiles(list: FileList | File[]): Promise<void> {
   }
 }
 
+async function createEmptyFile(): Promise<void> {
+  try {
+    const name = nextUntitledName(store.files.map((f) => f.name));
+    await store.upsertFromText(name, EMPTY_DOCUMENT_TEMPLATE);
+    await refreshPreviewAssets();
+    MessagePlugin.success(t("browse.fileCreated", { name }));
+  } catch (e) {
+    MessagePlugin.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function loadSample(): Promise<void> {
   if (loadingSamples.value) return;
   loadingSamples.value = true;
@@ -304,8 +319,13 @@ function onMainDrop(e: DragEvent): void {
         <div v-else-if="showEmpty" class="empty-stage">
           <slot name="empty">
             <FileDropZone @files="onFiles" />
-            <div v-if="showOfficialSamples" class="empty-extra">
+            <div class="empty-extra">
+              <t-button theme="primary" variant="outline" @click="createEmptyFile">
+                <template #icon><AddIcon /></template>
+                {{ t("browse.createFile") }}
+              </t-button>
               <t-link
+                v-if="showOfficialSamples"
                 theme="primary"
                 :disabled="loadingSamples"
                 @click="loadSample"
@@ -341,6 +361,7 @@ function onMainDrop(e: DragEvent): void {
               :show-official-samples="showOfficialSamples"
               @select="store.select"
               @files="onFiles"
+              @create="createEmptyFile"
               @fetch-samples="loadSample"
             />
           </slot>
@@ -474,6 +495,10 @@ function onMainDrop(e: DragEvent): void {
 }
 
 .empty-extra {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   font-size: 13px;
 }
 
