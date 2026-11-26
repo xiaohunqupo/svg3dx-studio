@@ -1008,6 +1008,10 @@ function onSelect(payload: TreeSelectPayload | null): void {
   interactHost.value?.setHighlight(payload?.path ?? null);
 }
 
+function onAnimTrackSelect(path: string): void {
+  treePanel.value?.selectPath(path);
+}
+
 function openSectionProfileEditor(path: string): void {
   const xml = readSectionElementXml(draftContent.value, path);
   if (!xml || !isSectionEditable(draftContent.value, path)) {
@@ -1549,7 +1553,11 @@ onBeforeUnmount(() => {
           v-if="showAnimTools"
           class="anim-dock"
           :get-viewer="getAnimViewer"
+          :content="draftContent"
+          :selected-path="selected?.path ?? null"
           @hide="setShowAnimTools(false)"
+          @select-path="onAnimTrackSelect"
+          @node-attrs-change="onNodeAttrsChange"
         />
       </div>
 
