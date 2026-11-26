@@ -4,6 +4,7 @@ import { MoreIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin, type DropdownOption } from "tdesign-vue-next";
 import { clearGltfCache, type EvaluationResult } from "svg3dx-viewer";
 import AppMenus from "@/components/AppMenus.vue";
+import AiChatHeaderButton from "@/components/AiChatHeaderButton.vue";
 import ReposMenu from "@/components/ReposMenu.vue";
 import SettingsMenu from "@/components/SettingsMenu.vue";
 import NodeInspectorPanel from "@/components/NodeInspectorPanel.vue";
@@ -22,6 +23,7 @@ import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import type { DrillCrumb, InteractViewport } from "@/interact";
 import type { EmbedViewer } from "svg3dx-viewer";
 import { useI18n } from "@/i18n";
+import { useChatStore } from "@/stores/chat";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
 import { downloadBlob, downloadText } from "@/utils/storage";
@@ -83,6 +85,7 @@ const props = withDefaults(
 );
 
 const store = useFilesStore();
+const chatStore = useChatStore();
 const nav = useStudioNavigation();
 const { t } = useI18n();
 
@@ -253,9 +256,10 @@ const sourceWidth = ref(
 const sourceHeight = ref(
   readStoredWidth(SOURCE_H_KEY, SOURCE_H_DEFAULT, SOURCE_H_MIN, 800)
 );
-const resizing = ref<"tree" | "inspector" | "inspector-row" | "source" | null>(
-  null
-);
+const resizing = ref<
+  "tree" | "inspector" | "inspector-row" | "source" | "ai" | null
+>(null);
+const aiMountEl = ref<HTMLElement | null>(null);
 const midEl = ref<HTMLElement | null>(null);
 const leftRailEl = ref<HTMLElement | null>(null);
 const inspectorMountLeft = ref<HTMLElement | null>(null);
@@ -372,6 +376,24 @@ const workspaceStyle = computed(() => {
   }
   return { gridTemplateColumns: cols.join(" ") };
 });
+
+/** Match Browse: AI column sits under the topbar, not full-page height. */
+const editBodyStyle = computed(() => {
+  if (!chatStore.open) return undefined;
+  return {
+    gridTemplateColumns: `minmax(0, 1fr) 0px ${chatStore.width}px`,
+  };
+});
+
+const editBodyEl = ref<HTMLElement | null>(null);
+
+watch(
+  [aiMountEl, () => chatStore.open],
+  ([el, open]) => {
+    chatStore.setMountEl(open && el ? el : null);
+  },
+  { flush: "post" }
+);
 
 const midBoth = computed(() => showSource.value && showModel.value);
 
@@ -1327,6 +1349,10 @@ function onResizeMove(ev: PointerEvent): void {
       maxH,
       Math.max(INSPECTOR_H_MIN, nextH)
     );
+  } else if (side === "ai") {
+    const body = editBodyEl.value?.getBoundingClientRect();
+    if (!body) return;
+    chatStore.setWidth(body.right - ev.clientX);
   } else {
     inspectorWidth.value = Math.min(
       INSPECTOR_W_MAX,
@@ -1336,7 +1362,7 @@ function onResizeMove(ev: PointerEvent): void {
 }
 
 function startResize(
-  side: "tree" | "inspector" | "inspector-row" | "source",
+  side: "tree" | "inspector" | "inspector-row" | "source" | "ai",
   ev: PointerEvent
 ): void {
   ev.preventDefault();
@@ -1376,14 +1402,13 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointercancel", stopResize);
   window.removeEventListener("keydown", onEditKeydown);
   stopResize();
+  chatStore.setMountEl(null);
   clearGltfCache();
 });
 </script>
 
 <template>
-  <EditPageSkeleton v-if="!pageReady" />
-
-  <div v-else-if="file" class="edit-page">
+  <div class="edit-page">
     <header class="topbar">
       <slot name="topbar-start">
         <div class="brand">
@@ -1392,6 +1417,7 @@ onBeforeUnmount(() => {
         </div>
       </slot>
       <AppMenus
+        v-if="pageReady && file"
         :show-model="showModel"
         :show-source="showSource"
         :show-anim-tools="showAnimTools"
@@ -1414,6 +1440,7 @@ onBeforeUnmount(() => {
       <slot name="toolbar-extra" />
       <div class="right">
         <slot name="topbar-end">
+          <AiChatHeaderButton />
           <ReposMenu v-if="showReposMenu" />
           <SettingsMenu v-if="showSettingsMenu" />
         </slot>
@@ -1421,11 +1448,21 @@ onBeforeUnmount(() => {
     </header>
 
     <div
-      ref="workspaceEl"
-      class="workspace"
-      :class="{ resizing: !!resizing }"
-      :style="workspaceStyle"
+      ref="editBodyEl"
+      class="edit-body"
+      :class="{ resizing: resizing === 'ai' }"
+      :style="editBodyStyle"
     >
+      <div class="edit-main">
+        <EditPageSkeleton v-if="!pageReady" :show-topbar="false" />
+
+        <template v-else-if="file">
+          <div
+            ref="workspaceEl"
+            class="workspace"
+            :class="{ resizing: !!resizing && resizing !== 'ai' }"
+            :style="workspaceStyle"
+          >
       <div
         ref="leftRailEl"
         class="left-rail"
@@ -1572,68 +1609,83 @@ onBeforeUnmount(() => {
         />
         <div ref="inspectorMountRight" class="inspector-mount inspector-mount--right" />
       </template>
-    </div>
+        </div>
 
-    <Teleport v-if="inspectorMountEl" :to="inspectorMountEl">
-      <aside
-        class="inspector"
-        :class="{
-          'inspector--left': inspectorOnLeft,
-          'inspector--left-top': inspectorOnLeft && inspectorAboveTree,
-        }"
-      >
-        <slot name="inspector">
-          <div class="panel-head">
-            <span class="panel-head-title">
-              {{
-                selected?.kind === "style"
-                  ? t("app.styleParams")
-                  : t("app.nodeParams")
-              }}
-            </span>
-            <t-dropdown
-              :options="nodeParamsMoreOptions"
-              :max-column-width="200"
-              :min-column-width="140"
-              trigger="click"
-              placement="bottom-right"
-              @click="onNodeParamsMoreClick"
-            >
-              <t-button
-                class="panel-more"
-                theme="default"
-                shape="square"
-                variant="text"
-                size="small"
-                :title="t('app.moreActions')"
-                :aria-label="t('app.moreActions')"
-              >
-                <template #icon><MoreIcon /></template>
-              </t-button>
-            </t-dropdown>
-          </div>
-          <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
-          <NodeInspectorPanel
-            v-else
-            ref="inspectorPanel"
-            :selected="selected"
-            :content="draftContent"
-            @style-params-change="onStyleParamsChange"
-            @style-category-rename="onStyleCategoryRename"
-            @node-attrs-change="onNodeAttrsChange"
-            @edit-section="onEditSection"
-            @pick-gltf-href="onPickGltfHref"
-            @arm-point-pick="onArmPointPick"
+        <Teleport v-if="inspectorMountEl" :to="inspectorMountEl">
+          <aside
+            class="inspector"
+            :class="{
+              'inspector--left': inspectorOnLeft,
+              'inspector--left-top': inspectorOnLeft && inspectorAboveTree,
+            }"
+          >
+            <slot name="inspector">
+              <div class="panel-head">
+                <span class="panel-head-title">
+                  {{
+                    selected?.kind === "style"
+                      ? t("app.styleParams")
+                      : t("app.nodeParams")
+                  }}
+                </span>
+                <t-dropdown
+                  :options="nodeParamsMoreOptions"
+                  :max-column-width="200"
+                  :min-column-width="140"
+                  trigger="click"
+                  placement="bottom-right"
+                  @click="onNodeParamsMoreClick"
+                >
+                  <t-button
+                    class="panel-more"
+                    theme="default"
+                    shape="square"
+                    variant="text"
+                    size="small"
+                    :title="t('app.moreActions')"
+                    :aria-label="t('app.moreActions')"
+                  >
+                    <template #icon><MoreIcon /></template>
+                  </t-button>
+                </t-dropdown>
+              </div>
+              <PanelSkeleton v-if="contentLoading && !selected" :rows="5" />
+              <NodeInspectorPanel
+                v-else
+                ref="inspectorPanel"
+                :selected="selected"
+                :content="draftContent"
+                @style-params-change="onStyleParamsChange"
+                @style-category-rename="onStyleCategoryRename"
+                @node-attrs-change="onNodeAttrsChange"
+                @edit-section="onEditSection"
+                @pick-gltf-href="onPickGltfHref"
+                @arm-point-pick="onArmPointPick"
+              />
+            </slot>
+          </aside>
+        </Teleport>
+
+          <SectionProfileEditorDialog
+            v-model:visible="sectionEditorOpen"
+            :section-xml="sectionEditorXml"
+            @confirm="onSectionProfileConfirm"
           />
-        </slot>
-      </aside>
-    </Teleport>
+        </template>
+      </div>
 
-    <SectionProfileEditorDialog
-      v-model:visible="sectionEditorOpen"
-      :section-xml="sectionEditorXml"
-      @confirm="onSectionProfileConfirm"
-    />
+      <template v-if="chatStore.open">
+        <div
+          class="resize-handle resize-handle--ai"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-valuenow="chatStore.width"
+          :title="t('app.resizePanel')"
+          @pointerdown="(e) => startResize('ai', e)"
+        />
+        <div ref="aiMountEl" class="ai-mount" />
+      </template>
+    </div>
   </div>
 </template>
 
@@ -1643,6 +1695,27 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.edit-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.edit-body.resizing {
+  cursor: col-resize;
+}
+
+.edit-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .topbar {
@@ -1872,6 +1945,19 @@ onBeforeUnmount(() => {
 
 .inspector-mount--right {
   height: 100%;
+}
+
+.ai-mount {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.edit-body.resizing .resize-handle--ai::after {
+  background: var(--td-brand-color-light);
 }
 
 .inspector {

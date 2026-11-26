@@ -7,6 +7,9 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AiChatHeaderButton: typeof import('./components/AiChatHeaderButton.vue')['default']
+    AiChatPanel: typeof import('./components/AiChatPanel.vue')['default']
+    AiChatSidebarChrome: typeof import('./components/AiChatSidebarChrome.vue')['default']
     AnimationTimelineBar: typeof import('./components/AnimationTimelineBar.vue')['default']
     AppMenus: typeof import('./components/AppMenus.vue')['default']
     BlendAttrSelect: typeof import('./components/BlendAttrSelect.vue')['default']
@@ -31,6 +34,7 @@ declare module 'vue' {
     ShapeSvgEditorDialog: typeof import('./components/ShapeSvgEditorDialog.vue')['default']
     SourceEditorPanel: typeof import('./components/SourceEditorPanel.vue')['default']
     SourceSkeleton: typeof import('./components/skeletons/SourceSkeleton.vue')['default']
+    StudioCopilotInner: typeof import('./components/StudioCopilotInner.vue')['default']
     StyleParamEditor: typeof import('./components/StyleParamEditor.vue')['default']
     TButton: typeof import('tdesign-vue-next')['Button']
     TCheckbox: typeof import('tdesign-vue-next')['Checkbox']
@@ -41,6 +45,8 @@ declare module 'vue' {
     TDialog: typeof import('tdesign-vue-next')['Dialog']
     TDropdown: typeof import('tdesign-vue-next')['Dropdown']
     TEmpty: typeof import('tdesign-vue-next')['Empty']
+    TForm: typeof import('tdesign-vue-next')['Form']
+    TFormItem: typeof import('tdesign-vue-next')['FormItem']
     THeadMenu: typeof import('tdesign-vue-next')['HeadMenu']
     TInput: typeof import('tdesign-vue-next')['Input']
     TLink: typeof import('tdesign-vue-next')['Link']

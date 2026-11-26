@@ -4,6 +4,7 @@ import { FolderOpenIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
 import FileDropZone from "@/components/FileDropZone.vue";
 import FileListPanel from "@/components/FileListPanel.vue";
+import AiChatHeaderButton from "@/components/AiChatHeaderButton.vue";
 import ReposMenu from "@/components/ReposMenu.vue";
 import SettingsMenu from "@/components/SettingsMenu.vue";
 import BrowsePageSkeleton from "@/components/skeletons/BrowsePageSkeleton.vue";
@@ -11,6 +12,7 @@ import ViewportSkeleton from "@/components/skeletons/ViewportSkeleton.vue";
 import ViewerHost from "@/components/ViewerHost.vue";
 import { useDocumentAssets } from "@/composables/useDocumentAssets";
 import { useI18n } from "@/i18n";
+import { useChatStore } from "@/stores/chat";
 import { useFilesStore } from "@/stores/files";
 import {
   defaultAssetHref,
@@ -60,6 +62,7 @@ function readStoredWidth(
 }
 
 const store = useFilesStore();
+const chatStore = useChatStore();
 const { t } = useI18n();
 const dragOverMain = ref(false);
 const previewReady = ref(false);
@@ -67,8 +70,10 @@ const loadingSamples = ref(false);
 const sidebarWidth = ref(
   readStoredWidth(SIDEBAR_W_KEY, SIDEBAR_W_DEFAULT, SIDEBAR_W_MIN, SIDEBAR_W_MAX)
 );
-const resizing = ref(false);
+const resizing = ref<"files" | "ai" | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
+const browseBodyEl = ref<HTMLElement | null>(null);
+const aiMountEl = ref<HTMLElement | null>(null);
 
 const showEmpty = computed(() => store.ready && store.isEmpty);
 const activeContent = computed(() => store.activeFile?.content ?? "");
@@ -87,6 +92,13 @@ const workspaceStyle = computed(() => ({
   gridTemplateColumns: `${sidebarWidth.value}px 0px minmax(0, 1fr)`,
 }));
 
+const browseBodyStyle = computed(() => {
+  if (!chatStore.open) return undefined;
+  return {
+    gridTemplateColumns: `minmax(0, 1fr) 0px ${chatStore.width}px`,
+  };
+});
+
 function persistSidebarWidth(): void {
   try {
     localStorage.setItem(SIDEBAR_W_KEY, String(sidebarWidth.value));
@@ -96,7 +108,14 @@ function persistSidebarWidth(): void {
 }
 
 function onResizeMove(ev: PointerEvent): void {
-  if (!resizing.value || !workspaceEl.value) return;
+  if (!resizing.value) return;
+  if (resizing.value === "ai") {
+    const rect = browseBodyEl.value?.getBoundingClientRect();
+    if (!rect) return;
+    chatStore.setWidth(rect.right - ev.clientX);
+    return;
+  }
+  if (!workspaceEl.value) return;
   const rect = workspaceEl.value.getBoundingClientRect();
   sidebarWidth.value = Math.min(
     SIDEBAR_W_MAX,
@@ -106,18 +125,34 @@ function onResizeMove(ev: PointerEvent): void {
 
 function stopResize(): void {
   if (!resizing.value) return;
-  resizing.value = false;
+  const wasFiles = resizing.value === "files";
+  resizing.value = null;
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
-  persistSidebarWidth();
+  if (wasFiles) persistSidebarWidth();
 }
 
 function startResize(ev: PointerEvent): void {
   ev.preventDefault();
-  resizing.value = true;
+  resizing.value = "files";
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
 }
+
+function startAiResize(ev: PointerEvent): void {
+  ev.preventDefault();
+  resizing.value = "ai";
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+}
+
+watch(
+  [aiMountEl, () => chatStore.open],
+  ([el, open]) => {
+    chatStore.setMountEl(open && el ? el : null);
+  },
+  { flush: "post" }
+);
 
 onMounted(async () => {
   window.addEventListener("pointermove", onResizeMove);
@@ -132,6 +167,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerup", stopResize);
   window.removeEventListener("pointercancel", stopResize);
   stopResize();
+  chatStore.setMountEl(null);
   clearGltfCache();
 });
 
@@ -240,83 +276,105 @@ function onMainDrop(e: DragEvent): void {
       </slot>
       <div class="right">
         <slot name="topbar-end">
+          <AiChatHeaderButton />
           <ReposMenu v-if="showReposMenu" />
           <SettingsMenu v-if="showSettingsMenu" />
         </slot>
       </div>
     </header>
 
-    <BrowsePageSkeleton v-if="!store.ready" />
-
-    <div v-else-if="showEmpty" class="empty-stage">
-      <slot name="empty">
-        <FileDropZone @files="onFiles" />
-        <div v-if="showOfficialSamples" class="empty-extra">
-          <t-link
-            theme="primary"
-            :disabled="loadingSamples"
-            @click="loadSample"
-          >
-            <template #prefix-icon><FolderOpenIcon /></template>
-            {{
-              loadingSamples
-                ? t("browse.fetchingSamples")
-                : t("browse.fetchSamples")
-            }}
-          </t-link>
-        </div>
-      </slot>
-    </div>
-
     <div
-      v-else
-      ref="workspaceEl"
-      class="workspace"
-      :class="{ 'drag-over': dragOverMain, resizing }"
-      :style="workspaceStyle"
-      @dragenter.prevent="dragOverMain = true"
-      @dragover.prevent="dragOverMain = true"
-      @dragleave.prevent="dragOverMain = false"
-      @drop.prevent="onMainDrop"
+      ref="browseBodyEl"
+      class="browse-body"
+      :class="{ resizing: !!resizing }"
+      :style="browseBodyStyle"
     >
-      <slot name="sidebar">
-        <FileListPanel
-          class="sidebar"
-          :files="store.files"
-          :active-id="store.activeId"
-          :loading-samples="loadingSamples"
-          :show-official-samples="showOfficialSamples"
-          @select="store.select"
-          @files="onFiles"
-          @fetch-samples="loadSample"
-        />
-      </slot>
-      <div
-        class="resize-handle"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-valuenow="sidebarWidth"
-        :title="t('app.resizePanel')"
-        @pointerdown="startResize"
-      />
-      <main class="viewport">
-        <slot name="viewport-chrome">
-          <div v-if="dragOverMain" class="drop-mask">{{ t("browse.dropToAdd") }}</div>
-          <ViewportSkeleton v-if="showPreviewSkeleton" />
-          <ViewerHost
-            v-if="activeContent"
-            :key="store.activeId ?? 'preview'"
-            :content="activeContent"
-            :document-base-url="activeDocumentBaseUrl"
-            :document-asset-urls="previewAssetUrls"
-            @error="(m) => MessagePlugin.error(m)"
-            @result="previewReady = true"
+      <div class="browse-main">
+        <BrowsePageSkeleton v-if="!store.ready" />
+
+        <div v-else-if="showEmpty" class="empty-stage">
+          <slot name="empty">
+            <FileDropZone @files="onFiles" />
+            <div v-if="showOfficialSamples" class="empty-extra">
+              <t-link
+                theme="primary"
+                :disabled="loadingSamples"
+                @click="loadSample"
+              >
+                <template #prefix-icon><FolderOpenIcon /></template>
+                {{
+                  loadingSamples
+                    ? t("browse.fetchingSamples")
+                    : t("browse.fetchSamples")
+                }}
+              </t-link>
+            </div>
+          </slot>
+        </div>
+
+        <div
+          v-else
+          ref="workspaceEl"
+          class="workspace"
+          :class="{ 'drag-over': dragOverMain, resizing: resizing === 'files' }"
+          :style="workspaceStyle"
+          @dragenter.prevent="dragOverMain = true"
+          @dragover.prevent="dragOverMain = true"
+          @dragleave.prevent="dragOverMain = false"
+          @drop.prevent="onMainDrop"
+        >
+          <slot name="sidebar">
+            <FileListPanel
+              class="sidebar"
+              :files="store.files"
+              :active-id="store.activeId"
+              :loading-samples="loadingSamples"
+              :show-official-samples="showOfficialSamples"
+              @select="store.select"
+              @files="onFiles"
+              @fetch-samples="loadSample"
+            />
+          </slot>
+          <div
+            class="resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            :aria-valuenow="sidebarWidth"
+            :title="t('app.resizePanel')"
+            @pointerdown="startResize"
           />
-          <div v-else class="viewport-empty">
-            <t-empty :title="t('browse.selectToPreview')" />
-          </div>
-        </slot>
-      </main>
+          <main class="viewport">
+            <slot name="viewport-chrome">
+              <div v-if="dragOverMain" class="drop-mask">{{ t("browse.dropToAdd") }}</div>
+              <ViewportSkeleton v-if="showPreviewSkeleton" />
+              <ViewerHost
+                v-if="activeContent"
+                :key="store.activeId ?? 'preview'"
+                :content="activeContent"
+                :document-base-url="activeDocumentBaseUrl"
+                :document-asset-urls="previewAssetUrls"
+                @error="(m) => MessagePlugin.error(m)"
+                @result="previewReady = true"
+              />
+              <div v-else class="viewport-empty">
+                <t-empty :title="t('browse.selectToPreview')" />
+              </div>
+            </slot>
+          </main>
+        </div>
+      </div>
+
+      <template v-if="chatStore.open">
+        <div
+          class="resize-handle resize-handle--ai"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-valuenow="chatStore.width"
+          :title="t('app.resizePanel')"
+          @pointerdown="startAiResize"
+        />
+        <div ref="aiMountEl" class="ai-mount" />
+      </template>
     </div>
   </div>
 </template>
@@ -327,6 +385,36 @@ function onMainDrop(e: DragEvent): void {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.browse-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browse-body.resizing {
+  cursor: col-resize;
+}
+
+.browse-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-mount {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .topbar {
@@ -418,7 +506,8 @@ function onMainDrop(e: DragEvent): void {
 }
 
 .resize-handle:hover::after,
-.workspace.resizing .resize-handle::after {
+.workspace.resizing .resize-handle::after,
+.browse-body.resizing .resize-handle::after {
   background: var(--td-brand-color-light);
 }
 

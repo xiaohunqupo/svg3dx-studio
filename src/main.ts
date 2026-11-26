@@ -2,6 +2,7 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import TDesign from "tdesign-vue-next";
 import "tdesign-vue-next/es/style/index.css";
+import "@copilotkit/vue/styles.css";
 import App from "./App.vue";
 import { installStudio } from "./lib/installStudio";
 import { router } from "./router";

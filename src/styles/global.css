@@ -43,3 +43,38 @@ button {
 a {
   color: inherit;
 }
+
+/*
+ * CopilotKit v2 chat tokens → TDesign (same palette as Studio shell).
+ * Dark/light switch via html.dark (see theme/applyScheme) + theme-mode tokens.
+ */
+[data-copilotkit],
+.dark [data-copilotkit],
+[data-copilotkit].dark {
+  --background: var(--td-bg-color-container);
+  --foreground: var(--td-text-color-primary);
+  --card: var(--td-bg-color-container);
+  --card-foreground: var(--td-text-color-primary);
+  --popover: var(--td-bg-color-container);
+  --popover-foreground: var(--td-text-color-primary);
+  --primary: var(--td-brand-color);
+  --primary-foreground: var(--td-text-color-anti);
+  --secondary: var(--td-bg-color-secondarycontainer);
+  --secondary-foreground: var(--td-text-color-primary);
+  --muted: var(--td-bg-color-secondarycontainer);
+  --muted-foreground: var(--td-text-color-secondary);
+  --accent: var(--td-bg-color-container-hover);
+  --accent-foreground: var(--td-text-color-primary);
+  --destructive: var(--td-error-color);
+  --border: var(--td-component-border);
+  --input: var(--td-component-border);
+  --ring: var(--td-brand-color);
+  --sidebar: var(--td-bg-color-container);
+  --sidebar-foreground: var(--td-text-color-primary);
+  --sidebar-border: var(--td-component-border);
+  --sidebar-accent: var(--td-bg-color-secondarycontainer);
+  --sidebar-accent-foreground: var(--td-text-color-primary);
+  --sidebar-primary: var(--td-brand-color);
+  --sidebar-primary-foreground: var(--td-text-color-anti);
+  --sidebar-ring: var(--td-brand-color);
+}

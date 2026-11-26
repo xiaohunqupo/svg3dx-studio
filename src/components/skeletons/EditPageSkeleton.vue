@@ -1,6 +1,16 @@
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    /** When false, only the workspace chrome is sketched (parent owns the topbar). */
+    showTopbar?: boolean;
+  }>(),
+  { showTopbar: true }
+);
+</script>
+
 <template>
   <div class="edit-skeleton" aria-busy="true" aria-live="polite">
-    <header class="topbar">
+    <header v-if="showTopbar" class="topbar">
       <div class="brand">
         <t-skeleton animation="gradient" :row-col="[{ width: '22px', height: '22px' }]" />
         <t-skeleton animation="gradient" :row-col="[{ width: '100px', height: '14px' }]" />

@@ -4,3 +4,7 @@ dist-lib/
 *.log
 .DS_Store
 .cursor/
+.env
+.env.local
+.env.*.local
+.studio-llm.json

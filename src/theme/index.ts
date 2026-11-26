@@ -36,6 +36,8 @@ function applyScheme(scheme: ColorScheme): void {
   root.setAttribute("data-theme", scheme);
   root.setAttribute("theme-mode", scheme);
   root.style.colorScheme = scheme;
+  // CopilotKit v2 (and Tailwind `dark:`) key off a `.dark` ancestor.
+  root.classList.toggle("dark", scheme === "dark");
 }
 
 export const colorScheme = ref<ColorScheme>(resolveScheme());

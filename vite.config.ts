@@ -81,6 +81,7 @@ export default defineConfig({
           res.setHeader("Content-Type", type);
           fs.createReadStream(filePath).pipe(res);
         });
+
       },
     },
   ],
@@ -93,6 +94,17 @@ export default defineConfig({
   },
   server: {
     fs: { allow: [studioRoot, viewerRoot, coreRoot, svg3dxRoot] },
+    // CopilotKit Runtime (`npm run copilot`) — chat + LLM settings API.
+    proxy: {
+      "/api/copilotkit": {
+        target: "http://127.0.0.1:8200",
+        changeOrigin: true,
+      },
+      "/api/studio-llm-config": {
+        target: "http://127.0.0.1:8200",
+        changeOrigin: true,
+      },
+    },
   },
   build: { target: "esnext" },
   optimizeDeps: {
