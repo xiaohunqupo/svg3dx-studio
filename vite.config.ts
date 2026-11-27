@@ -29,9 +29,27 @@ function resolveSamplePath(): string | null {
 // Local / custom hosts: leave unset (defaults to "/").
 const base = process.env.VITE_BASE || "/";
 
+/** Published viewer emits `dist/createViewer.js` importing `./vendor/ViewHelper.js`, which tsc does not copy. The file ships in `src/vendor`. */
+function resolveViewerViewHelper() {
+  return {
+    name: "svg3dx-viewer-view-helper",
+    resolveId(source: string, importer?: string) {
+      if (source !== "./vendor/ViewHelper.js" || !importer) return null;
+      const normalized = importer.replaceAll("\\", "/");
+      if (!normalized.includes("/svg3dx-viewer/dist/")) return null;
+      const file = path.resolve(
+        path.dirname(importer),
+        "../src/vendor/ViewHelper.js"
+      );
+      return fs.existsSync(file) ? file : null;
+    },
+  };
+}
+
 export default defineConfig({
   base,
   plugins: [
+    resolveViewerViewHelper(),
     vue(),
     wasm(),
     AutoImport({
