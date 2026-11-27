@@ -299,6 +299,8 @@ function seedDraft(fields: FieldRow[], path: string): void {
   Object.assign(transformParts, emptyTransformParts());
   Object.assign(transformTrs, emptyTransformTrs());
   for (const f of fields) {
+    // Display-only rows can share a name with a real XML attribute (e.g. type).
+    if (f.readonly) continue;
     if (f.name === "material") {
       draft[f.name] = normalizeMaterialAttr(f.value, docIds);
     } else if (f.name === "s3dx:transform") {
@@ -780,14 +782,13 @@ watch(
   { immediate: true }
 );
 
-function commitField(name: string): void {
+function commitField(_name: string): void {
   const view = geometryView.value;
   if (!view || draftPath !== view.path) return;
-  if (name === "type") return;
   const updates: Record<string, string> = {};
   let changed = false;
   for (const f of view.allFields) {
-    if (f.readonly || f.name === "type") continue;
+    if (f.readonly) continue;
     // Hidden form-dependent fields are not written; cleared below when form applies.
     if (!isFieldVisible(f) && f.visibleWhen?.name === "form") {
       continue;
@@ -2053,7 +2054,7 @@ defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
                   v-if="row.field.readonly"
                   class="value"
                   :title="row.field.valueTitle || undefined"
-                  >{{ draft[row.field.name] ?? row.field.value }}</span
+                  >{{ row.field.value }}</span
                 >
                 <div v-else class="value-cell">
                   <div

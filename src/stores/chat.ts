@@ -10,6 +10,8 @@ export type StudioChatLlmSettings = {
 const OPEN_KEY = "svg3dx-studio-chat-open";
 const LLM_KEY = "svg3dx-studio-chat-llm";
 const WIDTH_KEY = "svg3dx-studio-chat-width";
+const THREAD_KEY = "svg3dx-studio-chat-thread";
+const USER_KEY = "svg3dx-studio-chat-user";
 
 const AI_W_MIN = 280;
 const AI_W_MAX = 560;
@@ -39,6 +41,30 @@ function readOpen(): boolean {
   }
 }
 
+function readThreadId(): string {
+  try {
+    return localStorage.getItem(THREAD_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Stable anonymous id so a remote Runtime can isolate this browser's threads. */
+function readOrCreateUserId(): string {
+  try {
+    const existing = localStorage.getItem(USER_KEY)?.trim();
+    if (existing) return existing;
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(USER_KEY, id);
+    return id;
+  } catch {
+    return `ephemeral-${Date.now().toString(36)}`;
+  }
+}
+
 function readLlm(): StudioChatLlmSettings {
   try {
     const raw = localStorage.getItem(LLM_KEY);
@@ -64,6 +90,10 @@ export const useChatStore = defineStore("chat", () => {
   const width = ref(readWidth());
   /** CopilotKit Inspector overlay; off by default, opened from Settings. */
   const inspectorEnabled = ref(false);
+  /** Last thread that actually has a run, so a reload can resume it. */
+  const savedThreadId = ref(readThreadId());
+  /** Anonymous browser id for Runtime `identifyUser` (not a login). */
+  const userId = ref(readOrCreateUserId());
   /** Layout mount provided by Browse/Edit workspace (rightmost column). */
   const mountEl = shallowRef<HTMLElement | null>(null);
 
@@ -139,12 +169,35 @@ export const useChatStore = defineStore("chat", () => {
     inspectorEnabled.value = true;
   }
 
+  function rememberThread(id: string): void {
+    const next = id.trim();
+    if (!next || next === savedThreadId.value) return;
+    savedThreadId.value = next;
+    try {
+      localStorage.setItem(THREAD_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function forgetThread(): void {
+    if (!savedThreadId.value) return;
+    savedThreadId.value = "";
+    try {
+      localStorage.removeItem(THREAD_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return {
     open,
     llm,
     settingsOpen,
     width,
     inspectorEnabled,
+    savedThreadId,
+    userId,
     mountEl,
     configured,
     setOpen,
@@ -153,6 +206,8 @@ export const useChatStore = defineStore("chat", () => {
     setWidth,
     setMountEl,
     enableInspector,
+    rememberThread,
+    forgetThread,
     openSettings,
     closeSettings,
   };

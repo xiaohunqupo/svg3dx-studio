@@ -1,8 +1,15 @@
 /**
  * CopilotKit Runtime for svg3dx Studio.
  *
- * LLM settings: `/.studio-llm.json` (from Settings UI via PUT /api/studio-llm-config)
- * or OPENAI_API_KEY / OPENAI_BASE_URL / COPILOT_MODEL env vars.
+ * Per-request LLM credentials come from browser headers (Settings → localStorage).
+ * The server does not store user API keys.
+ *
+ * Optional server fallback (demo / local only):
+ *   OPENAI_API_KEY / OPENAI_BASE_URL / COPILOT_MODEL
+ *   or `.studio-llm.json` (legacy; no longer written by the UI)
+ *
+ * CORS: set COPILOT_CORS_ORIGIN to a comma-separated allowlist
+ *   (e.g. https://xiaohunqupo.github.io). Default `*` for local/dev.
  *
  *   npm run copilot
  */
@@ -18,6 +25,14 @@ import { createCopilotNodeListener } from "@copilotkit/runtime/v2/node";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const studioRoot = path.resolve(__dirname, "..");
 const CONFIG_PATH = path.join(studioRoot, ".studio-llm.json");
+
+/** Must match `src/chat/studioLlmTransport.ts`. */
+const HDR = {
+  baseUrl: "x-studio-llm-base-url",
+  apiKey: "x-studio-llm-api-key",
+  model: "x-studio-llm-model",
+  userId: "x-studio-user-id",
+};
 
 const PLACEHOLDER_KEYS = new Set([
   "",
@@ -40,39 +55,54 @@ const STUDIO_PROMPT = [
 ].join(" ");
 
 /**
+ * @param {string} apiKey
+ * @param {string} baseUrl
+ * @param {string} model
  * @returns {{ baseUrl: string, apiKey: string, model: string } | null}
  */
-function readLlmConfig() {
+function normalizeLlm(apiKey, baseUrl, model) {
+  const key = String(apiKey ?? "").trim();
+  const url = String(baseUrl ?? "").trim().replace(/\/$/, "");
+  const mod = String(model ?? "").trim();
+  if (!key || PLACEHOLDER_KEYS.has(key.toLowerCase()) || !url || !mod) {
+    return null;
+  }
+  return { apiKey: key, baseUrl: url, model: mod };
+}
+
+/**
+ * Optional server-side fallback — never written by the browser UI.
+ * @returns {{ baseUrl: string, apiKey: string, model: string } | null}
+ */
+function readServerFallbackLlm() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-      const apiKey = String(raw.apiKey ?? "").trim();
-      const baseUrl = String(raw.baseUrl ?? "").trim().replace(/\/$/, "");
-      const model = String(raw.model ?? "").trim();
-      if (
-        apiKey &&
-        !PLACEHOLDER_KEYS.has(apiKey.toLowerCase()) &&
-        baseUrl &&
-        model
-      ) {
-        return { apiKey, baseUrl, model };
-      }
+      const cfg = normalizeLlm(raw.apiKey, raw.baseUrl, raw.model);
+      if (cfg) return cfg;
     }
   } catch (err) {
     console.warn("[copilot-runtime] failed to read .studio-llm.json:", err);
   }
 
-  const apiKey = String(process.env.OPENAI_API_KEY ?? "").trim();
-  if (!apiKey || PLACEHOLDER_KEYS.has(apiKey.toLowerCase())) return null;
-  return {
-    apiKey,
-    baseUrl: String(process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1")
-      .trim()
-      .replace(/\/$/, ""),
-    model: String(
-      process.env.COPILOT_MODEL ?? process.env.STUDIO_CHAT_MODEL ?? "gpt-4o-mini"
-    ).trim(),
-  };
+  return normalizeLlm(
+    process.env.OPENAI_API_KEY,
+    process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+    process.env.COPILOT_MODEL ?? process.env.STUDIO_CHAT_MODEL ?? "gpt-4o-mini"
+  );
+}
+
+/**
+ * @param {Request} request
+ * @returns {{ baseUrl: string, apiKey: string, model: string } | null}
+ */
+function llmFromRequest(request) {
+  const fromHeaders = normalizeLlm(
+    request.headers.get(HDR.apiKey),
+    request.headers.get(HDR.baseUrl),
+    request.headers.get(HDR.model)
+  );
+  return fromHeaders ?? readServerFallbackLlm();
 }
 
 /**
@@ -88,30 +118,11 @@ function isOfficialOpenAIHost(baseUrl) {
 }
 
 /**
- * @param {{ baseUrl: string, apiKey: string, model: string } | null} cfg
- */
-function applyEnvFromConfig(cfg) {
-  if (!cfg) return;
-  process.env.OPENAI_API_KEY = cfg.apiKey;
-  process.env.OPENAI_BASE_URL = cfg.baseUrl;
-  // Official OpenAI keeps Responses (reasoning summaries). Compatible hosts
-  // no longer need this override — they use @ai-sdk/openai-compatible below.
-  if (!isOfficialOpenAIHost(cfg.baseUrl)) {
-    delete process.env.COPILOTKIT_OPENAI_API;
-  }
-}
-
-/**
- * Resolve the BuiltInAgent model.
- * Compatible endpoints (DeepSeek, etc.) use @ai-sdk/openai-compatible so
- * `reasoning_content` streams become CopilotKit reasoning messages.
- * Official OpenAI keeps string specs for the Responses API.
- *
- * @param {{ baseUrl: string, apiKey: string, model: string } | null} cfg
+ * @param {{ baseUrl: string, apiKey: string, model: string }} cfg
  */
 function resolveAgentModel(cfg) {
-  const modelId = cfg?.model || "gpt-4o-mini";
-  if (cfg && !isOfficialOpenAIHost(cfg.baseUrl)) {
+  const modelId = cfg.model || "gpt-4o-mini";
+  if (!isOfficialOpenAIHost(cfg.baseUrl)) {
     const provider = createOpenAICompatible({
       name: "studio-llm",
       baseURL: cfg.baseUrl,
@@ -124,151 +135,160 @@ function resolveAgentModel(cfg) {
   return `openai/${modelId}`;
 }
 
-function createRuntime() {
-  const cfg = readLlmConfig();
-  applyEnvFromConfig(cfg);
-  const model = resolveAgentModel(cfg);
+/**
+ * @param {{ baseUrl: string, apiKey: string, model: string }} cfg
+ */
+function createAgent(cfg) {
+  return new BuiltInAgent({
+    model: resolveAgentModel(cfg),
+    apiKey: cfg.apiKey,
+    prompt: STUDIO_PROMPT,
+  });
+}
 
+function createRuntime() {
   return new CopilotRuntime({
-    // Local single-user Studio — share threads without identity.
-    threads: { access: "open" },
-    agents: {
-      default: new BuiltInAgent({
-        model,
-        apiKey: cfg?.apiKey,
-        prompt: STUDIO_PROMPT,
-      }),
+    // Per-browser identity via x-studio-user-id — isolates threads without login.
+    identifyUser: (request) => {
+      const id =
+        request.headers.get(HDR.userId)?.trim() ||
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        "anonymous";
+      return { id };
+    },
+    agents: ({ request }) => {
+      const cfg = llmFromRequest(request);
+      if (!cfg) {
+        throw new Error(
+          "Missing LLM credentials. Configure the assistant in Studio Settings, " +
+            "or set OPENAI_API_KEY on the Runtime host."
+        );
+      }
+      return { default: createAgent(cfg) };
     },
   });
 }
 
+const corsOriginEnv = String(process.env.COPILOT_CORS_ORIGIN ?? "*").trim();
+const corsOrigins = corsOriginEnv
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+/**
+ * @param {import("node:http").IncomingMessage} req
+ * @param {import("node:http").ServerResponse} res
+ */
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  let allow = "*";
+  if (corsOrigins.includes("*")) {
+    allow = origin || "*";
+  } else if (origin && corsOrigins.includes(origin)) {
+    allow = origin;
+  } else if (corsOrigins[0]) {
+    allow = corsOrigins[0];
+  }
+  res.setHeader("Access-Control-Allow-Origin", allow);
+  res.setHeader("Vary", "Origin");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+  );
+  const requested = req.headers["access-control-request-headers"];
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    typeof requested === "string" && requested.trim()
+      ? requested
+      : [
+          "Content-Type",
+          "Authorization",
+          HDR.baseUrl,
+          HDR.apiKey,
+          HDR.model,
+          HDR.userId,
+        ].join(", ")
+  );
+}
+
 const listenerOptions = {
   basePath: "/api/copilotkit",
+  // Listener also emits CORS; we still apply for /api/studio-llm-config.
   cors: true,
 };
 
-/** @type {ReturnType<typeof createCopilotNodeListener>} */
-let copilotListener = createCopilotNodeListener({
+const copilotListener = createCopilotNodeListener({
   ...listenerOptions,
   runtime: createRuntime(),
 });
-
-function reloadRuntime() {
-  copilotListener = createCopilotNodeListener({
-    ...listenerOptions,
-    runtime: createRuntime(),
-  });
-}
 
 const port = Number(process.env.COPILOT_PORT ?? process.env.PORT ?? 8200);
 
 createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+  applyCors(req, res);
+
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
 
   if (url.pathname === "/api/studio-llm-config") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") {
-      res.statusCode = 204;
-      res.end();
-      return;
-    }
     if (req.method === "GET") {
-      const cfg = readLlmConfig();
+      const fallback = readServerFallbackLlm();
       res.setHeader("Content-Type", "application/json");
       res.end(
-        JSON.stringify(
-          cfg
+        JSON.stringify({
+          mode: "per-request",
+          /** Credentials are sent as request headers from the browser. */
+          storesUserKeys: false,
+          serverFallback: !!fallback,
+          fallbackHint: fallback
             ? {
-                configured: true,
-                baseUrl: cfg.baseUrl,
-                model: cfg.model,
-                apiKeyHint: cfg.apiKey ? `${cfg.apiKey.slice(0, 4)}…` : "",
+                baseUrl: fallback.baseUrl,
+                model: fallback.model,
+                apiKeyHint: `${fallback.apiKey.slice(0, 4)}…`,
               }
-            : { configured: false }
-        )
+            : null,
+        })
       );
       return;
     }
-    if (req.method === "DELETE") {
-      try {
-        if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
-        reloadRuntime();
-        console.log("[copilot-runtime] LLM config cleared");
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: true, cleared: true }));
-      } catch (err) {
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-      }
-      return;
-    }
-    if (req.method === "PUT") {
-      const chunks = [];
-      req.on("data", (c) => chunks.push(c));
-      req.on("end", () => {
-        try {
-          const body = JSON.parse(
-            Buffer.concat(chunks).toString("utf8") || "{}"
-          );
-          const next = {
-            baseUrl: String(body.baseUrl ?? "").trim().replace(/\/$/, ""),
-            apiKey: String(body.apiKey ?? "").trim(),
-            model: String(body.model ?? "").trim(),
-          };
-          if (!next.baseUrl || !next.apiKey || !next.model) {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error: "baseUrl, apiKey, and model are required",
-              })
-            );
-            return;
-          }
-          fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
-          reloadRuntime();
-          console.log(
-            `[copilot-runtime] LLM config updated → ${next.model} @ ${next.baseUrl}`
-          );
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err) {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json");
-          res.end(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            })
-          );
-        }
-      });
-      return;
-    }
     res.statusCode = 405;
-    res.end("Method not allowed");
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        error:
+          "LLM keys stay in the browser. Save them in Studio Settings; they are sent per request.",
+      })
+    );
+    return;
+  }
+
+  if (url.pathname === "/api/health") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ ok: true, service: "svg3dx-studio-copilot" }));
     return;
   }
 
   copilotListener(req, res);
 }).listen(port, () => {
-  const cfg = readLlmConfig();
-  const via =
-    cfg && !isOfficialOpenAIHost(cfg.baseUrl)
-      ? "openai-compatible+reasoning"
-      : cfg
-        ? "openai"
-        : null;
+  const fallback = readServerFallbackLlm();
   console.log(
     `[copilot-runtime] http://127.0.0.1:${port}/api/copilotkit` +
-      (cfg
-        ? ` (${cfg.model} @ ${cfg.baseUrl}, ${via})`
-        : " — waiting for Settings / OPENAI_API_KEY")
+      " (per-request LLM headers; keys not stored on server)"
   );
+  console.log(
+    `[copilot-runtime] CORS origins: ${corsOrigins.join(", ") || "*"}`
+  );
+  if (fallback) {
+    console.log(
+      `[copilot-runtime] server fallback ready: ${fallback.model} @ ${fallback.baseUrl}`
+    );
+  } else {
+    console.log(
+      "[copilot-runtime] no server fallback — clients must send Settings headers"
+    );
+  }
 });

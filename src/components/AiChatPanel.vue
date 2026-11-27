@@ -2,7 +2,11 @@
 import { computed, nextTick, reactive, watch } from "vue";
 import { SettingIcon, ToolsIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
-import { CopilotKitProvider } from "@copilotkit/vue/v2";
+import {
+  CopilotChatConfigurationProvider,
+  CopilotKitProvider,
+} from "@copilotkit/vue/v2";
+import { buildStudioLlmHeaders } from "@/chat/studioLlmTransport";
 import AiChatSidebarChrome from "@/components/AiChatSidebarChrome.vue";
 import StudioCopilotInner from "@/components/StudioCopilotInner.vue";
 import { useI18n } from "@/i18n";
@@ -21,10 +25,6 @@ const runtimeUrl =
   (import.meta.env.VITE_COPILOT_RUNTIME_URL as string | undefined)?.trim() ||
   "/api/copilotkit";
 
-const configUrl =
-  (import.meta.env.VITE_STUDIO_LLM_CONFIG_URL as string | undefined)?.trim() ||
-  "/api/studio-llm-config";
-
 const draft = reactive({
   baseUrl: "",
   apiKey: "",
@@ -33,6 +33,11 @@ const draft = reactive({
 
 const teleportTo = computed(() => chatStore.mountEl ?? "body");
 const teleportActive = computed(() => !!chatStore.mountEl);
+
+/** Evaluated at send time so Settings changes apply without remounting. */
+function copilotHeaders(): Record<string, string> {
+  return buildStudioLlmHeaders(chatStore.llm, chatStore.userId);
+}
 
 watch(
   () => chatStore.settingsOpen,
@@ -44,31 +49,7 @@ watch(
   }
 );
 
-async function pushLlmConfigToRuntime(llm: {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}): Promise<void> {
-  const res = await fetch(configUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(llm),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `${res.status} ${res.statusText}`);
-  }
-}
-
-async function clearLlmConfigOnRuntime(): Promise<void> {
-  const res = await fetch(configUrl, { method: "DELETE" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `${res.status} ${res.statusText}`);
-  }
-}
-
-async function saveSettings(): Promise<void> {
+function saveSettings(): void {
   const baseUrl = draft.baseUrl.trim();
   const apiKey = draft.apiKey.trim();
   const model = draft.model.trim();
@@ -84,33 +65,19 @@ async function saveSettings(): Promise<void> {
     MessagePlugin.warning(t("chat.settingsModelRequired"));
     return;
   }
-  try {
-    await pushLlmConfigToRuntime({ baseUrl, apiKey, model });
-    chatStore.setLlm({ baseUrl, apiKey, model });
-    chatStore.closeSettings();
-    chatStore.setOpen(true);
-    MessagePlugin.success(t("chat.settingsSaved"));
-  } catch (err) {
-    MessagePlugin.error(
-      t("chat.settingsSyncFailed", {
-        detail: err instanceof Error ? err.message : String(err),
-      })
-    );
-  }
+  chatStore.setLlm({ baseUrl, apiKey, model });
+  chatStore.closeSettings();
+  chatStore.setOpen(true);
+  MessagePlugin.success(t("chat.settingsSaved"));
 }
 
-async function clearSettings(): Promise<void> {
+function clearSettings(): void {
   draft.apiKey = "";
   chatStore.setLlm({
     baseUrl: draft.baseUrl.trim() || chatStore.llm.baseUrl,
     apiKey: "",
     model: draft.model.trim() || chatStore.llm.model,
   });
-  try {
-    await clearLlmConfigOnRuntime();
-  } catch {
-    /* runtime may be down; local key already cleared */
-  }
   MessagePlugin.success(t("chat.settingsCleared"));
 }
 
@@ -139,20 +106,6 @@ async function openCopilotInspector(): Promise<void> {
   MessagePlugin.warning(t("chat.settingsInspectorOpenFailed"));
 }
 
-watch(
-  () => chatStore.configured,
-  (ok) => {
-    if (!ok) return;
-    void pushLlmConfigToRuntime({
-      baseUrl: chatStore.llm.baseUrl,
-      apiKey: chatStore.llm.apiKey,
-      model: chatStore.llm.model,
-    }).catch(() => {
-      /* runtime may not be up yet; re-save from Settings */
-    });
-  },
-  { immediate: true }
-);
 </script>
 
 <template>
@@ -163,6 +116,7 @@ watch(
   <CopilotKitProvider
     v-if="chatStore.configured"
     :runtime-url="runtimeUrl"
+    :headers="copilotHeaders"
     :enable-inspector="chatStore.inspectorEnabled"
   >
     <Teleport :disabled="!teleportActive" :to="teleportTo">
@@ -173,10 +127,14 @@ watch(
         :aria-label="t('chat.title')"
         :aria-hidden="!teleportActive"
       >
-        <AiChatSidebarChrome />
-        <div class="ai-sidebar-body">
-          <StudioCopilotInner />
-        </div>
+        <CopilotChatConfigurationProvider>
+          <div class="ai-sidebar-frame">
+            <AiChatSidebarChrome show-threads />
+            <div class="ai-sidebar-body">
+              <StudioCopilotInner />
+            </div>
+          </div>
+        </CopilotChatConfigurationProvider>
       </aside>
     </Teleport>
   </CopilotKitProvider>
@@ -284,6 +242,16 @@ watch(
 
 .ai-sidebar--parked {
   display: none;
+}
+
+.ai-sidebar-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ai-sidebar-body {

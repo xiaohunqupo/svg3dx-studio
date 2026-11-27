@@ -75,6 +75,36 @@ Studio 内置基于 CopilotKit 的助手，属于页面库的一部分。**默�
 - **宿主自带 AI**：`installStudio(app, { showAiAssistant: false })`，且不要挂载 `AiChatPanel`（全局总开关）。
 - **仅关某页 chrome**：`:show-ai-assistant="false"`（不会卸载根上已挂的 `AiChatPanel`）。
 
+**密钥放哪：** 只在用户浏览器（`localStorage`）。每次对话请求带上 `x-studio-llm-*` 头；Runtime **不落盘**用户 Key。可选服务器兜底：`OPENAI_API_KEY` / `.studio-llm.json`（站主付费的演示）。
+
+#### 为 GitHub Pages（或任意静态站）部署 Runtime
+
+1. 在一台 Node 服务器上（建议 HTTPS）：
+
+```bash
+cd svg3dx-studio
+npm ci
+# 允许 Pages 源站（逗号分隔），例如：
+export COPILOT_CORS_ORIGIN=https://xiaohunqupo.github.io
+# 可选：站主兜底 Key（否则访客在 Settings 里填自己的）
+# export OPENAI_API_KEY=...
+# export OPENAI_BASE_URL=https://api.deepseek.com
+# export COPILOT_MODEL=deepseek-chat
+npm run copilot   # 默认 :8200，前面用 nginx/caddy 终结 TLS
+```
+
+2. 构建 SPA，指向该 Runtime：
+
+```bash
+export VITE_BASE=/svg3dx-studio/
+export VITE_COPILOT_RUNTIME_URL=https://runtime.example.com/api/copilotkit
+npm run build
+```
+
+3. 把 `dist/` 部署到 GitHub Pages。用户打开设置填自己的 Key（或使用你的服务器兜底）即可对话。
+
+健康检查：`GET https://runtime.example.com/api/health`
+
 ### 三层开放度
 
 1. **整页**：直接挂页面；用 props（如 `showOfficialSamples`、`showAiAssistant`）与插槽微调。

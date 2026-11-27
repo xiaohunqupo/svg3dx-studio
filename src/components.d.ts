@@ -10,6 +10,7 @@ declare module 'vue' {
     AiChatHeaderButton: typeof import('./components/AiChatHeaderButton.vue')['default']
     AiChatPanel: typeof import('./components/AiChatPanel.vue')['default']
     AiChatSidebarChrome: typeof import('./components/AiChatSidebarChrome.vue')['default']
+    AiChatThreadControls: typeof import('./components/AiChatThreadControls.vue')['default']
     AnimationTimelineBar: typeof import('./components/AnimationTimelineBar.vue')['default']
     AppMenus: typeof import('./components/AppMenus.vue')['default']
     BlendAttrSelect: typeof import('./components/BlendAttrSelect.vue')['default']

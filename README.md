@@ -75,6 +75,36 @@ Studio ships a CopilotKit-based assistant as part of the page library. **Enabled
 - **Host has its own AI**: `installStudio(app, { showAiAssistant: false })` and do not mount `AiChatPanel` (global kill-switch).
 - **Hide chrome on one page**: `:show-ai-assistant="false"` (does not unmount a root `AiChatPanel`).
 
+**Where the API key lives:** only in the user’s browser (`localStorage`). Each chat request sends `x-studio-llm-*` headers to your Runtime; the server does **not** persist user keys. Optional server fallback: `OPENAI_API_KEY` / `.studio-llm.json` (for a host-paid demo).
+
+#### Deploy Runtime for GitHub Pages (or any static host)
+
+1. On a Node server (HTTPS):
+
+```bash
+cd svg3dx-studio
+npm ci
+# Allow the Pages origin (comma-separated). Example:
+export COPILOT_CORS_ORIGIN=https://xiaohunqupo.github.io
+# Optional: host-paid fallback key (otherwise each visitor uses Settings)
+# export OPENAI_API_KEY=...
+# export OPENAI_BASE_URL=https://api.deepseek.com
+# export COPILOT_MODEL=deepseek-chat
+npm run copilot   # listens on :8200 — put nginx/caddy in front with TLS
+```
+
+2. Build the SPA pointing at that Runtime:
+
+```bash
+export VITE_BASE=/svg3dx-studio/
+export VITE_COPILOT_RUNTIME_URL=https://runtime.example.com/api/copilotkit
+npm run build
+```
+
+3. Deploy `dist/` to GitHub Pages. Visitors open Settings, paste their own key (or use your server fallback), then chat.
+
+Health check: `GET https://runtime.example.com/api/health`
+
 ### Three openness levels
 
 1. **Full pages**: mount as-is; tweak with props (`showOfficialSamples`, `showAiAssistant`, …) and slots.

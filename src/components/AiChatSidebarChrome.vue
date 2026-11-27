@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { CloseIcon, SettingIcon } from "tdesign-icons-vue-next";
+import AiChatThreadControls from "@/components/AiChatThreadControls.vue";
 import { useI18n } from "@/i18n";
 import { useChatStore } from "@/stores/chat";
+
+withDefaults(
+  defineProps<{
+    /** New-chat and history controls. Only inside a configured Copilot session. */
+    showThreads?: boolean;
+  }>(),
+  { showThreads: false }
+);
 
 const { t } = useI18n();
 const chatStore = useChatStore();
@@ -11,6 +20,7 @@ const chatStore = useChatStore();
   <header class="ai-sidebar-header">
     <div class="ai-sidebar-title">{{ t("chat.title") }}</div>
     <div class="ai-sidebar-actions">
+      <AiChatThreadControls v-if="showThreads" />
       <t-button
         variant="text"
         shape="square"
@@ -49,14 +59,19 @@ const chatStore = useChatStore();
 }
 
 .ai-sidebar-title {
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
   color: var(--td-text-color-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .ai-sidebar-actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 0;
 }
 </style>

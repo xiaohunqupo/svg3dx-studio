@@ -947,10 +947,7 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
     { name: "topCenterPt", placeholder: "0 0 100", pointAttr: true },
     { name: "angle", placeholder: "90" },
   ],
-  point: [
-    { name: "id", placeholder: "point-1" },
-    { name: "at", placeholder: "0 0 0" },
-  ],
+  point: [{ name: "at", placeholder: "0 0 0" }],
   line: [
     { name: "from", placeholder: "0 0 0", pointAttr: true },
     { name: "to", placeholder: "100 0 0", pointAttr: true },
