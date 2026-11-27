@@ -137,11 +137,11 @@ npm run build:lib          # 从包构建页面库
 发布顺序（CI / Cloudflare 变绿前必须完成）：
 
 1. `svg3dx-core`：`wasm-pack` → `pkg/` → 发布 **`svg3dx-ffi-wasm@0.2.0`**
-2. `svg3dx-viewer`：lock 改为 registry 的 `svg3dx-ffi-wasm@0.2.0` → 发布 **`svg3dx-viewer@0.2.0`**
+2. `svg3dx-viewer`：lock 改为 registry 的 `svg3dx-ffi-wasm@0.2.0` → 发布 **`svg3dx-viewer@0.2.1`**
 3. 本仓去掉 `file:../svg3dx-viewer` 本地链接：
 
 ```powershell
-npm install svg3dx-viewer@0.2.0
+npm install svg3dx-viewer@0.2.1
 ```
 
 ## CI / GitHub Pages

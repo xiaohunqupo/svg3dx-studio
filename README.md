@@ -137,11 +137,11 @@ npm run build:lib          # page library from packages
 Publish order (required for green CI / Cloudflare):
 
 1. `svg3dx-core`: `wasm-pack` → `pkg/` → publish **`svg3dx-ffi-wasm@0.2.0`**
-2. `svg3dx-viewer`: ensure lock uses registry `svg3dx-ffi-wasm@0.2.0` → publish **`svg3dx-viewer@0.2.0`**
+2. `svg3dx-viewer`: ensure lock uses registry `svg3dx-ffi-wasm@0.2.0` → publish **`svg3dx-viewer@0.2.1`**
 3. In this repo, replace the local `file:../svg3dx-viewer` lock link:
 
 ```powershell
-npm install svg3dx-viewer@0.2.0
+npm install svg3dx-viewer@0.2.1
 ```
 
 ## CI / GitHub Pages
