@@ -22,9 +22,12 @@
   ],
   "scripts": {
     "dev": "vite",
+    "dev:local": "node ./scripts/with-local-stack.mjs vite",
     "copilot": "tsx scripts/copilot-runtime.mjs",
     "build": "vue-tsc -p tsconfig.json --noEmit && vite build",
+    "build:local": "node ./scripts/with-local-stack.mjs vue-tsc -p tsconfig.local.json --noEmit && node ./scripts/with-local-stack.mjs vite build",
     "build:lib": "vite build --config vite.config.lib.ts && node ./scripts/copy-lib-dts.mjs",
+    "build:lib:local": "node ./scripts/with-local-stack.mjs vite build --config vite.config.lib.ts && node ./scripts/copy-lib-dts.mjs",
     "preview": "vite preview",
     "build:all": "node ./scripts/build-all.mjs",
     "build:all:dev": "node ./scripts/build-all.mjs --dev",

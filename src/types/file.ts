@@ -3,7 +3,7 @@ import type { StudioDocument } from "@/repos/types";
 /** @deprecated Prefer StudioDocument — kept as alias for existing imports. */
 export type StudioFile = StudioDocument;
 
-/** Insertable geometry kinds (svg3dx draft 0.1). */
+/** Insertable geometry kinds (svg3dx draft 0.2). */
 export type GeometryKind =
   | "box"
   | "cylinder"

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"],
+      "svg3dx-viewer": ["../svg3dx-viewer/src/index.ts"],
+      "svg3dx-ffi-wasm": ["../svg3dx-core/pkg/svg3dx_ffi_wasm"]
+    }
+  }
+}

@@ -1,4 +1,5 @@
-# Build pipeline: checkout core + viewer → wasm-pack → SPA (Pages) + lib artifact
+# Build + deploy: npm packages only (no sibling checkouts / wasm-pack).
+# Local full stack: `npm run build:all` (sets SVG3DX_USE_LOCAL=1).
 name: CI
 
 on:
@@ -18,94 +19,26 @@ permissions:
   id-token: write
 
 env:
-  CARGO_TERM_COLOR: always
-  SVG3DX_CORE_ROOT: ${{ github.workspace }}/svg3dx-core
-  SVG3DX_ROOT: ${{ github.workspace }}/svg3dx
   # Project Pages URL path: https://<owner>.github.io/svg3dx-studio/
+  # Cloudflare custom domain at site root: set VITE_BASE=/ in that project instead.
   VITE_BASE: /svg3dx-studio/
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: svg3dx-studio
 
     steps:
       - name: Checkout svg3dx-studio
         uses: actions/checkout@v4
-        with:
-          path: svg3dx-studio
-
-      - name: Checkout svg3dx-viewer
-        uses: actions/checkout@v4
-        with:
-          repository: xiaohunqupo/svg3dx-viewer
-          path: svg3dx-viewer
-
-      - name: Checkout svg3dx-core (WASM)
-        uses: actions/checkout@v4
-        with:
-          repository: xiaohunqupo/svg3dx-core
-          path: svg3dx-core
-
-      - name: Checkout svg3dx (samples)
-        uses: actions/checkout@v4
-        with:
-          repository: xiaohunqupo/svg3dx
-          path: svg3dx
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: |
-            svg3dx-studio/package-lock.json
-            svg3dx-viewer/package-lock.json
+          registry-url: https://registry.npmjs.org
 
-      - name: Setup Rust (wasm32)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            svg3dx-core/target/
-          key: ${{ runner.os }}-cargo-studio-${{ hashFiles('svg3dx-core/Cargo.toml', 'svg3dx-core/crates/**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-studio-
-
-      - name: Install wasm-pack
-        run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
-            cargo install wasm-pack --locked
-          fi
-        working-directory: ${{ github.workspace }}
-
-      - name: Build core WASM pkg/
-        # wasm-pack resolves relative --out-dir against the crate, not cwd.
-        # Studio/viewer aliases expect svg3dx-core/pkg (see build-wasm.mjs).
-        run: |
-          wasm-pack build crates/svg3dx-ffi-wasm \
-            --target bundler \
-            --out-dir "${{ github.workspace }}/svg3dx-core/pkg" \
-            --out-name svg3dx_ffi_wasm
-        working-directory: svg3dx-core
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/svg3dx-core/target
-
-      - name: "npm ci (viewer — file: dependency + aliased src)"
-        run: npm ci
-        working-directory: svg3dx-viewer
-
-      - name: npm ci (studio)
+      - name: npm ci
         run: npm ci
 
       - name: Build studio (SPA → Pages)
@@ -114,7 +47,7 @@ jobs:
       - name: Build studio library (dist-lib)
         run: npm run build:lib
 
-      # SPA fallback for vue-router history mode on GitHub Pages
+      # SPA fallback for vue-router history mode on static hosts
       - name: Prepare Pages SPA fallback
         run: cp dist/index.html dist/404.html
 
@@ -122,21 +55,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: svg3dx-studio-dist
-          path: svg3dx-studio/dist
+          path: dist
           if-no-files-found: error
 
       - name: Upload lib artifact
         uses: actions/upload-artifact@v4
         with:
           name: svg3dx-studio-lib
-          path: svg3dx-studio/dist-lib
+          path: dist-lib
           if-no-files-found: error
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: svg3dx-studio/dist
+          path: dist
 
   deploy:
     needs: build

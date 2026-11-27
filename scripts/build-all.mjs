@@ -9,7 +9,10 @@
  * Flags:
  *   --skip-tests   skip `cargo test -p svg3dx-core`
  *   --full-core    also build C DLL + header + dump_json (cmake)
- *   --dev          stop after core wasm + viewer lib (for `npm run dev`)
+ *   --dev          stop after core wasm + viewer lib (for `npm run dev:local`)
+ *
+ * Sets SVG3DX_USE_LOCAL=1 so studio Vite/tsconfig resolve sibling viewer+wasm
+ * instead of npm packages (CI / plain `npm run build` always use packages).
  *
  * Env:
  *   SVG3DX_CORE_ROOT / SVG3DX_VIEWER_ROOT  override sibling paths
@@ -160,17 +163,19 @@ run("npm", ["run", "build:lib"], viewerRoot);
 if (devOnly) {
   console.log("\n✓ stack ready for development.");
   console.log(`  cd ${studioRoot}`);
-  console.log("  npm run dev");
+  console.log("  npm run dev:local");
   process.exit(0);
 }
 
-// --- 5) studio production build ---
-next("svg3dx-studio: vue-tsc + vite build");
-run("npm", ["run", "build"], studioRoot);
+const localEnv = { SVG3DX_USE_LOCAL: "1" };
+
+// --- 5) studio production build (local sibling aliases) ---
+next("svg3dx-studio: build:local (vue-tsc + vite, SVG3DX_USE_LOCAL=1)");
+run("npm", ["run", "build:local"], studioRoot, localEnv);
 
 // --- 6) studio library build (embeddable pages) ---
-next("svg3dx-studio: vite build:lib → dist-lib/");
-run("npm", ["run", "build:lib"], studioRoot);
+next("svg3dx-studio: build:lib:local → dist-lib/");
+run("npm", ["run", "build:lib:local"], studioRoot, localEnv);
 
 console.log("\n✓ done.");
 console.log(`  studio dist:     ${path.join(studioRoot, "dist")}`);

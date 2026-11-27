@@ -12,12 +12,9 @@ import { TDesignResolver } from "@tdesign-vue-next/auto-import-resolver";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAliases } from "./scripts/localStack.mjs";
 
 const studioRoot = path.dirname(fileURLToPath(import.meta.url));
-const viewerRoot = path.resolve(studioRoot, "../svg3dx-viewer");
-const coreRoot = process.env.SVG3DX_CORE_ROOT
-  ? path.resolve(process.env.SVG3DX_CORE_ROOT)
-  : path.resolve(studioRoot, "../svg3dx-core");
 
 const pkg = JSON.parse(
   fs.readFileSync(path.join(studioRoot, "package.json"), "utf8")
@@ -84,11 +81,7 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: {
-      "@": path.join(studioRoot, "src"),
-      "svg3dx-viewer": path.join(viewerRoot, "src/index.ts"),
-      "svg3dx-ffi-wasm": path.join(coreRoot, "pkg/svg3dx_ffi_wasm.js"),
-    },
+    alias: resolveAliases(studioRoot),
   },
   build: {
     target: "esnext",

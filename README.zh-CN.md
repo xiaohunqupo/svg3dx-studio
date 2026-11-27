@@ -122,21 +122,33 @@ npm run build
 
 ## 开发
 
-本机并列：`svg3dx`、`svg3dx-core`、`svg3dx-viewer`、本仓。
+**CI / `npm run build` / `npm run dev`** 从 **npm 包**解析 `svg3dx-viewer`（及 wasm）。  
+**`npm run build:all`** 本地编译并列的 `svg3dx-core` + `svg3dx-viewer`，再用 `SVG3DX_USE_LOCAL=1` 编 studio。
 
 ```powershell
 cd ..\svg3dx-studio
-npm run build:all          # wasm → viewer → SPA dist + dist-lib
-npm run build:all:dev      # 只到 viewer，随后 npm run dev
-npm run build:lib          # 仅页面库
+npm ci
+npm run build              # 只走包（与 CI 相同）
+npm run build:all          # 本地 wasm → viewer → SPA + dist-lib
+npm run build:all:dev      # 本地栈就绪后：npm run dev:local
+npm run build:lib          # 从包构建页面库
+```
+
+发布顺序（CI / Cloudflare 变绿前必须完成）：
+
+1. `svg3dx-core`：`wasm-pack` → `pkg/` → 发布 **`svg3dx-ffi-wasm@0.2.0`**
+2. `svg3dx-viewer`：lock 改为 registry 的 `svg3dx-ffi-wasm@0.2.0` → 发布 **`svg3dx-viewer@0.2.0`**
+3. 本仓去掉 `file:../svg3dx-viewer` 本地链接：
+
+```powershell
+npm install svg3dx-viewer@0.2.0
 ```
 
 ## CI / GitHub Pages
 
-1. 检出 `svg3dx-core`、`svg3dx-viewer`、`svg3dx`
-2. `wasm-pack` → core `pkg/`
-3. `npm run build`（SPA，`VITE_BASE=/svg3dx-studio/`）→ Pages
-4. `npm run build:lib` → 上传 `svg3dx-studio-lib` artifact
+1. `npm ci`（仅 registry 包）
+2. `npm run build`（SPA，`VITE_BASE=/svg3dx-studio/`）→ Pages
+3. `npm run build:lib` → 上传 `svg3dx-studio-lib` artifact
 
 在线演示：https://xiaohunqupo.github.io/svg3dx-studio/
 

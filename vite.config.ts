@@ -7,15 +7,15 @@ import { TDesignResolver } from "@tdesign-vue-next/auto-import-resolver";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  resolveAliases,
+  studioPaths,
+  useLocalStack,
+} from "./scripts/localStack.mjs";
 
 const studioRoot = path.dirname(fileURLToPath(import.meta.url));
-const viewerRoot = path.resolve(studioRoot, "../svg3dx-viewer");
-const coreRoot = process.env.SVG3DX_CORE_ROOT
-  ? path.resolve(process.env.SVG3DX_CORE_ROOT)
-  : path.resolve(studioRoot, "../svg3dx-core");
-const svg3dxRoot = process.env.SVG3DX_ROOT
-  ? path.resolve(process.env.SVG3DX_ROOT)
-  : path.resolve(studioRoot, "../svg3dx");
+const { viewerRoot, coreRoot, svg3dxRoot } = studioPaths(studioRoot);
+const local = useLocalStack();
 
 function resolveSamplePath(): string | null {
   const candidates = [
@@ -64,7 +64,11 @@ export default defineConfig({
         server.middlewares.use("/svg3dx-samples", (req, res, next) => {
           const rel = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/");
           const filePath = path.normalize(path.join(samplesDir, rel));
-          if (!filePath.startsWith(samplesDir) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+          if (
+            !filePath.startsWith(samplesDir) ||
+            !fs.existsSync(filePath) ||
+            !fs.statSync(filePath).isFile()
+          ) {
             res.statusCode = 404;
             res.end("not found");
             return;
@@ -81,19 +85,18 @@ export default defineConfig({
           res.setHeader("Content-Type", type);
           fs.createReadStream(filePath).pipe(res);
         });
-
       },
     },
   ],
   resolve: {
-    alias: {
-      "@": path.join(studioRoot, "src"),
-      "svg3dx-viewer": path.join(viewerRoot, "src/index.ts"),
-      "svg3dx-ffi-wasm": path.join(coreRoot, "pkg/svg3dx_ffi_wasm.js"),
-    },
+    alias: resolveAliases(studioRoot),
   },
   server: {
-    fs: { allow: [studioRoot, viewerRoot, coreRoot, svg3dxRoot] },
+    fs: {
+      allow: local
+        ? [studioRoot, viewerRoot, coreRoot, svg3dxRoot]
+        : [studioRoot, svg3dxRoot],
+    },
     // CopilotKit Runtime (`npm run copilot`) — chat + LLM settings API.
     proxy: {
       "/api/copilotkit": {

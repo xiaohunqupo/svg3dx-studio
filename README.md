@@ -122,21 +122,33 @@ Health check: `GET https://runtime.example.com/api/health`
 
 ## Develop
 
-Sibling checkouts: `svg3dx`, `svg3dx-core`, `svg3dx-viewer`, and this repo.
+**CI / `npm run build` / `npm run dev`** resolve `svg3dx-viewer` (and wasm) from **npm**.  
+**`npm run build:all`** builds sibling `svg3dx-core` + `svg3dx-viewer`, then studio with `SVG3DX_USE_LOCAL=1`.
 
 ```powershell
 cd ..\svg3dx-studio
-npm run build:all          # wasm → viewer → SPA dist + dist-lib
-npm run build:all:dev      # stop after viewer, then npm run dev
-npm run build:lib          # page library only
+npm ci
+npm run build              # packages only (same as CI)
+npm run build:all          # local wasm → viewer → SPA + dist-lib
+npm run build:all:dev      # local stack, then: npm run dev:local
+npm run build:lib          # page library from packages
+```
+
+Publish order (required for green CI / Cloudflare):
+
+1. `svg3dx-core`: `wasm-pack` → `pkg/` → publish **`svg3dx-ffi-wasm@0.2.0`**
+2. `svg3dx-viewer`: ensure lock uses registry `svg3dx-ffi-wasm@0.2.0` → publish **`svg3dx-viewer@0.2.0`**
+3. In this repo, replace the local `file:../svg3dx-viewer` lock link:
+
+```powershell
+npm install svg3dx-viewer@0.2.0
 ```
 
 ## CI / GitHub Pages
 
-1. Checkout `svg3dx-core`, `svg3dx-viewer`, `svg3dx`
-2. `wasm-pack` → core `pkg/`
-3. `npm run build` (SPA, `VITE_BASE=/svg3dx-studio/`) → Pages
-4. `npm run build:lib` → upload `svg3dx-studio-lib` artifact
+1. `npm ci` (registry packages only)
+2. `npm run build` (SPA, `VITE_BASE=/svg3dx-studio/`) → Pages
+3. `npm run build:lib` → upload `svg3dx-studio-lib` artifact
 
 Live demo: https://xiaohunqupo.github.io/svg3dx-studio/
 

@@ -1,11 +1,11 @@
-/** Minimal starter document — same shape as `samples/draft-0.1-box.svg3dx`. */
+/** Minimal starter document for draft 0.2. */
 
 export const EMPTY_DOCUMENT_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 <svg version="1.1"
      svg3d="true"
      viewBox="0 0 800 600"
      xmlns="http://www.w3.org/2000/svg"
-     xmlns:s3dx="urn:s3dx:draft:0.1">
+     xmlns:s3dx="urn:s3dx:draft:0.2">
 
   <style>
     :root { --length: 100; --width: 100; --height: 100; }

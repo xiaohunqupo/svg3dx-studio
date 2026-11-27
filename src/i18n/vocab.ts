@@ -1,7 +1,7 @@
 /**
- * Official svg3dx vocabulary (draft 0.1).
+ * Official svg3dx vocabulary (draft 0.2).
  * XML / file values stay English identifiers; UI shows locale labels.
- * Keep in sync with docs/svg3dx-vocab-draft-0.1.md.
+ * Keep in sync with docs/svg3dx-vocab-draft-0.2.md.
  */
 
 export type LocalePair = { zh: string; en: string };
@@ -56,7 +56,6 @@ export const ELEMENT_LABELS = {
   model: { zh: "模型", en: "Model" },
   material: { zh: "材质", en: "Material" },
   materials: { zh: "材质集", en: "Materials" },
-  exp: { zh: "表达式", en: "Expression" },
   animate: { zh: "动画", en: "Animate" },
   animateTransform: { zh: "变换动画", en: "Animate transform" },
   group: { zh: "组", en: "Group" },
