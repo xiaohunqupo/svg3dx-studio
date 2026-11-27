@@ -2104,6 +2104,7 @@ onBeforeUnmount(() => {
 
 .left-rail--with-inspector > .inspector-mount {
   grid-area: inspector;
+  height: 100%;
 }
 
 .left-rail-tree {

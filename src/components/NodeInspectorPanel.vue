@@ -540,7 +540,10 @@ const geometryView = computed(() => {
   } else if (node.type === "primitive") {
     /** Control-flow assembly nodes: params + transform; no appearance cascade. */
     const isControlFlow =
-      node.kind === "if" || node.kind === "if-not";
+      node.kind === "if" ||
+      node.kind === "if-not" ||
+      node.kind === "loop-points" ||
+      node.kind === "loop-range";
     const isAnimation =
       node.kind === "animate" || node.kind === "animateTransform";
     const idVal = attrLookup(xmlAttrs, "id");
@@ -2392,6 +2395,16 @@ defineExpose({ applyTransformPreview, applyPointPick, clearPointPick });
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+}
+
+/*
+ * `.param-collapse` uses overflow:hidden (border-radius). With default
+ * flex-shrink that lets the panel compress into the short dock, so the
+ * parent scrollport never overflows. Keep intrinsic height; scroll on
+ * `.node-inspector` (see EditView `.inspector :deep(.node-inspector)`).
+ */
+.node-inspector > * {
+  flex-shrink: 0;
 }
 
 .param-collapse {

@@ -1149,6 +1149,17 @@ const PRIMITIVE_ATTRS: Record<string, AttrField[]> = {
   /** Control-flow containers — draft §5. */
   if: [{ name: "test", placeholder: "true" }],
   "if-not": [{ name: "test", placeholder: "true" }],
+  "loop-points": [
+    {
+      name: "points",
+      placeholder: "0 0 0  100 0 0  100 100 0  0 100 0",
+    },
+  ],
+  "loop-range": [
+    { name: "start", placeholder: "0" },
+    { name: "end", placeholder: "3" },
+    { name: "step", placeholder: "1" },
+  ],
   /** Animation (SMIL-shaped subset — draft §10). */
   animate: [
     {
