@@ -30,6 +30,21 @@ env:
   VITE_COPILOT_RUNTIME_URL: https://copilot.dannyxu.net/api/copilotkit
 
 jobs:
+  # Job-level `if` cannot read env, so this job turns RELEASE_BRANCH into an output.
+  release-check:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - id: gate
+        run: |
+          if [ "$GITHUB_REF_NAME" = "$RELEASE_BRANCH" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     runs-on: ubuntu-latest
 
@@ -78,8 +93,8 @@ jobs:
           path: dist
 
   deploy:
-    needs: build
-    if: github.ref_name == env.RELEASE_BRANCH && github.event_name != 'pull_request'
+    needs: [build, release-check]
+    if: needs.build.result == 'success' && needs.release-check.outputs.publish == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -90,8 +105,8 @@ jobs:
         uses: actions/deploy-pages@v4
 
   deploy-copilot:
-    needs: build
-    if: github.ref_name == env.RELEASE_BRANCH && github.event_name != 'pull_request'
+    needs: [build, release-check]
+    if: needs.build.result == 'success' && needs.release-check.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout svg3dx-studio
