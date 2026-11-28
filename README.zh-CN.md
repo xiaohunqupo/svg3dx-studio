@@ -79,31 +79,30 @@ Studio 内置基于 CopilotKit 的助手，属于页面库的一部分。**默�
 
 #### 为 GitHub Pages（或任意静态站）部署 Runtime
 
-1. 在一台 Node 服务器上（建议 HTTPS）：
+线上 Runtime 是 Cloudflare Worker：`https://copilot.dannyxu.net/api/copilotkit`。Pages 仍是静态站，SPA 构建用 `VITE_COPILOT_RUNTIME_URL` 指向 Worker。
 
 ```bash
 cd svg3dx-studio
 npm ci
-# 允许 Pages 源站（逗号分隔），例如：
-export COPILOT_CORS_ORIGIN=https://xiaohunqupo.github.io
-# 可选：站主兜底 Key（否则访客在 Settings 里填自己的）
-# export OPENAI_API_KEY=...
-# export OPENAI_BASE_URL=https://api.deepseek.com
-# export COPILOT_MODEL=deepseek-chat
-npm run copilot   # 默认 :8200，前面用 nginx/caddy 终结 TLS
+npx wrangler login          # 只需一次
+npm run copilot:deploy      # 发布 Worker，并绑定 copilot.dannyxu.net
 ```
 
-2. 构建 SPA，指向该 Runtime：
+可选的站主兜底 Key（否则访客在设置里填自己的）：
 
 ```bash
-export VITE_BASE=/svg3dx-studio/
-export VITE_COPILOT_RUNTIME_URL=https://runtime.example.com/api/copilotkit
-npm run build
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put OPENAI_BASE_URL
+npx wrangler secret put COPILOT_MODEL
 ```
 
-3. 把 `dist/` 部署到 GitHub Pages。用户打开设置填自己的 Key（或使用你的服务器兜底）即可对话。
+本地 Node Runtime（Vite 把 `/api/copilotkit` 代理过来）：
 
-健康检查：`GET https://runtime.example.com/api/health`
+```bash
+npm run copilot   # 默认 :8200
+```
+
+健康检查：`GET https://copilot.dannyxu.net/api/health`
 
 ### 三层开放度
 

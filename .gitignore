@@ -8,3 +8,5 @@ dist-lib/
 .env.local
 .env.*.local
 .studio-llm.json
+.wrangler/
+.dev.vars

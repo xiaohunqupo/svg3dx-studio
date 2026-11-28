@@ -25,6 +25,8 @@
     "dev": "vite",
     "dev:local": "node ./scripts/with-local-stack.mjs vite",
     "copilot": "tsx scripts/copilot-runtime.mjs",
+    "copilot:dev": "wrangler dev",
+    "copilot:deploy": "wrangler deploy",
     "build": "vue-tsc -p tsconfig.json --noEmit && vite build",
     "build:local": "node ./scripts/with-local-stack.mjs vue-tsc -p tsconfig.local.json --noEmit && node ./scripts/with-local-stack.mjs vite build",
     "build:lib": "vite build --config vite.config.lib.ts && node ./scripts/copy-lib-dts.mjs",
@@ -82,7 +84,8 @@
     "unplugin-vue-components": "^0.28.0",
     "vite": "^5.4.0",
     "vite-plugin-wasm": "^3.3.0",
-    "vue-tsc": "^2.1.10"
+    "vue-tsc": "^2.1.10",
+    "wrangler": "^4.169.0"
   },
   "license": "MIT OR MulanPSL-2.0"
 }
