@@ -79,31 +79,30 @@ Studio ships a CopilotKit-based assistant as part of the page library. **Enabled
 
 #### Deploy Runtime for GitHub Pages (or any static host)
 
-1. On a Node server (HTTPS):
+The hosted runtime is a Cloudflare Worker at `https://copilot.dannyxu.net/api/copilotkit`. Pages stays static; the SPA build points at the Worker via `VITE_COPILOT_RUNTIME_URL`.
 
 ```bash
 cd svg3dx-studio
 npm ci
-# Allow the Pages origin (comma-separated). Example:
-export COPILOT_CORS_ORIGIN=https://xiaohunqupo.github.io
-# Optional: host-paid fallback key (otherwise each visitor uses Settings)
-# export OPENAI_API_KEY=...
-# export OPENAI_BASE_URL=https://api.deepseek.com
-# export COPILOT_MODEL=deepseek-chat
-npm run copilot   # listens on :8200 — put nginx/caddy in front with TLS
+npx wrangler login          # once
+npm run copilot:deploy      # Worker + copilot.dannyxu.net
 ```
 
-2. Build the SPA pointing at that Runtime:
+Optional host-paid fallback (otherwise each visitor uses Settings):
 
 ```bash
-export VITE_BASE=/svg3dx-studio/
-export VITE_COPILOT_RUNTIME_URL=https://runtime.example.com/api/copilotkit
-npm run build
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put OPENAI_BASE_URL
+npx wrangler secret put COPILOT_MODEL
 ```
 
-3. Deploy `dist/` to GitHub Pages. Visitors open Settings, paste their own key (or use your server fallback), then chat.
+Local Node runtime (Vite proxies `/api/copilotkit` to it):
 
-Health check: `GET https://runtime.example.com/api/health`
+```bash
+npm run copilot   # listens on :8200
+```
+
+Health check: `GET https://copilot.dannyxu.net/api/health`
 
 ### Three openness levels
 

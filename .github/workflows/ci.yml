@@ -22,6 +22,8 @@ env:
   # Project Pages URL path: https://<owner>.github.io/svg3dx-studio/
   # Cloudflare custom domain at site root: set VITE_BASE=/ in that project instead.
   VITE_BASE: /svg3dx-studio/
+  # Copilot runtime is a Cloudflare Worker (see wrangler.jsonc). Pages cannot host it.
+  VITE_COPILOT_RUNTIME_URL: https://copilot.dannyxu.net/api/copilotkit
 
 jobs:
   build:
