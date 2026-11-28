@@ -5,15 +5,23 @@ import {
   type StudioEditBridge,
   type StudioEditToolResult,
 } from "@/chat/editBridge";
+import { consumeChatUpload } from "@/chat/chatUploads";
 import { getNodeSchema } from "@/chat/documentQuery";
 import type { DocumentOp } from "@/chat/documentEdits";
 import { normalizePreviewView } from "@/chat/capturePreview";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
-import { useFilesStore } from "@/stores/files";
+import {
+  FileNameConflictError,
+  useFilesStore,
+} from "@/stores/files";
+import type { StudioDocument } from "@/repos/types";
 import type { AddChildKind } from "@/types/file";
 
 export type StudioChatToolName =
   | "list_files"
+  | "create_file"
+  | "duplicate_file"
+  | "import_file"
   | "go_browse"
   | "go_edit"
   | "rename_file"
@@ -185,6 +193,32 @@ async function withEditBridge(
   return run(bridge);
 }
 
+function fileRef(doc: StudioDocument): { id: string; name: string; route: string } {
+  return { id: doc.id, name: doc.name, route: `/edit/${doc.id}` };
+}
+
+function nameConflictResult(err: FileNameConflictError): StudioChatToolResult {
+  return {
+    ok: false,
+    message: err.message,
+    data: {
+      conflictingId: err.conflictingId,
+      conflictingName: err.conflictingName,
+    },
+  };
+}
+
+async function maybeOpenFile(
+  files: ReturnType<typeof useFilesStore>,
+  nav: ReturnType<typeof useStudioNavigation>,
+  doc: StudioDocument,
+  open: boolean
+): Promise<void> {
+  if (!open) return;
+  await files.select(doc.id);
+  nav.goEdit(doc.id);
+}
+
 /** Run a frontend tool requested by the CopilotKit agent. */
 export async function runStudioChatTool(
   call: StudioChatToolCall
@@ -217,6 +251,102 @@ export async function runStudioChatTool(
       }));
       return { ok: true, message: `files:${list.length}`, data: list };
     }
+    case "create_file": {
+      try {
+        const doc = await files.createDocument({
+          name: str(args, "name") || undefined,
+          content:
+            typeof args.content === "string" && args.content.trim()
+              ? String(args.content)
+              : undefined,
+          select: false,
+        });
+        await maybeOpenFile(files, nav, doc, bool(args, "open", false));
+        return {
+          ok: true,
+          message: `created:${doc.id}`,
+          data: fileRef(doc),
+        };
+      } catch (e) {
+        if (e instanceof FileNameConflictError) return nameConflictResult(e);
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }
+    case "duplicate_file": {
+      const id = str(args, "id");
+      if (!id) return { ok: false, message: "missing file id" };
+      try {
+        const doc = await files.duplicateDocument(id, {
+          name: str(args, "name") || undefined,
+          select: false,
+        });
+        await maybeOpenFile(files, nav, doc, bool(args, "open", false));
+        return {
+          ok: true,
+          message: `duplicated:${doc.id}`,
+          data: fileRef(doc),
+        };
+      } catch (e) {
+        if (e instanceof FileNameConflictError) return nameConflictResult(e);
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }
+    case "import_file": {
+      const uploadId = str(args, "uploadId");
+      const contentArg =
+        typeof args.content === "string" ? String(args.content) : "";
+      if (!uploadId && !contentArg.trim()) {
+        return {
+          ok: false,
+          message:
+            "missing uploadId or content — attach a .svg3dx/.svg3dxz in chat (see pendingUploads) or pass XML content",
+        };
+      }
+      try {
+        let doc: StudioDocument;
+        if (uploadId) {
+          const upload = consumeChatUpload(uploadId);
+          if (!upload) {
+            return { ok: false, message: `upload not found: ${uploadId}` };
+          }
+          if (upload.kind === "other") {
+            return {
+              ok: false,
+              message: `unsupported upload type: ${upload.name}`,
+            };
+          }
+          doc = await files.importDocument({
+            name: str(args, "name") || upload.name,
+            bytes: upload.bytes,
+            select: false,
+          });
+        } else {
+          doc = await files.importDocument({
+            name: str(args, "name") || "import.svg3dx",
+            content: contentArg,
+            select: false,
+          });
+        }
+        await maybeOpenFile(files, nav, doc, bool(args, "open", false));
+        return {
+          ok: true,
+          message: `imported:${doc.id}`,
+          data: fileRef(doc),
+        };
+      } catch (e) {
+        if (e instanceof FileNameConflictError) return nameConflictResult(e);
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }
     case "rename_file": {
       const id = str(args, "id") || files.activeId || "";
       const newName = str(args, "name");
@@ -225,8 +355,25 @@ export async function runStudioChatTool(
       if (!files.files.some((f) => f.id === id)) {
         return { ok: false, message: `file not found: ${id}` };
       }
-      await files.rename(id, newName);
-      return { ok: true, message: `renamed:${id}`, data: { id, name: newName } };
+      try {
+        await files.rename(id, newName);
+        const renamed = files.getById(id);
+        return {
+          ok: true,
+          message: `renamed:${id}`,
+          data: {
+            id,
+            name: renamed?.name ?? newName,
+            route: `/edit/${id}`,
+          },
+        };
+      } catch (e) {
+        if (e instanceof FileNameConflictError) return nameConflictResult(e);
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
     }
     case "remove_file": {
       const id = str(args, "id");

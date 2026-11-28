@@ -26,14 +26,48 @@ export const EMPTY_DOCUMENT_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 
 const UNTITLED = "untitled.svg3dx";
 
+function takenNameSet(existingNames: Iterable<string>): Set<string> {
+  return new Set([...existingNames].map((n) => n.trim().toLowerCase()));
+}
+
+/** Ensure a `.svg3dx` / `.svg3dxz` / `.svg` extension; default `.svg3dx`. */
+export function ensureDocumentFileName(name: string): string {
+  const trimmed = name.trim() || "untitled";
+  if (/\.(svg3dxz|svg3dx|svg)$/i.test(trimmed)) return trimmed;
+  return `${trimmed}.svg3dx`;
+}
+
 /** Next free `untitled.svg3dx` / `untitled-2.svg3dx` … among existing names. */
 export function nextUntitledName(existingNames: Iterable<string>): string {
-  const taken = new Set(
-    [...existingNames].map((n) => n.trim().toLowerCase())
-  );
-  if (!taken.has(UNTITLED)) return UNTITLED;
+  return nextUniqueFileName(UNTITLED, existingNames);
+}
+
+/**
+ * Next free name from a preferred base (`foo.svg3dx` → `foo-2.svg3dx` …).
+ * Case-insensitive against existing names.
+ */
+export function nextUniqueFileName(
+  preferred: string,
+  existingNames: Iterable<string>
+): string {
+  const base = ensureDocumentFileName(preferred);
+  const taken = takenNameSet(existingNames);
+  if (!taken.has(base.toLowerCase())) return base;
+  const stem = base.replace(/\.(svg3dxz|svg3dx|svg)$/i, "");
+  const ext = base.slice(stem.length) || ".svg3dx";
   for (let i = 2; ; i++) {
-    const name = `untitled-${i}.svg3dx`;
-    if (!taken.has(name)) return name;
+    const name = `${stem}-${i}${ext}`;
+    if (!taken.has(name.toLowerCase())) return name;
   }
+}
+
+/** Default duplicate name: `copy of X.svg3dx`, falling back to unique suffix. */
+export function nextCopyFileName(
+  sourceName: string,
+  existingNames: Iterable<string>
+): string {
+  const base = ensureDocumentFileName(sourceName);
+  const stem = base.replace(/\.(svg3dxz|svg3dx|svg)$/i, "");
+  const ext = base.slice(stem.length) || ".svg3dx";
+  return nextUniqueFileName(`copy of ${stem}${ext}`, existingNames);
 }

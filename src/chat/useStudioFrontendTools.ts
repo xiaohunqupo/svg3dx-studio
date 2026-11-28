@@ -19,6 +19,70 @@ export function useStudioFrontendTools(): void {
   });
 
   useFrontendTool({
+    name: "create_file",
+    description:
+      "Create a new .svg3dx document in the file library (blank box template by default). Does not overwrite an existing name — on conflict returns conflictingId. Returns { id, name, route }. Call go_edit({ id }) or pass open:true to enter the editor. Prefer this over set_source when the user wants a new file.",
+    parameters: z.object({
+      name: z
+        .string()
+        .optional()
+        .describe("File name, e.g. demo.svg3dx. Defaults to untitled.svg3dx"),
+      open: z
+        .boolean()
+        .optional()
+        .describe("If true, navigate to the new document edit page"),
+      content: z
+        .string()
+        .optional()
+        .describe("Optional initial SVG3DX XML; defaults to the blank template"),
+    }),
+    handler: async (args) => run("create_file", args),
+  });
+
+  useFrontendTool({
+    name: "duplicate_file",
+    description:
+      "Copy an existing library document and its sidecar assets under a new id. Does not modify the source. Same-name conflicts fail (no silent overwrite). Returns { id, name, route }.",
+    parameters: z.object({
+      id: z.string().describe("Source document id from list_files"),
+      name: z
+        .string()
+        .optional()
+        .describe("Name for the copy; defaults to 'copy of …'"),
+      open: z
+        .boolean()
+        .optional()
+        .describe("If true, navigate to the duplicated document"),
+    }),
+    handler: async (args) => run("duplicate_file", args),
+  });
+
+  useFrontendTool({
+    name: "import_file",
+    description:
+      "Import a user-uploaded .svg3dx / .svg3dxz into the file library (packages keep assets). Pass uploadId from context.pendingUploads after the user attaches a file in chat. Optional content imports loose XML without an upload. Same-name conflicts fail. Returns { id, name, route }.",
+    parameters: z.object({
+      uploadId: z
+        .string()
+        .optional()
+        .describe("Id from context.pendingUploads after a chat attachment"),
+      name: z
+        .string()
+        .optional()
+        .describe("Library file name; defaults to the upload / import.svg3dx"),
+      open: z
+        .boolean()
+        .optional()
+        .describe("If true, navigate to the imported document"),
+      content: z
+        .string()
+        .optional()
+        .describe("Loose SVG3DX XML when no uploadId (not for .svg3dxz packages)"),
+    }),
+    handler: async (args) => run("import_file", args),
+  });
+
+  useFrontendTool({
     name: "go_browse",
     description:
       "Navigate to the browse page. Use only when the user asks to leave the editor / see the file list.",
@@ -28,9 +92,9 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "go_edit",
     description:
-      "Open another document by id. Use only when the user asks to switch files — not needed if already editing.",
+      "Open another document by id. Use only when the user asks to switch files — not needed if already editing. Switching keeps other files' unsaved in-memory drafts.",
     parameters: z.object({
-      id: z.string().describe("Document id from list_files"),
+      id: z.string().describe("Document id from list_files / create_file"),
     }),
     handler: async ({ id }) => run("go_edit", { id }),
   });

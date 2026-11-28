@@ -22,10 +22,6 @@ import {
   putDocumentAsset,
 } from "@/utils/documentAssets";
 import {
-  EMPTY_DOCUMENT_TEMPLATE,
-  nextUntitledName,
-} from "@/utils/emptyDocument";
-import {
   fetchOfficialSamples,
   preferredSampleName,
   supersededLooseNames,
@@ -237,10 +233,9 @@ async function onFiles(list: FileList | File[]): Promise<void> {
 
 async function createEmptyFile(): Promise<void> {
   try {
-    const name = nextUntitledName(store.files.map((f) => f.name));
-    await store.upsertFromText(name, EMPTY_DOCUMENT_TEMPLATE);
+    const file = await store.createDocument();
     await refreshPreviewAssets();
-    MessagePlugin.success(t("browse.fileCreated", { name }));
+    MessagePlugin.success(t("browse.fileCreated", { name: file.name }));
   } catch (e) {
     MessagePlugin.error(e instanceof Error ? e.message : String(e));
   }

@@ -315,6 +315,37 @@ const KIND_NOTES: Record<
       step: "Increment.",
     },
   },
+  animate: {
+    coords:
+      "Parameter timeline. Must be a direct child of the scope host (root svg or a <g> that declares the custom property). attributeName is a dashed-ident such as --H.",
+    params: {
+      attributeName: "CSS custom property with leading -- (e.g. --H). Must already be declared on the parent scope.",
+      from: "Start scalar.",
+      to: "End scalar.",
+      dur: "One-cycle duration: Ns or Nms.",
+      repeat:
+        "Non-negative integer play count. 0 = indefinite loop (not Infinity / indefinite). Omit for one play (default 1).",
+      begin: "Offset from document clock zero; same syntax as dur. Default 0s.",
+      fill: "After the active interval: remove (default) or freeze.",
+      calcMode: "Interpolation easing: linear / sine / cosine / tan / cotan.",
+    },
+  },
+  animateTransform: {
+    coords:
+      "Transform animation as a direct child of the transformed node. Composites with the author's s3dx:transform; does not rewrite the DOM attribute.",
+    params: {
+      attributeName: "Fixed as transform (means s3dx:transform, not SVG 2D transform).",
+      type: "translate | rotate | scale.",
+      from: "Three numbers (rotate in degrees).",
+      to: "Three numbers (rotate in degrees).",
+      dur: "One-cycle duration: Ns or Nms.",
+      repeat:
+        "Non-negative integer play count. 0 = indefinite loop (not Infinity / indefinite). Omit for one play (default 1).",
+      begin: "Offset from document clock zero; same syntax as dur. Default 0s.",
+      fill: "After the active interval: remove (default) or freeze.",
+      calcMode: "Interpolation easing: linear / sine / cosine / tan / cotan.",
+    },
+  },
 };
 
 /**
@@ -1165,6 +1196,9 @@ function schemaParam(
     onInvalid = "href must be #groupId of a <g> under defs. An unknown target draws nothing.";
   } else if (name === "href" && kind === "gltf") {
     onInvalid = "href is a document-relative asset path. A missing file draws nothing.";
+  } else if (name === "repeat" && anim) {
+    onInvalid =
+      "Must be a non-negative integer. 0 means indefinite loop. Values such as Infinity or indefinite warn and play once.";
   }
 
   const param: SchemaParam = {
@@ -1179,6 +1213,11 @@ function schemaParam(
   if (kind === "prism" && name === "height") param.whenOmitted = "1";
   if (kind === "prism" && name === "normal") {
     param.whenOmitted = "(p1-p0) × (p2-p0), or +Z when that cross product is degenerate";
+  }
+  if (name === "repeat" && anim) {
+    param.type = "number";
+    param.min = 0;
+    param.whenOmitted = "1";
   }
   if (name === "metalness" || name === "roughness" || name === "opacity") {
     param.min = 0;

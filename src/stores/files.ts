@@ -6,7 +6,15 @@ import type { StudioDocument } from "@/repos/types";
 import {
   deleteDocumentAssets,
   ingestPackageAssets,
+  listDocumentAssets,
+  putDocumentAsset,
 } from "@/utils/documentAssets";
+import {
+  EMPTY_DOCUMENT_TEMPLATE,
+  ensureDocumentFileName,
+  nextCopyFileName,
+  nextUntitledName,
+} from "@/utils/emptyDocument";
 import {
   isSvg3dxzFileName,
   openSvg3dxzBytes,
@@ -15,6 +23,22 @@ import {
 
 function normalizeName(name: string): string {
   return name.trim() || "untitled.svg3dx";
+}
+
+function namesEqual(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+export class FileNameConflictError extends Error {
+  readonly conflictingId: string;
+  readonly conflictingName: string;
+
+  constructor(conflictingId: string, conflictingName: string) {
+    super(`name already exists: ${conflictingName}`);
+    this.name = "FileNameConflictError";
+    this.conflictingId = conflictingId;
+    this.conflictingName = conflictingName;
+  }
 }
 
 async function readActiveId(): Promise<string | null> {
@@ -62,6 +86,125 @@ export const useFilesStore = defineStore("files", () => {
     if (!files.value.some((f) => f.id === id)) return;
     activeId.value = id;
     await writeActiveId(id);
+  }
+
+  function findByName(name: string): StudioDocument | undefined {
+    return files.value.find((f) => namesEqual(f.name, name));
+  }
+
+  function assertUniqueName(name: string): string {
+    const normalized = normalizeName(name);
+    const existing = findByName(normalized);
+    if (existing) {
+      throw new FileNameConflictError(existing.id, existing.name);
+    }
+    return normalized;
+  }
+
+  async function insertNewDocument(
+    name: string,
+    content: string,
+    opts?: { select?: boolean; documentBaseUrl?: string }
+  ): Promise<StudioDocument> {
+    const repo = getDocumentRepository();
+    const file: StudioDocument = {
+      id: createFileId(),
+      name: assertUniqueName(name),
+      content,
+      updatedAt: Date.now(),
+      dirty: false,
+      documentBaseUrl: opts?.documentBaseUrl,
+    };
+    files.value = [file, ...files.value];
+    await repo.save(file);
+    if (opts?.select !== false) {
+      activeId.value = file.id;
+      await writeActiveId(file.id);
+    }
+    return file;
+  }
+
+  /**
+   * Create a new library document. Never overwrites by name.
+   * Omitting `name` picks the next `untitled.svg3dx`.
+   */
+  async function createDocument(opts?: {
+    name?: string;
+    content?: string;
+    select?: boolean;
+  }): Promise<StudioDocument> {
+    const name = opts?.name?.trim()
+      ? ensureDocumentFileName(opts.name)
+      : nextUntitledName(files.value.map((f) => f.name));
+    return insertNewDocument(
+      name,
+      opts?.content?.trim() ? opts.content : EMPTY_DOCUMENT_TEMPLATE,
+      { select: opts?.select }
+    );
+  }
+
+  /** Copy a document and its sidecar assets under a new id. */
+  async function duplicateDocument(
+    sourceId: string,
+    opts?: { name?: string; select?: boolean }
+  ): Promise<StudioDocument> {
+    const source = files.value.find((f) => f.id === sourceId);
+    if (!source) throw new Error(`file not found: ${sourceId}`);
+    const name = opts?.name?.trim()
+      ? ensureDocumentFileName(opts.name)
+      : nextCopyFileName(
+          source.name,
+          files.value.map((f) => f.name)
+        );
+    const file = await insertNewDocument(name, source.content, {
+      select: opts?.select,
+      documentBaseUrl: source.documentBaseUrl,
+    });
+    const assets = await listDocumentAssets(sourceId);
+    for (const asset of assets) {
+      await putDocumentAsset(file.id, asset.path, asset.blob, asset.mime);
+    }
+    return file;
+  }
+
+  /**
+   * Import XML or a `.svg3dxz` package into the library without overwriting.
+   * Pass `bytes` for packages (and optional plain XML); `content` for loose XML.
+   */
+  async function importDocument(opts: {
+    name: string;
+    content?: string;
+    bytes?: ArrayBuffer | Uint8Array;
+    select?: boolean;
+  }): Promise<StudioDocument> {
+    const rawName = opts.name.trim() || "import.svg3dx";
+    if (isSvg3dxzFileName(rawName)) {
+      if (!opts.bytes) {
+        throw new Error("svg3dxz import requires package bytes");
+      }
+      const opened = await openSvg3dxzBytes(opts.bytes);
+      const file = await insertNewDocument(
+        packageDisplayName(rawName),
+        opened.mainXml,
+        {
+          select: opts.select,
+          documentBaseUrl: "",
+        }
+      );
+      await ingestPackageAssets(file.id, opened.assets);
+      return file;
+    }
+
+    let content = opts.content;
+    if (!content && opts.bytes) {
+      content = new TextDecoder().decode(opts.bytes);
+    }
+    if (!content?.trim()) {
+      throw new Error("import requires content or bytes");
+    }
+    return insertNewDocument(ensureDocumentFileName(rawName), content, {
+      select: opts.select,
+    });
   }
 
   async function upsertFromText(
@@ -177,9 +320,14 @@ export const useFilesStore = defineStore("files", () => {
   async function rename(id: string, name: string): Promise<void> {
     const target = files.value.find((f) => f.id === id);
     if (!target) return;
+    const normalized = ensureDocumentFileName(normalizeName(name));
+    const clash = findByName(normalized);
+    if (clash && clash.id !== id) {
+      throw new FileNameConflictError(clash.id, clash.name);
+    }
     const next: StudioDocument = {
       ...target,
-      name: normalizeName(name),
+      name: normalized,
       updatedAt: Date.now(),
     };
     files.value = files.value.map((f) => (f.id === id ? next : f));
@@ -226,6 +374,10 @@ export const useFilesStore = defineStore("files", () => {
     loading,
     hydrate,
     select,
+    findByName,
+    createDocument,
+    duplicateDocument,
+    importDocument,
     upsertFromText,
     addBrowserFiles,
     updateContent,

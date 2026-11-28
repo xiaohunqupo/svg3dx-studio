@@ -215,18 +215,38 @@ function elementEnd(svg: string, open: OpenTag): number {
   return open.end;
 }
 
+/**
+ * Range of the depth-matched closing tag for `open`.
+ * Must use the *last* same-local-name close in the element span — the first
+ * `</g>` inside a nested group would truncate siblings.
+ */
+function closingTagRange(
+  svg: string,
+  open: OpenTag
+): { start: number; end: number } | null {
+  if (open.selfClosing) return null;
+  const fullEnd = elementEnd(svg, open);
+  const inner = svg.slice(open.end, fullEnd);
+  const closeRe = new RegExp(
+    `<\\/(?:[\\w.-]+:)?${open.local}\\s*>`,
+    "gi"
+  );
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = closeRe.exec(inner))) last = m;
+  if (!last) return null;
+  return {
+    start: open.end + last.index,
+    end: open.end + last.index + last[0].length,
+  };
+}
+
 /** Direct child element open tags inside parent (document order). */
 function childOpens(svg: string, parent: OpenTag): OpenTag[] {
   if (parent.selfClosing) return [];
   const innerStart = parent.end;
-  const closeEnd = elementEnd(svg, parent);
-  const closeRe = new RegExp(
-    `<\\/(?:[\\w.-]+:)?${parent.local}\\s*>`,
-    "i"
-  );
-  const closeSlice = svg.slice(innerStart, closeEnd);
-  const cm = closeRe.exec(closeSlice);
-  const bodyEnd = cm ? innerStart + cm.index : closeEnd;
+  const close = closingTagRange(svg, parent);
+  const bodyEnd = close?.start ?? elementEnd(svg, parent);
   return childOpensAccurate(svg, innerStart, bodyEnd);
 }
 
@@ -501,22 +521,8 @@ function tagPairFromOpen(
 ): { open: TextRange; close: TextRange | null } {
   const openRange = { start: open.start, end: open.end };
   if (open.selfClosing) return { open: openRange, close: null };
-  const fullEnd = elementEnd(content, open);
-  const inner = content.slice(open.end, fullEnd);
-  const closeRe = new RegExp(`<\\/(?:[\\w.-]+:)?${open.local}\\s*>`, "gi");
-  let last: RegExpExecArray | null = null;
-  let m: RegExpExecArray | null;
-  while ((m = closeRe.exec(inner))) last = m;
-  if (!last || last.index === undefined) {
-    return { open: openRange, close: null };
-  }
-  return {
-    open: openRange,
-    close: {
-      start: open.end + last.index,
-      end: open.end + last.index + last[0].length,
-    },
-  };
+  const close = closingTagRange(content, open);
+  return { open: openRange, close };
 }
 
 /**
@@ -827,13 +833,9 @@ export function insertXmlAtPath(
     return content.slice(0, open.start) + replacement + content.slice(open.end);
   }
 
-  const end = elementEnd(content, open);
-  const closeRe = new RegExp(`<\\/(?:[\\w.-]+:)?${open.local}\\s*>`, "i");
-  const closeSlice = content.slice(open.end, end);
-  const cm = closeRe.exec(closeSlice);
-  if (!cm) return null;
-  const insertAt = open.end + cm.index;
-  return content.slice(0, insertAt) + padded + content.slice(insertAt);
+  const close = closingTagRange(content, open);
+  if (!close) return null;
+  return content.slice(0, close.start) + padded + content.slice(close.start);
 }
 
 /** Local tag without namespace prefix, lowercased. */
