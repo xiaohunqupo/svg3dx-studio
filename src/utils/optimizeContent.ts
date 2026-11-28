@@ -252,21 +252,19 @@ function removeEmptyGroups(svg: string, stats: OptimizeStats): string {
   return out;
 }
 
+/** Document material ids referenced as `url(#id)` on `material` or `--material`. */
 function collectUsedMaterialIds(svg: string): Set<string> {
   const used = new Set<string>();
-  const re =
-    /\bmaterial\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  const attrRe = /\bmaterial\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(svg))) {
+  while ((m = attrRe.exec(svg))) {
     const raw = (m[1] ?? m[2] ?? "").trim();
-    if (!raw) continue;
-    const url = /^url\(\s*#\s*([^)\s]+)\s*\)$/i.exec(raw);
-    if (url) {
-      used.add(url[1]!);
-      continue;
-    }
-    if (raw.startsWith("#")) used.add(raw.slice(1));
-    else if (!/[\s(/]/.test(raw)) used.add(raw);
+    const url = /^url\(\s*#([^)\s]+)\s*\)$/i.exec(raw);
+    if (url?.[1]) used.add(url[1]);
+  }
+  const cssRe = /--material\s*:\s*url\(\s*#([^)\s]+)\s*\)/gi;
+  while ((m = cssRe.exec(svg))) {
+    if (m[1]) used.add(m[1]);
   }
   return used;
 }

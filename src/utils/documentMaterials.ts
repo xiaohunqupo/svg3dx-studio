@@ -42,22 +42,9 @@ function attrOf(attrs: string, name: string): string | null {
 }
 
 /**
- * Normalize material attr for the picker: bare document ids → `url(#id)`.
- * Built-in keywords and existing `url(#…)` are unchanged.
+ * Rewrite `url(#old)` after a document material id rename.
+ * Bare names are built-in keywords, not document ids, so `material="old"` stays.
  */
-export function normalizeMaterialAttr(
-  raw: string,
-  documentIds: Iterable<string>
-): string {
-  const s = raw.trim();
-  if (!s) return "";
-  if (/^url\(\s*#/i.test(s)) return s;
-  const ids = documentIds instanceof Set ? documentIds : new Set(documentIds);
-  if (ids.has(s)) return `url(#${s})`;
-  return s;
-}
-
-/** Rewrite `material="url(#old)"` / `material="old"` after a document material id rename. */
 export function rewriteMaterialIdRefs(
   content: string,
   oldId: string,
@@ -65,13 +52,8 @@ export function rewriteMaterialIdRefs(
 ): string {
   if (!oldId || !newId || oldId === newId) return content;
   const esc = oldId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  let out = content.replace(
+  return content.replace(
     new RegExp(`url\\(\\s*#${esc}\\s*\\)`, "gi"),
     `url(#${newId})`
   );
-  out = out.replace(
-    new RegExp(`(\\bmaterial\\s*=\\s*)(["'])${esc}\\2`, "gi"),
-    `$1$2${newId}$2`
-  );
-  return out;
 }

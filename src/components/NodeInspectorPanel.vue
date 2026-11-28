@@ -55,10 +55,7 @@ import {
   type TransformTrsKey,
 } from "@/utils/nodeSchema";
 import { previewExprResult } from "@/utils/exprEval";
-import {
-  extractDocumentMaterials,
-  normalizeMaterialAttr,
-} from "@/utils/documentMaterials";
+import { extractDocumentMaterials } from "@/utils/documentMaterials";
 import {
   DEFAULT_FILL_HEX8,
   DEFAULT_MATERIAL_COLOR_HEX8,
@@ -287,9 +284,6 @@ function seedDraft(fields: FieldRow[], path: string): void {
   const pathChanged = draftPath !== path;
   draftPath = path;
   for (const k of Object.keys(draft)) delete draft[k];
-  const docIds = new Set(
-    extractDocumentMaterials(props.content ?? "").map((m) => m.id)
-  );
   fillHexUi.value = "";
   // Keep transform split open across content refreshes on the same node
   // (commit → XML update → watch). Only collapse when selection path changes.
@@ -302,7 +296,7 @@ function seedDraft(fields: FieldRow[], path: string): void {
     // Display-only rows can share a name with a real XML attribute (e.g. type).
     if (f.readonly) continue;
     if (f.name === "material") {
-      draft[f.name] = normalizeMaterialAttr(f.value, docIds);
+      draft[f.name] = f.value;
     } else if (f.name === "s3dx:transform") {
       draft[f.name] = transformToDisplay(f.value);
       transformForm.value = detectTransformForm(f.value || draft[f.name]);
@@ -1455,8 +1449,7 @@ const selectedMaterialColor = computed((): string | undefined => {
   }
   const builtin = BUILTIN_MATERIALS[ref];
   if (builtin?.color) return builtin.color.join(" ");
-  const bare = docs.find((m) => m.id === ref);
-  return bare?.color;
+  return undefined;
 });
 
 const materialSelectOptions = computed((): SelectOption[] => {

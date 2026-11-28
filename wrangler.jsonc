@@ -4,6 +4,9 @@
   "main": "workers/copilot/index.mjs",
   "compatibility_date": "2026-11-28",
   "compatibility_flags": ["nodejs_compat"],
+  // Paid Workers only. Default is 30s; long reasoning streams get killed with
+  // Error 1102 ("Exceeded CPU time limit") and the chat stops mid-thought.
+  "limits": { "cpu_ms": 300000 },
   // Hostname is attached in the Worker dashboard (Domains), not here.
   // A routes entry replaces that dashboard binding on the next deploy.
   "workers_dev": true
