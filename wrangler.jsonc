@@ -4,14 +4,7 @@
   "main": "workers/copilot/index.mjs",
   "compatibility_date": "2026-11-28",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
-  "routes": [
-    {
-      "pattern": "copilot.dannyxu.net",
-      "custom_domain": true
-    }
-  ],
-  "vars": {
-    "COPILOT_CORS_ORIGIN": "https://www.dannyxu.net,https://dannyxu.net,https://xiaohunqupo.github.io,http://localhost:5173,http://127.0.0.1:5173"
-  }
+  // Hostname is attached in the Worker dashboard (Domains), not here.
+  // A routes entry replaces that dashboard binding on the next deploy.
+  "workers_dev": true
 }
