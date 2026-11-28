@@ -83,7 +83,7 @@ Pages stays static. Point the SPA at a Worker with the build-time variable `VITE
 
 That value is not in the repo. For GitHub Actions, set the repository variable of the same name. For a local checkout, put it in `.env.local` (gitignored).
 
-The Worker's chat routes accept only Origins listed in the runtime variable `COPILOT_CORS_ORIGIN`. That list lives in the Cloudflare Worker settings, not in the repo; with the variable unset, those requests get 403 and never reach the model. A browser on another site cannot change `Origin`. Local development uses the Node runtime below.
+The Worker's chat routes accept only Origins listed in the runtime variable `COPILOT_CORS_ORIGIN`. That list lives in the Cloudflare Worker settings, not in the repo; with the variable unset, those requests get 403 and never reach the model. A browser on another site cannot change `Origin`. The custom hostname is attached under Domains in that same dashboard, not in `wrangler.jsonc`. Local development uses the Node runtime below.
 
 Pushing `release/0.2.1` publishes both. That branch name is `RELEASE_BRANCH` in `.github/workflows/ci.yml`; the next release line changes it once for Pages and the Worker. The repo secret `CLOUDFLARE_API_TOKEN` is what the Worker deploy uses.
 

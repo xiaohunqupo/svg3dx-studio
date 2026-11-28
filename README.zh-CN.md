@@ -83,7 +83,7 @@ Pages 仍是静态站。用构建期变量 `VITE_COPILOT_RUNTIME_URL` 把 SPA �
 
 这个地址不进仓库。GitHub Actions 里设同名的仓库变量；本地开发写在 `.env.local`（已被 git 忽略）。
 
-Worker 的对话接口只接受运行时变量 `COPILOT_CORS_ORIGIN` 里的页面来源。名单在 Cloudflare 控制台的 Worker 设置里，不写进仓库；没配这个变量时请求会 403。别的网站打开的浏览器改不了 `Origin`，所以不会转到模型。本地开发用下面的本机 Runtime。
+Worker 的对话接口只接受运行时变量 `COPILOT_CORS_ORIGIN` 里的页面来源。名单在 Cloudflare 控制台的 Worker 设置里，不写进仓库；没配这个变量时请求会 403。别的网站打开的浏览器改不了 `Origin`，所以不会转到模型。自定义域名同样在控制台的 Domains 里绑定，不写进 `wrangler.jsonc`。本地开发用下面的本机 Runtime。
 
 推送 `release/0.2.1` 会同时发布 Pages 和 Worker。分支名写在 `.github/workflows/ci.yml` 的 `RELEASE_BRANCH`；下次换发布分支时改这一处即可。Worker 部署使用仓库密钥 `CLOUDFLARE_API_TOKEN`。
 
