@@ -74,6 +74,21 @@ import {
   replaceChildrenAtPath,
 } from "@/utils/nodeXmlEdit";
 import {
+  applyAttrsToSnippet,
+  applyNodeUpdates,
+  classifyRenderWarning,
+  findNodeById,
+  lastChildHandle,
+  listDocumentNodes,
+  materialView,
+  resolveNodeHandle,
+  validateNodeAttrs,
+} from "@/chat/documentQuery";
+import {
+  captureViewerFrame,
+  type PreviewView,
+} from "@/chat/capturePreview";
+import {
   isSectionEditable,
   readSectionElementXml,
 } from "@/utils/shapeSvgEditor";
@@ -595,9 +610,16 @@ function editOk(
   return data === undefined ? { ok: true, message } : { ok: true, message, data };
 }
 
-function editFail(message: string): StudioEditToolResult {
-  return { ok: false, message };
+function editFail(message: string, data?: unknown): StudioEditToolResult {
+  return data === undefined ? { ok: false, message } : { ok: false, message, data };
 }
+
+const AI_TOOL_HINTS = [
+  "Handles come from list_nodes or find_node_by_id (defs:group.0, model:id.0). An xml id is not a handle unless the element is a <g>.",
+  "assign_material writes built-ins as material=\"steel\" and document materials as material=\"url(#id)\". get_material reports the effective material and whether an invalid reference fell back to default.",
+  "Call get_node_schema(kind) before inserting. add_child and insert_at_path accept attrs. update_nodes validates every edit and commits them as one undo.",
+  "capture_preview returns a JPEG data URL plus geometry and material warnings.",
+];
 
 function getEditSnapshot() {
   const sel = selected.value;
@@ -617,7 +639,31 @@ function getEditSnapshot() {
       animTools: showAnimTools.value,
       nodeParams: showNodeParams.value,
     },
+    toolHints: AI_TOOL_HINTS,
   };
+}
+
+async function commitAiContent(
+  next: string,
+  message: string,
+  data: unknown,
+  syncPath?: string
+): Promise<StudioEditToolResult> {
+  if (!file.value) return editFail("no active file");
+  const formatted = await formatDraftContent(normalizeXmlNewlines(next));
+  if (formatted === draftContent.value) return editOk(message, data);
+  draftContent.value = formatted;
+  await store.updateContent(file.value.id, formatted, true);
+  await nextTick();
+  if (syncPath) treePanel.value?.syncAfterEdit(syncPath);
+  else revealSelectedInSource({ scroll: false });
+  return editOk(message, data);
+}
+
+function parentGroupFromPath(path: string): string {
+  const info = nodeKindAtPath(draftContent.value, path);
+  if (info?.kind === "group" && info.id) return info.id;
+  return "";
 }
 
 async function applyBridgeSource(
@@ -754,14 +800,35 @@ onMounted(async () => {
     },
     updateNodeAttrs: async (path, updates) => {
       if (!file.value) return editFail("no active file");
+      const resolved = resolveNodeHandle(draftContent.value, path);
+      if (!resolved.ok) return editFail(resolved.message, resolved.candidates);
+      const valid = validateNodeAttrs(
+        draftContent.value,
+        resolved.node.kind,
+        resolved.handle,
+        updates,
+        { allowIdentityRename: true }
+      );
+      if (!valid.ok) return editFail(valid.message);
       const before = draftContent.value;
-      await onNodeAttrsChange({ path, updates });
+      await onNodeAttrsChange({ path: resolved.handle, updates: valid.updates });
       if (draftContent.value === before) {
         return editFail("attrs unchanged or path not found");
       }
+      const renamed = valid.updates.id?.trim();
+      const readPath =
+        renamed && resolved.node.kind === "material"
+          ? `material:${renamed}`
+          : renamed && resolved.node.kind === "model" && !resolved.handle.includes(".")
+            ? `model:${renamed}`
+            : resolved.handle;
       return editOk("attrs updated", {
-        path,
-        attrs: readAttrsAtPath(draftContent.value, path),
+        path: readPath,
+        ...(resolved.resolvedFromId
+          ? { resolvedFromId: resolved.resolvedFromId }
+          : {}),
+        ...(valid.notes.length ? { notes: valid.notes } : {}),
+        attrs: readAttrsAtPath(draftContent.value, readPath),
       });
     },
     addGroup: async () => {
@@ -803,13 +870,64 @@ onMounted(async () => {
     },
     addChild: async (opts) => {
       if (!file.value) return editFail("no active file");
-      if (opts.kind === "gltf" && !opts.href?.trim()) {
+      let parentPath = opts.parentPath?.trim() || "";
+      let parentGroupId = opts.parentGroupId?.trim() || "";
+      if (!parentPath && parentGroupId) parentPath = `defs:${parentGroupId}`;
+      if (!parentGroupId && parentPath) parentGroupId = parentGroupFromPath(parentPath);
+      if (!parentGroupId || !parentPath) {
+        return editFail("missing parent group handle");
+      }
+      const attrs = { ...(opts.attrs ?? {}) };
+      const href = (attrs.href || opts.href || "").trim();
+      if (href) attrs.href = href;
+      if (opts.kind === "gltf" && !href) {
         return editFail("gltf add_child requires href");
       }
-      const before = draftContent.value;
-      await onAddChild(opts);
-      if (draftContent.value === before) return editFail("add child failed");
-      return editOk("child added", opts);
+      const kindName = opts.kind === "group" ? "group" : opts.kind;
+      if (Object.keys(attrs).length) {
+        const valid = validateNodeAttrs(
+          draftContent.value,
+          kindName,
+          null,
+          attrs
+        );
+        if (!valid.ok) return editFail(valid.message);
+      }
+      const snippet =
+        opts.kind === "gltf" && href ? gltfSnippet(href) : undefined;
+      const inserted = insertChildIntoGroup(
+        draftContent.value,
+        parentGroupId,
+        opts.kind,
+        snippet ? { snippet } : undefined
+      );
+      if (inserted.content === draftContent.value) {
+        return editFail("add child failed");
+      }
+      let content = inserted.content;
+      const handle = lastChildHandle(content, parentPath);
+      if (!handle) return editFail("add child failed");
+      let notes: string[] = [];
+      if (Object.keys(attrs).length) {
+        const valid = validateNodeAttrs(
+          content,
+          nodeKindAtPath(content, handle)?.kind ?? kindName,
+          handle,
+          attrs
+        );
+        if (!valid.ok) return editFail(valid.message);
+        const patched = applyAttrsAtPath(content, handle, valid.updates);
+        if (!patched) return editFail("failed to apply attrs");
+        content = patched;
+        notes = valid.notes;
+      }
+      const id = nodeKindAtPath(content, handle)?.id || inserted.childId || null;
+      return commitAiContent(
+        content,
+        "child added",
+        { handle, kind: opts.kind, id, ...(notes.length ? { notes } : {}) },
+        parentPath
+      );
     },
     addUse: async (opts) => {
       if (!file.value) return editFail("no active file");
@@ -826,13 +944,170 @@ onMounted(async () => {
     },
     insertAtPath: async (opts) => {
       if (!file.value) return editFail("no active file");
-      if (opts.kind === "gltf" && !opts.href?.trim()) {
+      const parentPath = opts.parentPath.trim();
+      const attrs = { ...(opts.attrs ?? {}) };
+      const href = (attrs.href || opts.href || "").trim();
+      if (href) attrs.href = href;
+      if (opts.kind === "gltf" && !href) {
         return editFail("gltf insert_at_path requires href");
       }
-      const before = draftContent.value;
-      await onInsertChildAtPath(opts);
-      if (draftContent.value === before) return editFail("insert failed");
-      return editOk("inserted", opts);
+      const parentKind = nodeKindAtPath(draftContent.value, parentPath)?.kind;
+      let snippet =
+        opts.kind === "gltf" && href
+          ? gltfSnippet(href)
+          : snippetForPathInsert(opts.kind, parentKind);
+      if (!snippet) return editFail(`unknown kind: ${opts.kind}`);
+      let notes: string[] = [];
+      if (Object.keys(attrs).length) {
+        const valid = validateNodeAttrs(
+          draftContent.value,
+          opts.kind,
+          null,
+          attrs
+        );
+        if (!valid.ok) return editFail(valid.message);
+        snippet = applyAttrsToSnippet(snippet, valid.updates);
+        notes = valid.notes;
+      }
+      const content = insertXmlAtPath(
+        draftContent.value,
+        parentPath,
+        `      ${snippet}`
+      );
+      if (!content) return editFail("insert failed");
+      const handle = lastChildHandle(content, parentPath);
+      if (!handle) return editFail("insert failed");
+      return commitAiContent(
+        content,
+        "inserted",
+        {
+          handle,
+          kind: opts.kind,
+          id: nodeKindAtPath(content, handle)?.id || null,
+          ...(notes.length ? { notes } : {}),
+        },
+        parentPath
+      );
+    },
+    listNodes: (opts = {}) => {
+      const scope = opts.scope ?? "all";
+      if (
+        scope !== "all" &&
+        scope !== "definitions" &&
+        scope !== "instances" &&
+        scope !== "materials"
+      ) {
+        return editFail("scope must be all|definitions|instances|materials");
+      }
+      const data = listDocumentNodes(draftContent.value, {
+        scope,
+        kind: opts.kind,
+        limit: opts.limit,
+      });
+      return editOk(`nodes:${data.nodes.length}`, data);
+    },
+    findNodeById: (id) => {
+      const matches = findNodeById(draftContent.value, id);
+      if (!matches.length) {
+        return editFail(
+          `no element with id '${id}'. Use list_nodes. Geometry ids are not tree handles.`
+        );
+      }
+      return editOk(`found:${matches.length}`, { id, matches });
+    },
+    getMaterial: (handle) => {
+      const resolved = resolveNodeHandle(draftContent.value, handle);
+      if (!resolved.ok) {
+        return editFail(resolved.message, resolved.candidates);
+      }
+      const view = materialView(draftContent.value, resolved.handle);
+      if (!view) return editFail(`path not found: ${resolved.handle}`);
+      return editOk(view.effective.fellBack ? "material fallback" : "material", {
+        ...view,
+        ...(resolved.resolvedFromId
+          ? { resolvedFromId: resolved.resolvedFromId }
+          : {}),
+      });
+    },
+    assignMaterial: async (handle, materialId) => {
+      if (!file.value) return editFail("no active file");
+      const resolved = resolveNodeHandle(draftContent.value, handle);
+      if (!resolved.ok) {
+        return editFail(resolved.message, resolved.candidates);
+      }
+      const valid = validateNodeAttrs(
+        draftContent.value,
+        resolved.node.kind,
+        resolved.handle,
+        { material: materialId }
+      );
+      if (!valid.ok) return editFail(valid.message);
+      const next = applyAttrsAtPath(
+        draftContent.value,
+        resolved.handle,
+        valid.updates
+      );
+      if (!next) return editFail(`path not found: ${resolved.handle}`);
+      const view = materialView(next, resolved.handle);
+      const overridden = view?.overridden === true;
+      return commitAiContent(
+        next,
+        overridden
+          ? "material assigned; a class or inline style still overrides it"
+          : "material assigned",
+        {
+          ...view,
+          ...(valid.notes.length ? { notes: valid.notes } : {}),
+          ...(resolved.resolvedFromId
+            ? { resolvedFromId: resolved.resolvedFromId }
+            : {}),
+        }
+      );
+    },
+    updateNodes: async (edits) => {
+      if (!file.value) return editFail("no active file");
+      const result = applyNodeUpdates(draftContent.value, edits);
+      if (!result.ok) return editFail(result.message, { errors: result.errors });
+      return commitAiContent(result.content, "nodes updated", {
+        count: result.results.length,
+        undo: "single",
+        results: result.results,
+      });
+    },
+    capturePreview: async (view) => {
+      const interact = interactHost.value?.getInteract() ?? null;
+      if (!interact) return editFail("viewport not ready");
+      let warnings: string[] = [];
+      try {
+        const result = await interact.applySvg(draftContent.value, {
+          fitCamera: false,
+        });
+        warnings = result.warnings ?? [];
+      } catch (err) {
+        return editFail(
+          err instanceof Error ? err.message : "preview evaluate failed"
+        );
+      }
+      const shot = await captureViewerFrame(interact.viewer, view as PreviewView);
+      if (!shot.ok) return editFail(shot.message);
+      const classified = warnings.map((message) => ({
+        message,
+        category: classifyRenderWarning(message),
+      }));
+      const materialWarnings = classified.filter((w) => w.category === "material").length;
+      const geometryWarnings = classified.filter((w) => w.category === "geometry").length;
+      return editOk(
+        `preview:${shot.view} materialWarnings:${materialWarnings} geometryWarnings:${geometryWarnings}`,
+        {
+          view: shot.view,
+          width: shot.width,
+          height: shot.height,
+          framed: shot.framed,
+          mime: "image/jpeg",
+          dataUrl: shot.dataUrl,
+          warnings: classified,
+        }
+      );
     },
     deleteAtPath: async (path) => {
       if (!file.value) return editFail("no active file");

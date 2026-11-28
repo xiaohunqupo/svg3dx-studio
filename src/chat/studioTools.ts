@@ -5,6 +5,8 @@ import {
   type StudioEditBridge,
   type StudioEditToolResult,
 } from "@/chat/editBridge";
+import { getNodeSchema } from "@/chat/documentQuery";
+import { normalizePreviewView } from "@/chat/capturePreview";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import { useFilesStore } from "@/stores/files";
 import type { AddChildKind } from "@/types/file";
@@ -39,7 +41,14 @@ export type StudioChatToolName =
   | "add_use"
   | "insert_at_path"
   | "delete_at_path"
-  | "set_panel";
+  | "set_panel"
+  | "list_nodes"
+  | "find_node_by_id"
+  | "get_node_schema"
+  | "get_material"
+  | "assign_material"
+  | "update_nodes"
+  | "capture_preview";
 
 export type StudioChatToolCall = {
   name: string;
@@ -73,6 +82,22 @@ function num(args: Record<string, unknown>, key: string): number | undefined {
   if (v === undefined || v === null || v === "") return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function asEdits(
+  raw: unknown
+): { handle: string; updates: Record<string, string> }[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: { handle: string; updates: Record<string, string> }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return null;
+    const rec = item as Record<string, unknown>;
+    const handle = String(rec.handle ?? rec.path ?? rec.id ?? rec.nodeId ?? "").trim();
+    const updates = asStringRecord(rec.updates);
+    if (!handle || !updates || !Object.keys(updates).length) return null;
+    out.push({ handle, updates });
+  }
+  return out;
 }
 
 function asStringRecord(raw: unknown): Record<string, string> | null {
@@ -248,17 +273,22 @@ export async function runStudioChatTool(
       return withEditBridge((bridge) => bridge.addStyleCategory());
     case "add_child": {
       const parentGroupId = str(args, "parentGroupId");
-      const parentPath = str(args, "parentPath");
+      const parentPath = str(args, "parentPath") || str(args, "handle");
       const kind = str(args, "kind") as AddChildKind;
-      if (!parentGroupId) return { ok: false, message: "missing parentGroupId" };
-      if (!parentPath) return { ok: false, message: "missing parentPath" };
+      if (!parentGroupId && !parentPath) {
+        return { ok: false, message: "missing parent handle" };
+      }
       if (!kind) return { ok: false, message: "missing kind" };
+      if (args.attrs !== undefined && !asStringRecord(args.attrs)) {
+        return { ok: false, message: "attrs must be a string map" };
+      }
       return withEditBridge((bridge) =>
         bridge.addChild({
-          parentGroupId,
+          parentGroupId: parentGroupId || undefined,
           parentPath,
           kind,
           href: str(args, "href") || undefined,
+          attrs: asStringRecord(args.attrs) ?? undefined,
         })
       );
     }
@@ -270,15 +300,19 @@ export async function runStudioChatTool(
         })
       );
     case "insert_at_path": {
-      const parentPath = str(args, "parentPath");
+      const parentPath = str(args, "parentPath") || str(args, "handle");
       const kind = str(args, "kind");
       if (!parentPath) return { ok: false, message: "missing parentPath" };
       if (!kind) return { ok: false, message: "missing kind" };
+      if (args.attrs !== undefined && !asStringRecord(args.attrs)) {
+        return { ok: false, message: "attrs must be a string map" };
+      }
       return withEditBridge((bridge) =>
         bridge.insertAtPath({
           parentPath,
           kind,
           href: str(args, "href") || undefined,
+          attrs: asStringRecord(args.attrs) ?? undefined,
         })
       );
     }
@@ -286,6 +320,73 @@ export async function runStudioChatTool(
       const path = str(args, "path");
       if (!path) return { ok: false, message: "missing path" };
       return withEditBridge((bridge) => bridge.deleteAtPath(path));
+    }
+    case "list_nodes": {
+      const scope = str(args, "scope") || "all";
+      if (
+        scope !== "all" &&
+        scope !== "definitions" &&
+        scope !== "instances" &&
+        scope !== "materials"
+      ) {
+        return {
+          ok: false,
+          message: "scope must be all|definitions|instances|materials",
+        };
+      }
+      return withEditBridge((bridge) =>
+        bridge.listNodes({
+          scope,
+          kind: str(args, "kind") || undefined,
+          limit: num(args, "limit"),
+        })
+      );
+    }
+    case "find_node_by_id": {
+      const id = str(args, "id");
+      if (!id) return { ok: false, message: "missing id" };
+      return withEditBridge((bridge) => bridge.findNodeById(id));
+    }
+    case "get_node_schema": {
+      const result = getNodeSchema(str(args, "kind") || "list");
+      if (!result.ok) {
+        return { ok: false, message: result.message, data: { kinds: result.kinds } };
+      }
+      return { ok: true, message: `schema:${result.schema.kind}`, data: result.schema };
+    }
+    case "get_material": {
+      const handle = str(args, "handle") || str(args, "path") || str(args, "id") || str(args, "nodeId");
+      if (!handle) return { ok: false, message: "missing handle" };
+      return withEditBridge((bridge) => bridge.getMaterial(handle));
+    }
+    case "assign_material": {
+      const handle = str(args, "handle") || str(args, "path") || str(args, "id") || str(args, "nodeId");
+      if (!handle) return { ok: false, message: "missing handle" };
+      if (args.materialId === undefined && args.material === undefined) {
+        return { ok: false, message: "missing materialId" };
+      }
+      const materialId = String(args.materialId ?? args.material ?? "");
+      return withEditBridge((bridge) => bridge.assignMaterial(handle, materialId));
+    }
+    case "update_nodes": {
+      const edits = asEdits(args.edits ?? args.updates);
+      if (!edits) {
+        return {
+          ok: false,
+          message: "edits must be [{ handle, updates }]",
+        };
+      }
+      return withEditBridge((bridge) => bridge.updateNodes(edits));
+    }
+    case "capture_preview": {
+      const view = normalizePreviewView(str(args, "view") || "current");
+      if (!view) {
+        return {
+          ok: false,
+          message: "view must be current|front|side|top|iso",
+        };
+      }
+      return withEditBridge((bridge) => bridge.capturePreview(view));
     }
     case "set_panel": {
       const panel = str(args, "panel") as

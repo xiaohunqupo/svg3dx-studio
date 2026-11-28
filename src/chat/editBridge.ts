@@ -23,6 +23,8 @@ export type StudioEditSnapshot = {
     animTools: boolean;
     nodeParams: boolean;
   };
+  /** Stable reminders for the assistant. Handles are tree paths, not xml ids. */
+  toolHints: string[];
 };
 
 export type StudioEditBridge = {
@@ -62,10 +64,11 @@ export type StudioEditBridge = {
   addRootAnimate: () => Promise<StudioEditToolResult>;
   addStyleCategory: () => Promise<StudioEditToolResult>;
   addChild: (opts: {
-    parentGroupId: string;
+    parentGroupId?: string;
     parentPath: string;
     kind: AddChildKind;
     href?: string;
+    attrs?: Record<string, string>;
   }) => Promise<StudioEditToolResult>;
   addUse: (opts: {
     href?: string;
@@ -75,7 +78,25 @@ export type StudioEditBridge = {
     parentPath: string;
     kind: string;
     href?: string;
+    attrs?: Record<string, string>;
   }) => Promise<StudioEditToolResult>;
+  listNodes: (opts?: {
+    scope?: "all" | "definitions" | "instances" | "materials";
+    kind?: string;
+    limit?: number;
+  }) => StudioEditToolResult;
+  findNodeById: (id: string) => StudioEditToolResult;
+  getMaterial: (handle: string) => StudioEditToolResult;
+  assignMaterial: (
+    handle: string,
+    materialId: string
+  ) => Promise<StudioEditToolResult>;
+  updateNodes: (
+    edits: { handle: string; updates: Record<string, string> }[]
+  ) => Promise<StudioEditToolResult>;
+  capturePreview: (
+    view: "current" | "front" | "side" | "top" | "iso"
+  ) => Promise<StudioEditToolResult>;
   deleteAtPath: (path: string) => Promise<StudioEditToolResult>;
   setPanel: (
     panel: "model" | "source" | "animTools" | "nodeParams",
