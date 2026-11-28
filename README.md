@@ -81,11 +81,13 @@ Studio ships a CopilotKit-based assistant as part of the page library. **Enabled
 
 The hosted runtime is a Cloudflare Worker at `https://copilot.dannyxu.net/api/copilotkit`. Pages stays static; the SPA build points at the Worker via `VITE_COPILOT_RUNTIME_URL`.
 
+Pushing `release/0.2.1` publishes both. That branch name is `RELEASE_BRANCH` in `.github/workflows/ci.yml`; the next release line changes it once for Pages and the Worker. The repo secret `CLOUDFLARE_API_TOKEN` is what the Worker deploy uses.
+
+Manual publish from a local checkout (same files `wrangler deploy` would upload):
+
 ```bash
-cd svg3dx-studio
-npm ci
-npx wrangler login          # once
-npm run copilot:deploy      # Worker + copilot.dannyxu.net
+npx wrangler login     # once
+npm run copilot:deploy
 ```
 
 Optional host-paid fallback (otherwise each visitor uses Settings):

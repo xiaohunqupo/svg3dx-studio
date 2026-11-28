@@ -2,6 +2,8 @@
 # Local full stack: `npm run build:all` (sets SVG3DX_USE_LOCAL=1).
 name: CI
 
+# Pages and the Copilot Worker both publish from RELEASE_BRANCH.
+# Next release line: add the new branch under push.branches, then change RELEASE_BRANCH.
 on:
   push:
     branches: [main, release/0.2.1]
@@ -19,6 +21,8 @@ permissions:
   id-token: write
 
 env:
+  # Shared publish branch for GitHub Pages and the Cloudflare Copilot Worker.
+  RELEASE_BRANCH: release/0.2.1
   # Project Pages URL path: https://<owner>.github.io/svg3dx-studio/
   # Cloudflare custom domain at site root: set VITE_BASE=/ in that project instead.
   VITE_BASE: /svg3dx-studio/
@@ -68,14 +72,14 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/release/0.2.1' && github.event_name != 'pull_request'
+        if: github.ref_name == env.RELEASE_BRANCH && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/release/0.2.1' && github.event_name != 'pull_request'
+    if: github.ref_name == env.RELEASE_BRANCH && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -84,3 +88,25 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-copilot:
+    needs: build
+    if: github.ref_name == env.RELEASE_BRANCH && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout svg3dx-studio
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Deploy Copilot runtime
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy

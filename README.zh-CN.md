@@ -81,11 +81,13 @@ Studio 内置基于 CopilotKit 的助手，属于页面库的一部分。**默�
 
 线上 Runtime 是 Cloudflare Worker：`https://copilot.dannyxu.net/api/copilotkit`。Pages 仍是静态站，SPA 构建用 `VITE_COPILOT_RUNTIME_URL` 指向 Worker。
 
+推送 `release/0.2.1` 会同时发布 Pages 和 Worker。分支名写在 `.github/workflows/ci.yml` 的 `RELEASE_BRANCH`；下次换发布分支时改这一处即可。Worker 部署使用仓库密钥 `CLOUDFLARE_API_TOKEN`。
+
+本地手动发布（上传当前工作区，与 CI 相同的 `wrangler deploy`）：
+
 ```bash
-cd svg3dx-studio
-npm ci
-npx wrangler login          # 只需一次
-npm run copilot:deploy      # 发布 Worker，并绑定 copilot.dannyxu.net
+npx wrangler login     # 只需一次
+npm run copilot:deploy
 ```
 
 可选的站主兜底 Key（否则访客在设置里填自己的）：
