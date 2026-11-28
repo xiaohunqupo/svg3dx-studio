@@ -6,6 +6,7 @@ import {
   type StudioEditToolResult,
 } from "@/chat/editBridge";
 import { getNodeSchema } from "@/chat/documentQuery";
+import type { DocumentOp } from "@/chat/documentEdits";
 import { normalizePreviewView } from "@/chat/capturePreview";
 import { useStudioNavigation } from "@/composables/useStudioNavigation";
 import { useFilesStore } from "@/stores/files";
@@ -48,6 +49,9 @@ export type StudioChatToolName =
   | "get_material"
   | "assign_material"
   | "update_nodes"
+  | "validate_document"
+  | "ensure_node_ids"
+  | "edit_document"
   | "capture_preview";
 
 export type StudioChatToolCall = {
@@ -98,6 +102,69 @@ function asEdits(
     out.push({ handle, updates });
   }
   return out;
+}
+
+function asOps(raw: unknown): DocumentOp[] | null {
+  if (!Array.isArray(raw)) return null;
+  const ops: DocumentOp[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return null;
+    const rec = item as Record<string, unknown>;
+    const op = String(rec.op ?? "").trim();
+    if (op === "ensure_ids") {
+      ops.push({ op: "ensure_ids" });
+      continue;
+    }
+    if (op === "insert") {
+      const parent = String(rec.parent ?? rec.parentPath ?? rec.handle ?? "").trim();
+      const kind = String(rec.kind ?? "").trim();
+      if (!parent || !kind) return null;
+      const attrs = rec.attrs === undefined ? undefined : asStringRecord(rec.attrs);
+      if (rec.attrs !== undefined && !attrs) return null;
+      const href = String(rec.href ?? "").trim();
+      ops.push({
+        op: "insert",
+        parent,
+        kind,
+        ...(attrs ? { attrs } : {}),
+        ...(href ? { href } : {}),
+      });
+      continue;
+    }
+    if (op === "update") {
+      const handle = String(rec.handle ?? rec.path ?? rec.id ?? "").trim();
+      const updates = asStringRecord(rec.updates);
+      if (!handle || !updates || !Object.keys(updates).length) return null;
+      ops.push({ op: "update", handle, updates });
+      continue;
+    }
+    if (op === "delete") {
+      const handle = String(rec.handle ?? rec.path ?? rec.id ?? "").trim();
+      if (!handle) return null;
+      ops.push({ op: "delete", handle });
+      continue;
+    }
+    if (op === "move") {
+      const handle = String(rec.handle ?? rec.path ?? rec.id ?? "").trim();
+      const parent = String(rec.parent ?? rec.parentPath ?? "").trim();
+      if (!handle || !parent) return null;
+      ops.push({ op: "move", handle, parent });
+      continue;
+    }
+    if (op === "assign_material") {
+      const handle = String(rec.handle ?? rec.path ?? rec.id ?? "").trim();
+      if (!handle) return null;
+      if (rec.materialId === undefined && rec.material === undefined) return null;
+      ops.push({
+        op: "assign_material",
+        handle,
+        materialId: String(rec.materialId ?? rec.material ?? ""),
+      });
+      continue;
+    }
+    return null;
+  }
+  return ops;
 }
 
 function asStringRecord(raw: unknown): Record<string, string> | null {
@@ -377,6 +444,21 @@ export async function runStudioChatTool(
         };
       }
       return withEditBridge((bridge) => bridge.updateNodes(edits));
+    }
+    case "validate_document":
+      return withEditBridge((bridge) => bridge.validateDocument());
+    case "ensure_node_ids":
+      return withEditBridge((bridge) => bridge.ensureNodeIds());
+    case "edit_document": {
+      const ops = asOps(args.ops);
+      if (!ops) {
+        return {
+          ok: false,
+          message:
+            "ops must be [{ op: ensure_ids | insert | update | delete | move | assign_material, ... }]",
+        };
+      }
+      return withEditBridge((bridge) => bridge.editDocument(ops));
     }
     case "capture_preview": {
       const view = normalizePreviewView(str(args, "view") || "current");

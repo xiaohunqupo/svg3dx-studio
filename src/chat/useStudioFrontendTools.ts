@@ -273,7 +273,7 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "list_nodes",
     description:
-      "List nodes in the active document. Each node has a handle to pass to read/write/select tools. role=definition is the editable element under defs; role=instance is an s3dx:use in a model. An xml id is reported separately and is not itself a handle.",
+      "List nodes in the active document. Each node has a handle to pass to read/write/select tools. role=definition is the editable element under defs; role=instance is an s3dx:use in a model. Prefer the xml id once the node has one. Index handles such as defs:main.7 expire after an insert, delete, or move of an earlier sibling.",
     parameters: z.object({
       scope: z
         .enum(["all", "definitions", "instances", "materials"])
@@ -288,7 +288,7 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "find_node_by_id",
     description:
-      "Find elements whose xml id matches. Returns the definition handle (pass this to read/write tools) and the model instances that display it. Use this when source has id=\"nose\" but a guessed path does not resolve.",
+      "Find elements whose xml id matches. Returns the definition handle and the model instances that display it. Ids stay valid across structural edits; re-query with this after an insert or delete instead of reusing an index handle.",
     parameters: z.object({
       id: z.string().describe("XML id, e.g. nose"),
     }),
@@ -298,9 +298,9 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "get_node_schema",
     description:
-      "Parameters, defaults, and coordinate convention for a node kind before you insert or edit it. kind=list returns every kind. World is Z-up; XY is the ground plane.",
+      "Machine-readable parameters for a node kind: type, required, insertDefault (value written on insert), whenOmitted (evaluator value when absent), min/max/minCount, enum values, and onInvalid. kind=list returns every kind. kind=shared returns id, class, style, fill, material, opacity, and s3dx:transform. kind=transform or s3dx:transform returns the placement attribute: matrix or T·R·S with R = Rz·Ry·Rx, local versus world. World is Z-up; XY is the ground plane.",
     parameters: z.object({
-      kind: z.string().describe("Kind such as prism, box, extrude, or list"),
+      kind: z.string().describe("Kind such as prism, use, shared, s3dx:transform, or list"),
     }),
     handler: async ({ kind }) => run("get_node_schema", { kind }),
   });
@@ -332,7 +332,7 @@ export function useStudioFrontendTools(): void {
   useFrontendTool({
     name: "update_nodes",
     description:
-      "Update attributes on several handles in one undo. Invalid handles, unknown attributes, and bad material references fail the whole batch with no write. Material values are canonicalized the same way as assign_material.",
+      "Update attributes on several handles in one undo. Invalid handles, unknown attributes, and bad material references fail the whole batch with no write. Material values are canonicalized the same way as assign_material. For insert, delete, and move together, use edit_document. Do not reuse an index handle after a structural edit.",
     parameters: z.object({
       edits: z
         .array(
@@ -347,9 +347,53 @@ export function useStudioFrontendTools(): void {
   });
 
   useFrontendTool({
+    name: "validate_document",
+    description:
+      "Read-only check of the active document. The tool's ok means the call ran. documentValid is true only when errorCount is 0. Each issue has handle, attribute, code, severity, message, and fix. repairs is an edit_document ops array for every error that has a concrete attribute write (such as material.bare-document-id → url(#id)); it is not applied. id.missing is an info and stays off that list, with its own issue.repair. capture_preview uses the same documentValid and repairs fields.",
+    handler: async () => run("validate_document"),
+  });
+
+  useFrontendTool({
+    name: "ensure_node_ids",
+    description:
+      "Write a document-unique id on every node that lacks one, as one undo. Indexes do not move. Use this when a node has no id so later edits can address it by id.",
+    handler: async () => run("ensure_node_ids"),
+  });
+
+  useFrontendTool({
+    name: "edit_document",
+    description:
+      "Apply insert, update, delete, move, assign_material, and ensure_ids as one transaction. Any error writes nothing. Success is one undo. New nodes get an id; set attrs.id when a later op in the same transaction must refer to the new node. Index handles must be bound before a structural op. A shifted index returns handle.stale instead of editing another node.",
+    parameters: z.object({
+      ops: z
+        .array(
+          z.object({
+            op: z.enum([
+              "ensure_ids",
+              "insert",
+              "update",
+              "delete",
+              "move",
+              "assign_material",
+            ]),
+            parent: z.string().optional().describe("insert/move destination handle or id"),
+            handle: z.string().optional().describe("Target handle or xml id"),
+            kind: z.string().optional().describe("insert kind"),
+            href: z.string().optional().describe("gltf or use href"),
+            materialId: z.string().optional().describe("assign_material value"),
+            attrs: z.record(z.string()).optional().describe("Attributes for insert"),
+            updates: z.record(z.string()).optional().describe("Attributes for update"),
+          })
+        )
+        .describe("Ops committed together, or not at all"),
+    }),
+    handler: async ({ ops }) => run("edit_document", { ops }),
+  });
+
+  useFrontendTool({
     name: "capture_preview",
     description:
-      "JPEG data URL of the active viewport after the latest edit, plus render warnings classified as material or geometry. view=current keeps the camera; front, side, top, and iso frame the model and then restore the camera.",
+      "JPEG of the active viewport. view=current keeps the camera; front, side, top, and iso frame the model and then restore it. The tool's ok means the picture was captured. documentValid, documentErrors, and repairs match validate_document and are not applied. runtimeWarnings are evaluator messages only and do not include material-reference fallback.",
     parameters: z.object({
       view: z
         .enum(["current", "front", "side", "top", "iso"])

@@ -176,15 +176,62 @@ function nextGroupId(content: string, kind: string): string {
   return `group-${kind}-${max + 1}`;
 }
 
-/** Next free `point-N` id for `<s3dx:point>`. */
-function nextPointId(content: string): string {
-  const re = /\bid="(point-\d+)"/g;
-  let max = 0;
+/** Every `id` already written in the document. */
+export function collectElementIds(content: string): Set<string> {
+  const ids = new Set<string>();
+  const re = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
   for (const m of content.matchAll(re)) {
-    const n = Number(m[1].split("-").pop());
-    if (Number.isFinite(n) && n > max) max = n;
+    const id = (m[1] ?? m[2] ?? "").trim();
+    if (id) ids.add(id);
   }
-  return `point-${max + 1}`;
+  return ids;
+}
+
+/** First free `{kind}-N` id. Adds it to `used`. */
+export function allocateElementId(used: Set<string>, kind: string): string {
+  const base =
+    kind.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
+    "node";
+  let n = 1;
+  let id = `${base}-${n}`;
+  while (used.has(id)) {
+    n += 1;
+    id = `${base}-${n}`;
+  }
+  used.add(id);
+  return id;
+}
+
+/**
+ * Give the first element of a snippet a document-unique id.
+ * An id already on the tag is kept when it is free.
+ */
+export function ensureSnippetId(
+  snippet: string,
+  content: string,
+  kind?: string
+): { snippet: string; id: string } {
+  const m = /<([A-Za-z_][\w:.-]*)\b([^>]*)>/.exec(snippet);
+  if (!m || m.index === undefined) return { snippet, id: "" };
+  const tag = m[1]!;
+  const rawBody = m[2] ?? "";
+  const self = /\/\s*$/.test(rawBody);
+  const attrs = self ? rawBody.replace(/\/\s*$/, "") : rawBody;
+  const idMatch = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+  const current = (idMatch?.[1] ?? idMatch?.[2] ?? "").trim();
+  const used = collectElementIds(content);
+  if (current && !used.has(current)) return { snippet, id: current };
+  const local = tag.includes(":") ? tag.slice(tag.lastIndexOf(":") + 1) : tag;
+  const id = allocateElementId(used, kind || local);
+  const attrsOut = current
+    ? attrs.replace(/\bid\s*=\s*(?:"[^"]*"|'[^']*')/i, `id="${id}"`)
+    : `${attrs} id="${id}"`;
+  const open = self ? `<${tag}${attrsOut}/>` : `<${tag}${attrsOut}>`;
+  return {
+    snippet:
+      snippet.slice(0, m.index) + open + snippet.slice(m.index + m[0].length),
+    id,
+  };
 }
 
 function insertGroupIntoDefs(svg: string, groupXml: string): string {
@@ -447,7 +494,8 @@ export function insertUseIntoModel(
   const bare = href.trim().replace(/^#/, "");
   const hrefAttr = bare ? `#${bare}` : "";
   const nl = lineEnding(svg);
-  const use = `    <s3dx:use href="${hrefAttr}"/>${nl}`;
+  const stamped = ensureSnippetId(`<s3dx:use href="${hrefAttr}"/>`, svg, "use");
+  const use = `    ${stamped.snippet}${nl}`;
 
   const openRe = /<s3dx:model\b([^>]*)\/?>/gi;
   let m: RegExpExecArray | null;
@@ -496,7 +544,7 @@ export function insertPrimitive(content: string, kind: GeometryKind): string {
   let svg = ensureSvgShell(content);
   const id = nextGroupId(svg, kind);
   const nl = lineEnding(svg);
-  const body = DEFAULT_SNIPPETS[kind];
+  const body = ensureSnippetId(DEFAULT_SNIPPETS[kind], svg, kind).snippet;
   const group = `    <g id="${id}">${nl}      ${body}${nl}    </g>${nl}`;
   svg = insertGroupIntoDefs(svg, group);
   return referenceInActiveModel(svg, id);
@@ -504,7 +552,7 @@ export function insertPrimitive(content: string, kind: GeometryKind): string {
 
 export type InsertChildResult = {
   content: string;
-  /** Present when a nested `<g id>` was created. */
+  /** Id written on the new element. */
   childId?: string;
   kind: AddChildKind;
 };
@@ -533,19 +581,13 @@ export function insertChildIntoGroup(
   if (!body) {
     return { content: svg, kind };
   }
-  let childId: string | undefined;
-  if (kind === "point") {
-    childId = nextPointId(svg);
-    body = body.replace(/\bid="[^"]*"/, `id="${childId}"`);
-    if (!/\bid=/.test(body)) {
-      body = body.replace(/<s3dx:point\b/, `<s3dx:point id="${childId}"`);
-    }
-  }
+  const stamped = ensureSnippetId(body, svg, kind);
+  body = stamped.snippet;
   const child = `      ${body}${nl}`;
   return {
     content: insertXmlIntoGroup(svg, parentGroupId, child),
     kind,
-    childId,
+    childId: stamped.id || undefined,
   };
 }
 

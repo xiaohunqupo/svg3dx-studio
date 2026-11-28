@@ -1,3 +1,4 @@
+import type { DocumentOp } from "@/chat/documentEdits";
 import type { AddChildKind } from "@/types/file";
 
 /** Same shape as StudioChatToolResult — kept local to avoid circular imports. */

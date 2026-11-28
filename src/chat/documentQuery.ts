@@ -2,6 +2,8 @@
  * Structured document queries for the AI tools.
  * Tree handles (`defs:group.0`, `model:id.0`, `material:id`) are the values
  * read/write tools accept. An XML `id` is not a handle unless it is a `<g>`.
+ * Index handles expire after a structural edit; `validateDocument` is the
+ * document check that preview must not replace with evaluator warnings.
  */
 
 import { extractDocumentMaterials } from "@/utils/documentMaterials";
@@ -13,7 +15,11 @@ import {
   readAttrsAtPath,
 } from "@/utils/nodeXmlEdit";
 import { extractClassRules, extractDefsGroups, extractRootProps } from "@/utils/styleClasses";
-import { snippetForPathInsert } from "@/utils/svgEdit";
+import {
+  allocateElementId,
+  collectElementIds,
+  snippetForPathInsert,
+} from "@/utils/svgEdit";
 
 export type NodeRole =
   | "definition"
@@ -228,9 +234,10 @@ const KIND_NOTES: Record<
     coords:
       "points are XYZ triplets of the base polygon (at least 3). height extrudes along normal. If normal is omitted, the polygon's own normal is used — an XY base (z=0) extrudes toward +Z.",
     params: {
-      points: "XYZ triplets, e.g. \"0 0 0  100 0 0  100 100 0  0 100 0\".",
-      height: "Extrusion distance along normal.",
-      normal: "Optional XYZ extrusion direction.",
+      points:
+        "XYZ triplets, e.g. \"0 0 0  100 0 0  100 100 0  0 100 0\". Winding of the first three points sets the normal when normal is omitted.",
+      height: "Extrusion distance along normal. Omitted height evaluates as 1.",
+      normal: "Optional XYZ extrusion direction. Omitted: polygon normal; a degenerate polygon uses +Z.",
     },
   },
   "sector-cylinder": {
@@ -1019,6 +1026,266 @@ export function rootAttrDefaults(kind: string): Record<string, string> {
   return parseAttrMap(attrs);
 }
 
+export type SchemaParam = {
+  name: string;
+  type: string;
+  required: boolean;
+  /** Value the editor writes on a new node. This is not the evaluator default. */
+  insertDefault: string | null;
+  note: string;
+  onInvalid: string;
+  /** Value the evaluator uses when the attribute is absent. */
+  whenOmitted?: string;
+  min?: number;
+  max?: number;
+  minCount?: number;
+  values?: string[];
+};
+
+const ENUM_VALUES: Record<string, readonly string[]> = {
+  "arc.form": ["angles", "ends"],
+  "path.form": ["polyline", "segments"],
+  "pipe.form": ["inline", "child"],
+  "sweep.orient": ["frenet", "fixed", "parallel"],
+  "sweep.outerCorner": ["round", "bevel", "miter"],
+  "sweep.innerCorner": ["round", "bevel", "miter"],
+  "pipe.outerCorner": ["round", "bevel", "miter"],
+  "pipe.innerCorner": ["round", "bevel", "miter"],
+  "loft.blend": ["linear", "sine", "cosine", "tan", "cotan"],
+  "animate.calcMode": ["linear", "sine", "cosine", "tan", "cotan"],
+  "animateTransform.calcMode": ["linear", "sine", "cosine", "tan", "cotan"],
+  "animate.fill": ["remove", "freeze"],
+  "revolve.solid": ["true", "false"],
+  "loft.solid": ["true", "false"],
+  "sweep.solid": ["true", "false"],
+  "model.active": ["true", "false"],
+};
+
+const REQUIRED_PARAMS: Record<string, readonly string[]> = {
+  prism: ["points"],
+  use: ["href"],
+  gltf: ["href"],
+  material: ["id"],
+  line: ["from", "to"],
+  point: ["at"],
+};
+
+const XYZ_NAMES = new Set([
+  "center",
+  "bottomCenterPt",
+  "topCenterPt",
+  "torusCenterPt",
+  "normal",
+  "lengthVec",
+  "widthVec",
+  "at",
+  "origin",
+  "xDir",
+  "dir",
+  "refDir",
+]);
+
+const NUMBER_NAMES = new Set([
+  "length",
+  "width",
+  "height",
+  "radius",
+  "diameter",
+  "diameter1",
+  "diameter2",
+  "bottomDiameter",
+  "topDiameter",
+  "topLength",
+  "topWidth",
+  "metalness",
+  "roughness",
+  "opacity",
+  "outerCornerRadius",
+  "innerCornerRadius",
+  "miterLimit",
+  "cx",
+  "cy",
+  "r",
+  "rx",
+  "ry",
+  "x",
+  "y",
+]);
+
+function schemaParam(
+  kind: string,
+  name: string,
+  fallback: string | null,
+  note: string
+): SchemaParam {
+  const values = ENUM_VALUES[`${kind}.${name}`];
+  const anim = kind === "animate" || kind === "animateTransform";
+  let type = "string";
+  if (values) type = name === "solid" || name === "active" ? "boolean" : "enum";
+  else if (name === "material") type = "material";
+  else if (name === "color") type = "color";
+  else if (
+    name === "points" &&
+    ["prism", "path", "loop-points", "polygon", "svg-polygon"].includes(kind)
+  ) {
+    type = "xyz-list";
+  } else if (name === "angle" || name === "startAngle") type = "angle";
+  else if ((name === "from" || name === "to") && (kind === "line" || kind === "arc")) {
+    type = "xyz";
+  } else if (XYZ_NAMES.has(name) && !anim) type = "xyz";
+  else if (NUMBER_NAMES.has(name) && !anim) type = "number";
+  else if (kind === "loop-range" && (name === "start" || name === "end" || name === "step")) {
+    type = "number";
+  }
+
+  let onInvalid = "The evaluator skips the primitive or ignores the attribute.";
+  if (type === "material") {
+    onInvalid =
+      "A bare document id, an unknown url(#id), or an unknown keyword falls back to the default material. Write document materials as url(#id).";
+  } else if (kind === "prism" && name === "points") {
+    onInvalid =
+      "Fewer than 3 XYZ triplets produces no mesh. When normal is omitted, extrusion follows the cross product of (p1-p0) and (p2-p0). Reversing that winding reverses the normal. A degenerate polygon uses +Z.";
+  } else if (kind === "prism" && name === "height") {
+    onInvalid =
+      "Omitted height evaluates as 1. A non-positive height is clamped to a tiny extrusion along normal.";
+  } else if (kind === "prism" && name === "normal") {
+    onInvalid =
+      "Omit it to use the polygon normal. A zero vector falls back to +Z. Reversing point order reverses the omitted normal.";
+  } else if (type === "enum" || type === "boolean") {
+    onInvalid = `Use one of: ${values!.join(", ")}.`;
+  } else if (type === "xyz") {
+    onInvalid = "Need three numbers. A short vector is ignored or the primitive is skipped.";
+  } else if (type === "xyz-list") {
+    onInvalid = "Values are space-separated XYZ triplets.";
+  } else if (type === "number" || type === "angle") {
+    onInvalid = "A non-numeric value fails the primitive.";
+  } else if (type === "color") {
+    onInvalid = "RGBA floats in 0..1, e.g. \"0.7 0.2 0.2 1\".";
+  } else if (name === "href" && kind === "use") {
+    onInvalid = "href must be #groupId of a <g> under defs. An unknown target draws nothing.";
+  } else if (name === "href" && kind === "gltf") {
+    onInvalid = "href is a document-relative asset path. A missing file draws nothing.";
+  }
+
+  const param: SchemaParam = {
+    name,
+    type,
+    required: (REQUIRED_PARAMS[kind] ?? []).includes(name),
+    insertDefault: fallback,
+    note,
+    onInvalid,
+  };
+  if (kind === "prism" && name === "points") param.minCount = 3;
+  if (kind === "prism" && name === "height") param.whenOmitted = "1";
+  if (kind === "prism" && name === "normal") {
+    param.whenOmitted = "(p1-p0) × (p2-p0), or +Z when that cross product is degenerate";
+  }
+  if (name === "metalness" || name === "roughness" || name === "opacity") {
+    param.min = 0;
+    param.max = 1;
+  }
+  if (values) param.values = [...values];
+  return param;
+}
+
+const TRANSFORM_NOTE =
+  "Local placement. World = ancestor transforms · this transform · local geometry (column vector, p' = M p). Two syntaxes, not mixed in one value: matrix(a b c d e f g h i tx ty tz) or the same 12 numbers bare — columns are xdir, ydir, zdir, translation; identity is 1 0 0 0 1 0 0 0 1 0 0 0. Or translate(tx ty tz) rotate(rx ry rz) scale(sx sy sz), any subset. Written function order does not change the matrix: M = T · R · S. Inside R, R = Rz · Ry · Rx (fixed-axis X, then Y, then Z; Three.js Euler XYZ), so p' = Rz Ry Rx p. rotate(90 90 0) applies Rx then Ry and equals matrix(0 0 -1 1 0 0 0 -1 0 0 0 0); local +X (1 0 0) lands on (0 0 -1). Empty or identity removes the attribute.";
+
+const WITHOUT_SHARED = new Set(["animate", "animateTransform", "material"]);
+
+function sharedAttrParams(): SchemaParam[] {
+  return [
+    {
+      name: "id",
+      type: "id",
+      required: false,
+      insertDefault: null,
+      whenOmitted: "no id; the index handle expires when an earlier sibling changes",
+      note: "Document-unique XML id. Stable address for find_node_by_id and edit_document.",
+      onInvalid: "A duplicate id is rejected. New nodes receive {kind}-N.",
+    },
+    {
+      name: "class",
+      type: "string",
+      required: false,
+      insertDefault: null,
+      note: "Space-separated class names. A class rule may set --material, which overrides the material attribute.",
+      onInvalid: "An unknown class name adds no declarations.",
+    },
+    {
+      name: "style",
+      type: "style",
+      required: false,
+      insertDefault: null,
+      note: "Inline CSS declarations. --material on this node wins over its material attribute.",
+      onInvalid: "An unparsable declaration is ignored.",
+    },
+    {
+      name: "fill",
+      type: "color",
+      required: false,
+      insertDefault: null,
+      note: "SVG fill. Used as presentation color when no material resolves.",
+      onInvalid: "An unparsable color is ignored.",
+    },
+    {
+      name: "material",
+      type: "material",
+      required: false,
+      insertDefault: null,
+      whenOmitted: "inherit from an ancestor, otherwise the built-in default",
+      note: "Built-in keyword (steel, plastic, default, …) or url(#documentId). A bare document id falls back to default.",
+      onInvalid:
+        "A bare document id, an unknown url(#id), or an unknown keyword falls back to the default material. Write document materials as url(#id).",
+    },
+    {
+      name: "opacity",
+      type: "number",
+      required: false,
+      insertDefault: null,
+      whenOmitted: "1",
+      min: 0,
+      max: 1,
+      note: "Opacity from 0 to 1.",
+      onInvalid: "A non-numeric value is ignored.",
+    },
+    {
+      name: "s3dx:transform",
+      type: "transform",
+      required: false,
+      insertDefault: null,
+      whenOmitted: "identity",
+      note: TRANSFORM_NOTE,
+      onInvalid:
+        "A matrix that is not 12 numbers, or a TRS function with a non-numeric argument, is ignored and the transform stays identity. Do not mix matrix() with translate/rotate/scale.",
+    },
+    {
+      name: "transform",
+      type: "transform",
+      required: false,
+      insertDefault: null,
+      whenOmitted: "identity",
+      note: `Unprefixed alias of s3dx:transform. Prefer s3dx:transform. ${TRANSFORM_NOTE}`,
+      onInvalid:
+        "Same rules as s3dx:transform. Prefer the prefixed attribute so it is not read as an SVG transform.",
+    },
+  ];
+}
+
+function sharedQuery(name: string): SchemaParam[] | null {
+  const key = name.trim().toLowerCase();
+  if (key === "shared" || key === "attrs" || key === "attributes") {
+    return sharedAttrParams();
+  }
+  if (key === "transform" || key === "s3dx:transform") {
+    return sharedAttrParams().filter((p) => p.name === "s3dx:transform");
+  }
+  if (key === "material") return null;
+  const params = sharedAttrParams();
+  const hit = params.find((p) => p.name.toLowerCase() === key);
+  return hit ? [hit] : null;
+}
+
 export function getNodeSchema(kind: string):
   | {
       ok: true;
@@ -1027,13 +1294,28 @@ export function getNodeSchema(kind: string):
         element: string;
         coords: string;
         children?: string;
-        defaults: Record<string, string>;
-        params: { name: string; note: string; default: string | null }[];
+        shared?: boolean;
+        insertDefaults: Record<string, string>;
+        params: SchemaParam[];
       };
     }
   | { ok: false; message: string; kinds: string[] } {
   const name = kind.trim();
   const kinds = Object.keys(KIND_ATTRS);
+  const shared = sharedQuery(name);
+  if (shared) {
+    return {
+      ok: true,
+      schema: {
+        kind: name.toLowerCase() === "transform" ? "s3dx:transform" : name,
+        element: "",
+        coords: WORLD,
+        shared: true,
+        insertDefaults: {},
+        params: shared,
+      },
+    };
+  }
   if (!name || name === "list" || name === "*") {
     return {
       ok: true,
@@ -1041,26 +1323,37 @@ export function getNodeSchema(kind: string):
         kind: "list",
         element: "",
         coords: WORLD,
-        defaults: {},
-        params: kinds.map((k) => ({ name: k, note: "pass this kind to get_node_schema", default: null })),
+        insertDefaults: {},
+        params: kinds.map((k) => ({
+          name: k,
+          type: "kind",
+          required: false,
+          insertDefault: null,
+          note: "pass this kind to get_node_schema",
+          onInvalid: "Unknown kinds are rejected. Shared attributes: get_node_schema('shared') or get_node_schema('s3dx:transform').",
+        })),
       },
     };
   }
   if (!KIND_ATTRS[name] && name !== "group") {
     return {
       ok: false,
-      message: `unknown kind '${name}'`,
+      message: `unknown kind '${name}'. Shared attributes: get_node_schema('shared') or get_node_schema('s3dx:transform').`,
       kinds,
     };
   }
   const notes = KIND_NOTES[name];
-  const defaults = rootAttrDefaults(name);
-  const names = new Set([...(KIND_ATTRS[name] ?? []), ...Object.keys(defaults)]);
-  const params = [...names].map((param) => ({
-    name: param,
-    note: notes?.params?.[param] ?? "",
-    default: defaults[param] ?? null,
-  }));
+  const insertDefaults = rootAttrDefaults(name);
+  const names = new Set([...(KIND_ATTRS[name] ?? []), ...Object.keys(insertDefaults)]);
+  const params = [...names].map((param) =>
+    schemaParam(name, param, insertDefaults[param] ?? null, notes?.params?.[param] ?? "")
+  );
+  if (!WITHOUT_SHARED.has(name)) {
+    const have = new Set(params.map((p) => p.name));
+    for (const attr of sharedAttrParams()) {
+      if (!have.has(attr.name)) params.push(attr);
+    }
+  }
   const svgLeaf = new Set(["circle", "rect", "ellipse", "polygon"]);
   const element =
     name === "group"
@@ -1077,7 +1370,7 @@ export function getNodeSchema(kind: string):
       element,
       coords: [WORLD, notes?.coords].filter(Boolean).join(" "),
       ...(notes?.children ? { children: notes.children } : {}),
-      defaults,
+      insertDefaults,
       params,
     },
   };
@@ -1189,4 +1482,377 @@ export function classifyRenderWarning(
     return "geometry";
   }
   return "other";
+}
+
+/** Evaluator warnings do not include host material-reference fallback. */
+export const RUNTIME_WARNING_SCOPE =
+  "runtimeWarnings are evaluator messages only (unknown elements, bad parameters, missing geometry). They do not include material-reference fallback. documentValid is the document check, the same field as validate_document. The call's ok only means the preview was captured. documentValid is true only when documentErrors is 0.";
+
+export const HANDLE_LIFETIME =
+  "Index handles such as defs:main.7 address the child currently at that position. They stay valid until an earlier sibling is inserted, deleted, or moved; after that the same string can address a different node. In one edit_document transaction, bind an index handle before any insert, delete, or move. An unbound or shifted index fails with handle.stale and writes nothing. Ids are stable and resolve again through find_node_by_id. Assigning an id does not shift indexes. New nodes receive an id; ensure_node_ids fills any that are still missing.";
+
+/** `defs:main.7` and `anim:0` name a position. `defs:main` and a bare id do not. */
+export function isPositionalHandle(ref: string): boolean {
+  const trimmed = ref.trim();
+  const colon = trimmed.indexOf(":");
+  if (colon < 0) return false;
+  return trimmed
+    .slice(colon + 1)
+    .split(".")
+    .some((seg) => /^\d+$/.test(seg));
+}
+
+/** XYZ triplets. A repeated closing vertex is dropped, matching prism mesh build. */
+export function parseXyzList(raw: string): number[][] {
+  const nums = raw
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((n) => Number.isFinite(n));
+  const pts: number[][] = [];
+  for (let i = 0; i + 2 < nums.length; i += 3) {
+    pts.push([nums[i]!, nums[i + 1]!, nums[i + 2]!]);
+  }
+  if (pts.length >= 2) {
+    const a = pts[0]!;
+    const b = pts[pts.length - 1]!;
+    if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) pts.pop();
+  }
+  return pts;
+}
+
+/**
+ * Unit normal of a prism base: (p1-p0) × (p2-p0).
+ * Same rule as the viewer `buildPrismGeometry` when `normal` is omitted.
+ * A degenerate cross product is +Z. Null when there are fewer than 3 points.
+ */
+export function prismPolygonNormal(
+  points: number[][]
+): [number, number, number] | null {
+  if (points.length < 3) return null;
+  const a = points[0]!;
+  const b = points[1]!;
+  const c = points[2]!;
+  const x = (b[1]! - a[1]!) * (c[2]! - a[2]!) - (b[2]! - a[2]!) * (c[1]! - a[1]!);
+  const y = (b[2]! - a[2]!) * (c[0]! - a[0]!) - (b[0]! - a[0]!) * (c[2]! - a[2]!);
+  const z = (b[0]! - a[0]!) * (c[1]! - a[1]!) - (b[1]! - a[1]!) * (c[0]! - a[0]!);
+  const len = Math.hypot(x, y, z);
+  if (len < 1e-12) return [0, 0, 1];
+  return [x / len, y / len, z / len];
+}
+
+export type MaterialReferenceIssue = {
+  code: string;
+  message: string;
+  fix: string;
+};
+
+/** Host material fallback. Null when the reference resolves. */
+export function materialReferenceIssue(
+  content: string,
+  raw: string
+): MaterialReferenceIssue | null {
+  const token = normalizeRefToken(raw);
+  if (!token) return null;
+  if (/url\s*\(/i.test(raw) && !/^url\(\s*#([^)\s]+)\s*\)$/i.test(token)) {
+    return {
+      code: "material.unparsed",
+      message: `could not parse material '${raw.trim()}' — falling back to default`,
+      fix: "url(#id)",
+    };
+  }
+  const parsed = parseMaterialRef(token);
+  const docs = new Set(extractDocumentMaterials(content).map((d) => d.id));
+  if (parsed.kind === "id") {
+    if (docs.has(parsed.value)) return null;
+    return {
+      code: "material.unknown-url",
+      message: `unknown material url(#${parsed.value}) — falling back to default`,
+      fix: "Create that material, or set material to a built-in keyword or an existing url(#id).",
+    };
+  }
+  const keyword = parsed.value;
+  if (!keyword) return null;
+  if (Object.prototype.hasOwnProperty.call(BUILTIN_MATERIALS, keyword)) return null;
+  if (docs.has(keyword)) {
+    return {
+      code: "material.bare-document-id",
+      message: `material '${keyword}' is a document id — use url(#${keyword}); falling back to default`,
+      fix: `url(#${keyword})`,
+    };
+  }
+  return {
+    code: "material.unknown-keyword",
+    message: `unknown material '${keyword}' — falling back to default`,
+    fix: "Use a built-in keyword (steel, plastic, default, …) or url(#documentId).",
+  };
+}
+
+/** One attribute write. Pass a list of these as edit_document ops; nothing is written until then. */
+export type IssueRepair = {
+  op: "update";
+  handle: string;
+  updates: Record<string, string>;
+};
+
+export type DocumentIssue = {
+  handle: string;
+  id: string | null;
+  kind: string;
+  attribute: string;
+  code: string;
+  severity: "error" | "info";
+  message: string;
+  fix: string;
+  /** Present when the fix is an attribute write. Infos are omitted from the top-level repairs batch. */
+  repair?: IssueRepair;
+};
+
+const CONCRETE_MATERIAL = /^(?:url\(\s*#[^)\s]+\s*\)|[A-Za-z_][\w.-]*)$/;
+const CONCRETE_ID = /^[A-Za-z_][\w:.-]*$/;
+
+function repairFor(issue: {
+  handle: string;
+  id: string | null;
+  attribute: string;
+  code: string;
+  fix: string;
+}): IssueRepair | undefined {
+  if (!issue.handle || issue.handle.startsWith("style:")) return undefined;
+  const fix = issue.fix.trim();
+  if (issue.attribute === "material" && CONCRETE_MATERIAL.test(fix)) {
+    return {
+      op: "update",
+      handle: issue.id || issue.handle,
+      updates: { material: fix },
+    };
+  }
+  if (
+    (issue.code === "id.missing" || issue.code === "id.duplicate") &&
+    CONCRETE_ID.test(fix)
+  ) {
+    return {
+      op: "update",
+      handle: issue.handle,
+      updates: { id: fix },
+    };
+  }
+  if (issue.code === "attr.unknown" && issue.attribute && !issue.attribute.includes(" ")) {
+    return {
+      op: "update",
+      handle: issue.id || issue.handle,
+      updates: { [issue.attribute]: "" },
+    };
+  }
+  return undefined;
+}
+
+function pushIssue(issues: DocumentIssue[], issue: DocumentIssue): void {
+  issues.push(issue);
+}
+
+export function validateDocument(content: string): {
+  issues: DocumentIssue[];
+  errorCount: number;
+  infoCount: number;
+  /** True when errorCount is 0. Infos such as id.missing do not clear this. */
+  documentValid: boolean;
+  /** Error repairs only. Pass to edit_document for one undo. This call does not write. */
+  repairs: IssueRepair[];
+  handleLifetime: string;
+} {
+  const issues: DocumentIssue[] = [];
+  const walked = walkAll(content, 5000);
+  const used = collectElementIds(content);
+  const seen = new Map<string, string>();
+  const groupIds = new Set(extractDefsGroups(content).map((g) => g.id));
+  const rules = extractClassRules(content);
+
+  for (const node of walked.nodes) {
+    if (!node.id) {
+      const id = allocateElementId(used, node.kind);
+      pushIssue(issues, {
+        handle: node.handle,
+        id: null,
+        kind: node.kind,
+        attribute: "id",
+        code: "id.missing",
+        severity: "info",
+        message: `${node.kind} has no id. Index handles for it expire when an earlier sibling changes.`,
+        fix: id,
+      });
+    } else {
+      const first = seen.get(node.id);
+      if (first) {
+        const id = allocateElementId(used, node.kind);
+        pushIssue(issues, {
+          handle: node.handle,
+          id: node.id,
+          kind: node.kind,
+          attribute: "id",
+          code: "id.duplicate",
+          severity: "error",
+          message: `id '${node.id}' is already used at ${first}.`,
+          fix: id,
+        });
+      } else {
+        seen.set(node.id, node.handle);
+      }
+    }
+
+    const attrs = readAttrsAtPath(content, node.handle);
+    if (!attrs) continue;
+    const allow = allowedNames(node.kind);
+    if (allow) {
+      for (const name of Object.keys(attrs)) {
+        if (name.startsWith("xmlns")) continue;
+        if (!allow.has(name)) {
+          pushIssue(issues, {
+            handle: node.handle,
+            id: node.id,
+            kind: node.kind,
+            attribute: name,
+            code: "attr.unknown",
+            severity: "error",
+            message: `'${name}' is not an attribute of ${node.kind}.`,
+            fix: "Remove it, or see get_node_schema for the allowed names.",
+          });
+        }
+      }
+    }
+
+    const ownMaterial = attrs.material?.trim();
+    if (ownMaterial) {
+      const found = materialReferenceIssue(content, ownMaterial);
+      if (found) {
+        pushIssue(issues, {
+          handle: node.handle,
+          id: node.id,
+          kind: node.kind,
+          attribute: "material",
+          code: found.code,
+          severity: "error",
+          message: found.message,
+          fix: found.fix,
+        });
+      }
+    }
+    const inline = inlineDecls(attrs.style)["--material"]?.trim();
+    if (inline) {
+      const found = materialReferenceIssue(content, inline);
+      if (found) {
+        pushIssue(issues, {
+          handle: node.handle,
+          id: node.id,
+          kind: node.kind,
+          attribute: "style",
+          code: found.code,
+          severity: "error",
+          message: found.message,
+          fix: found.fix,
+        });
+      }
+    }
+
+    if (node.kind === "prism") {
+      const pts = parseXyzList(attrs.points ?? "");
+      if (pts.length < 3) {
+        pushIssue(issues, {
+          handle: node.handle,
+          id: node.id,
+          kind: node.kind,
+          attribute: "points",
+          code: "prism.too-few-points",
+          severity: "error",
+          message: "prism needs at least 3 XYZ triplets or it produces no mesh.",
+          fix: "Provide at least 3 points. Reversing their order reverses the extrusion when normal is omitted.",
+        });
+      }
+    }
+
+    if (node.kind === "use") {
+      const target = hrefTarget(attrs.href);
+      if (!target || !groupIds.has(target)) {
+        pushIssue(issues, {
+          handle: node.handle,
+          id: node.id,
+          kind: node.kind,
+          attribute: "href",
+          code: "use.unknown-target",
+          severity: "error",
+          message: target
+            ? `use href="#${target}" does not match a <g> under defs.`
+            : "use is missing href.",
+          fix: target ? "href=\"#groupId\" of an existing defs group." : "href=\"#groupId\"",
+        });
+      }
+    }
+  }
+
+  for (const [name, decls] of Object.entries(rules)) {
+    const ref = (decls["--material"] || decls.material || "").trim();
+    if (!ref) continue;
+    const found = materialReferenceIssue(content, ref);
+    if (!found) continue;
+    pushIssue(issues, {
+      handle: `style:.${name}`,
+      id: null,
+      kind: "style",
+      attribute: "--material",
+      code: found.code,
+      severity: "error",
+      message: found.message,
+      fix: found.fix,
+    });
+  }
+
+  if (walked.truncated) {
+    pushIssue(issues, {
+      handle: "",
+      id: null,
+      kind: "document",
+      attribute: "",
+      code: "document.truncated",
+      severity: "info",
+      message: "Node walk stopped at the safety cap. Later nodes were not checked.",
+      fix: "Split the document or inspect the remaining tree with list_nodes.",
+    });
+  }
+
+  for (const issue of issues) {
+    const repair = repairFor(issue);
+    if (repair) issue.repair = repair;
+  }
+  const errorCount = issues.filter((i) => i.severity === "error").length;
+  const infoCount = issues.length - errorCount;
+  const repairs = issues
+    .filter((i) => i.severity === "error" && i.repair)
+    .map((i) => i.repair!);
+  return {
+    issues,
+    errorCount,
+    infoCount,
+    documentValid: errorCount === 0,
+    repairs,
+    handleLifetime: HANDLE_LIFETIME,
+  };
+}
+
+/** Write an id onto every walked node that lacks one. Indexes do not move. */
+export function assignMissingNodeIds(content: string): {
+  content: string;
+  assigned: { handle: string; id: string; kind: string }[];
+} {
+  const missing = walkAll(content, 5000).nodes.filter((n) => !n.id);
+  const used = collectElementIds(content);
+  let next = content;
+  const assigned: { handle: string; id: string; kind: string }[] = [];
+  for (const node of missing) {
+    const id = allocateElementId(used, node.kind);
+    const updated = applyAttrsAtPath(next, node.handle, { id });
+    if (!updated) continue;
+    next = updated;
+    assigned.push({ handle: node.handle, id, kind: node.kind });
+  }
+  return { content: next, assigned };
 }

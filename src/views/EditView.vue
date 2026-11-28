@@ -38,6 +38,7 @@ import {
   writeSvg3dxzBytes,
 } from "@/utils/svg3dxz";
 import {
+  ensureSnippetId,
   gltfSnippet,
   insertChildIntoGroup,
   insertEmptyGroup,
@@ -73,15 +74,20 @@ import {
   removeElementAtPath,
   replaceChildrenAtPath,
 } from "@/utils/nodeXmlEdit";
+import { applyDocumentEdits, type DocumentOp } from "@/chat/documentEdits";
 import {
   applyAttrsToSnippet,
   applyNodeUpdates,
+  assignMissingNodeIds,
   classifyRenderWarning,
   findNodeById,
+  HANDLE_LIFETIME,
   lastChildHandle,
   listDocumentNodes,
   materialView,
   resolveNodeHandle,
+  RUNTIME_WARNING_SCOPE,
+  validateDocument,
   validateNodeAttrs,
 } from "@/chat/documentQuery";
 import {
@@ -615,10 +621,10 @@ function editFail(message: string, data?: unknown): StudioEditToolResult {
 }
 
 const AI_TOOL_HINTS = [
-  "Handles come from list_nodes or find_node_by_id (defs:group.0, model:id.0). An xml id is not a handle unless the element is a <g>.",
-  "assign_material writes built-ins as material=\"steel\" and document materials as material=\"url(#id)\". get_material reports the effective material and whether an invalid reference fell back to default.",
-  "Call get_node_schema(kind) before inserting. add_child and insert_at_path accept attrs. update_nodes validates every edit and commits them as one undo.",
-  "capture_preview returns a JPEG data URL plus geometry and material warnings.",
+  "Handles come from list_nodes or find_node_by_id. Prefer the xml id once the node has one. Index handles such as defs:main.7 expire after an insert, delete, or move of an earlier sibling; a stale index returns handle.stale instead of editing another node.",
+  "assign_material writes built-ins as material=\"steel\" and document materials as material=\"url(#id)\". get_material reports fallback. validate_document lists every issue. Its outer ok means the call ran; documentValid means the document passed. repairs is an edit_document ops list and is not applied.",
+  "New nodes receive an id. ensure_node_ids fills ids that are still missing. edit_document submits insert, update, delete, move, assign_material, and ensure_ids as one commit: any error writes nothing and one success is one undo. Pass validate_document.repairs to fix every mechanical error in that one undo. Set attrs.id when a later op in the same transaction must refer to a new node.",
+  "get_node_schema returns type, required, insertDefault (editor snippet), whenOmitted (evaluator), and onInvalid. kind=shared or kind=s3dx:transform returns placement attributes. capture_preview returns a JPEG, evaluator runtimeWarnings, and the same documentValid / repairs as validate_document.",
 ];
 
 function getEditSnapshot() {
@@ -969,6 +975,8 @@ onMounted(async () => {
         snippet = applyAttrsToSnippet(snippet, valid.updates);
         notes = valid.notes;
       }
+      const stamped = ensureSnippetId(snippet, draftContent.value, opts.kind);
+      snippet = stamped.snippet;
       const content = insertXmlAtPath(
         draftContent.value,
         parentPath,
@@ -1004,7 +1012,10 @@ onMounted(async () => {
         kind: opts.kind,
         limit: opts.limit,
       });
-      return editOk(`nodes:${data.nodes.length}`, data);
+      return editOk(`nodes:${data.nodes.length}`, {
+        ...data,
+        handleLifetime: HANDLE_LIFETIME,
+      });
     },
     findNodeById: (id) => {
       const matches = findNodeById(draftContent.value, id);
@@ -1013,7 +1024,11 @@ onMounted(async () => {
           `no element with id '${id}'. Use list_nodes. Geometry ids are not tree handles.`
         );
       }
-      return editOk(`found:${matches.length}`, { id, matches });
+      return editOk(`found:${matches.length}`, {
+        id,
+        matches,
+        handleLifetime: HANDLE_LIFETIME,
+      });
     },
     getMaterial: (handle) => {
       const resolved = resolveNodeHandle(draftContent.value, handle);
@@ -1072,9 +1087,55 @@ onMounted(async () => {
         count: result.results.length,
         undo: "single",
         results: result.results,
+        handleLifetime: HANDLE_LIFETIME,
       });
     },
+    validateDocument: () => {
+      const report = validateDocument(draftContent.value);
+      return editOk(
+        `validate documentValid:${report.documentValid} errors:${report.errorCount} repairs:${report.repairs.length}`,
+        report
+      );
+    },
+    ensureNodeIds: async () => {
+      if (!file.value) return editFail("no active file");
+      const result = assignMissingNodeIds(draftContent.value);
+      if (!result.assigned.length) {
+        return editOk("ids already present", { assigned: [] });
+      }
+      return commitAiContent(result.content, "ids assigned", {
+        undo: "single",
+        assigned: result.assigned,
+        handleLifetime: HANDLE_LIFETIME,
+      });
+    },
+    editDocument: async (ops: DocumentOp[]) => {
+      if (!file.value) return editFail("no active file");
+      const result = applyDocumentEdits(draftContent.value, ops);
+      if (!result.ok) {
+        return editFail(result.message, {
+          code: result.code,
+          ...(result.handle ? { handle: result.handle } : {}),
+          ...(result.fix ? { fix: result.fix } : {}),
+        });
+      }
+      return commitAiContent(
+        result.content,
+        "document edited",
+        {
+          undo: result.undo,
+          results: result.results,
+          handleLifetime: result.handleLifetime,
+        },
+        result.syncPath
+      );
+    },
     capturePreview: async (view) => {
+      const doc = validateDocument(draftContent.value);
+      const errors = doc.issues.filter((issue) => issue.severity === "error");
+      const infos = doc.issues.filter((issue) => issue.severity === "info");
+      const documentIssues = [...errors.slice(0, 40), ...infos.slice(0, 20)];
+      const documentIssuesTruncated = errors.length > 40 || infos.length > 20;
       const interact = interactHost.value?.getInteract() ?? null;
       if (!interact) return editFail("viewport not ready");
       let warnings: string[] = [];
@@ -1084,20 +1145,24 @@ onMounted(async () => {
         });
         warnings = result.warnings ?? [];
       } catch (err) {
-        return editFail(
-          err instanceof Error ? err.message : "preview evaluate failed"
-        );
+        return editFail(err instanceof Error ? err.message : "preview evaluate failed", {
+          runtimeScope: RUNTIME_WARNING_SCOPE,
+          documentIssues,
+          documentErrors: doc.errorCount,
+          documentInfos: doc.infoCount,
+          documentValid: doc.documentValid,
+          repairs: doc.repairs,
+          documentIssuesTruncated,
+        });
       }
       const shot = await captureViewerFrame(interact.viewer, view as PreviewView);
       if (!shot.ok) return editFail(shot.message);
-      const classified = warnings.map((message) => ({
+      const runtimeWarnings = warnings.map((message) => ({
         message,
         category: classifyRenderWarning(message),
       }));
-      const materialWarnings = classified.filter((w) => w.category === "material").length;
-      const geometryWarnings = classified.filter((w) => w.category === "geometry").length;
       return editOk(
-        `preview:${shot.view} materialWarnings:${materialWarnings} geometryWarnings:${geometryWarnings}`,
+        `preview:${shot.view} runtimeWarnings:${runtimeWarnings.length} documentValid:${doc.documentValid} documentErrors:${doc.errorCount} repairs:${doc.repairs.length}`,
         {
           view: shot.view,
           width: shot.width,
@@ -1105,7 +1170,14 @@ onMounted(async () => {
           framed: shot.framed,
           mime: "image/jpeg",
           dataUrl: shot.dataUrl,
-          warnings: classified,
+          runtimeWarnings,
+          runtimeScope: RUNTIME_WARNING_SCOPE,
+          documentIssues,
+          documentErrors: doc.errorCount,
+          documentInfos: doc.infoCount,
+          documentValid: doc.documentValid,
+          repairs: doc.repairs,
+          documentIssuesTruncated,
         }
       );
     },
@@ -1439,6 +1511,8 @@ async function onInsertChildAtPath(payload: {
     snippet = gltfSnippet(href);
   }
   if (!snippet) return;
+  const stamped = ensureSnippetId(snippet, draftContent.value, payload.kind);
+  snippet = stamped.snippet;
   const content = insertXmlAtPath(
     draftContent.value,
     payload.parentPath,
