@@ -19,7 +19,8 @@ type CopilotWebInspectorEl = HTMLElement & {
 const { t } = useI18n();
 const chatStore = useChatStore();
 
-const isDev = import.meta.env.DEV;
+/** Inspector is a local `vite dev` tool; production and preview builds omit it. */
+const inspectorAvailable = import.meta.env.DEV;
 
 const runtimeUrl =
   (import.meta.env.VITE_COPILOT_RUNTIME_URL as string | undefined)?.trim() ||
@@ -82,10 +83,7 @@ function clearSettings(): void {
 }
 
 async function openCopilotInspector(): Promise<void> {
-  if (!isDev) {
-    MessagePlugin.warning(t("chat.settingsInspectorDevOnly"));
-    return;
-  }
+  if (!inspectorAvailable) return;
   if (!chatStore.configured) {
     MessagePlugin.warning(t("chat.setupTitle"));
     return;
@@ -117,7 +115,7 @@ async function openCopilotInspector(): Promise<void> {
     v-if="chatStore.configured"
     :runtime-url="runtimeUrl"
     :headers="copilotHeaders"
-    :enable-inspector="chatStore.inspectorEnabled"
+    :enable-inspector="inspectorAvailable && chatStore.inspectorEnabled"
   >
     <Teleport :disabled="!teleportActive" :to="teleportTo">
       <aside
@@ -197,7 +195,7 @@ async function openCopilotInspector(): Promise<void> {
           />
         </t-form-item>
       </t-form>
-      <div class="ai-chat-settings-inspector">
+      <div v-if="inspectorAvailable" class="ai-chat-settings-inspector">
         <div class="ai-chat-settings-inspector-text">
           <div class="ai-chat-settings-inspector-title">
             {{ t("chat.settingsInspector") }}
@@ -206,8 +204,7 @@ async function openCopilotInspector(): Promise<void> {
         </div>
         <t-button
           variant="outline"
-          :disabled="!isDev || !chatStore.configured"
-          :title="isDev ? undefined : t('chat.settingsInspectorDevOnly')"
+          :disabled="!chatStore.configured"
           @click="openCopilotInspector"
         >
           <template #icon><ToolsIcon /></template>

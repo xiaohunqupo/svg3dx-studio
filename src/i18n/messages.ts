@@ -233,10 +233,9 @@ export const messages: Record<Locale, MessageTree> = {
       settingsModelRequired: "请填写模型名称",
       settingsInspector: "CopilotKit Inspector",
       settingsInspectorHint:
-        "开发调试面板（默认隐藏）。点击后加载并打开，仅开发模式可用。",
+        "开发调试面板（默认隐藏）。点击后加载并打开。",
       settingsInspectorOpen: "打开 Inspector",
-      settingsInspectorDevOnly: "生产构建中不可用",
-      settingsInspectorOpenFailed: "未能打开 Inspector，请确认开发模式且助手已启用",
+      settingsInspectorOpenFailed: "未能打开 Inspector，请确认助手已启用",
       setupTitle: "请进行设置以启用 AI 助手",
       setupHint: "点击侧边栏设置，填写大模型地址、API Key 与模型名称。密钥只保存在本机。",
       setupAction: "打开设置",
@@ -495,11 +494,10 @@ export const messages: Record<Locale, MessageTree> = {
       settingsModelRequired: "Model is required",
       settingsInspector: "CopilotKit Inspector",
       settingsInspectorHint:
-        "Dev debugging overlay (hidden by default). Loads and opens on click; development builds only.",
+        "Dev debugging overlay (hidden by default). Loads and opens on click.",
       settingsInspectorOpen: "Open Inspector",
-      settingsInspectorDevOnly: "Unavailable in production builds",
       settingsInspectorOpenFailed:
-        "Could not open Inspector. Use a development build with the assistant enabled.",
+        "Could not open Inspector. Make sure the assistant is enabled.",
       setupTitle: "Set up the AI assistant to enable it",
       setupHint:
         "Open sidebar Settings and enter the base URL, API key, and model. The key stays in this browser.",
