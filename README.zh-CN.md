@@ -79,11 +79,15 @@ Studio 内置基于 CopilotKit 的助手，属于页面库的一部分。**默�
 
 #### 为 GitHub Pages（或任意静态站）部署 Runtime
 
-线上 Runtime 是 Cloudflare Worker：`https://copilot.dannyxu.net/api/copilotkit`。Pages 仍是静态站，SPA 构建用 `VITE_COPILOT_RUNTIME_URL` 指向 Worker。
+Pages 仍是静态站。用构建期变量 `VITE_COPILOT_RUNTIME_URL` 把 SPA 指到 Worker（例如 `https://<host>/api/copilotkit`）。不设置时，应用请求同源的 `/api/copilotkit`。
+
+这个地址不进仓库。GitHub Actions 里设同名的仓库变量；本地开发写在 `.env.local`（已被 git 忽略）。
+
+Worker 的对话接口只接受运行时变量 `COPILOT_CORS_ORIGIN` 里的页面来源。名单在 Cloudflare 控制台的 Worker 设置里，不写进仓库；没配这个变量时请求会 403。别的网站打开的浏览器改不了 `Origin`，所以不会转到模型。本地开发用下面的本机 Runtime。
 
 推送 `release/0.2.1` 会同时发布 Pages 和 Worker。分支名写在 `.github/workflows/ci.yml` 的 `RELEASE_BRANCH`；下次换发布分支时改这一处即可。Worker 部署使用仓库密钥 `CLOUDFLARE_API_TOKEN`。
 
-本地手动发布（上传当前工作区，与 CI 相同的 `wrangler deploy`）：
+本地手动发布（与 CI 相同，`wrangler deploy --keep-vars`，不会清掉控制台里已有的变量）：
 
 ```bash
 npx wrangler login     # 只需一次
@@ -104,7 +108,7 @@ npx wrangler secret put COPILOT_MODEL
 npm run copilot   # 默认 :8200
 ```
 
-健康检查：`GET https://copilot.dannyxu.net/api/health`
+健康检查：Worker 主机上的 `GET /api/health`。
 
 ### 三层开放度
 

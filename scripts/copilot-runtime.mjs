@@ -9,7 +9,7 @@
  *   or `.studio-llm.json` (legacy; no longer written by the UI)
  *
  * CORS: set COPILOT_CORS_ORIGIN to a comma-separated allowlist
- *   (e.g. https://www.dannyxu.net). Default `*` for local/dev.
+ *   (e.g. https://example.com). Default `*` for local/dev.
  *
  *   npm run copilot
  * Hosted runtime: `npm run copilot:deploy` (Cloudflare Worker).

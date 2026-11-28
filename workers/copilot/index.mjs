@@ -1,8 +1,10 @@
 /**
  * Cloudflare Worker for the svg3dx Studio Copilot runtime.
  *
- * Pages is static, so chat goes to this host:
- *   https://copilot.dannyxu.net/api/copilotkit
+ * Chat is cross-origin. Relay routes accept only Origins listed in the
+ * runtime variable COPILOT_CORS_ORIGIN (Worker dashboard). No list means deny.
+ * A browser on another site cannot set Origin, so it cannot use this
+ * worker as a proxy. Health checks stay open.
  *
  * LLM keys stay in the browser (`x-studio-llm-*`). Optional host fallback:
  *   wrangler secret put OPENAI_API_KEY
@@ -19,14 +21,6 @@ import {
   parseCorsOrigins,
 } from "../../scripts/copilot-shared.mjs";
 
-const DEFAULT_ORIGINS = [
-  "https://www.dannyxu.net",
-  "https://dannyxu.net",
-  "https://xiaohunqupo.github.io",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-];
-
 const ALLOW_HEADERS = [
   "Content-Type",
   "Authorization",
@@ -37,14 +31,36 @@ const ALLOW_HEADERS = [
 ];
 
 /**
+ * Relay routes only. Browsers set Origin and page scripts cannot override it.
  * @param {Request} request
  * @param {string[]} origins
  */
+function originAllowed(request, origins) {
+  if (origins.includes("*")) return true;
+  const origin = request.headers.get("origin")?.trim() ?? "";
+  return origin.length > 0 && origins.includes(origin);
+}
+
+/**
+ * @param {string} pathname
+ */
+function isRelayPath(pathname) {
+  return (
+    pathname.startsWith("/api/copilotkit") ||
+    pathname === "/api/studio-llm-config"
+  );
+}
+
+/**
+ * @param {Request} request
+ * @param {string[]} origins
+ * @returns {string} echoed origin, or "" when this request must not see CORS
+ */
 function allowOrigin(request, origins) {
-  const origin = request.headers.get("origin");
+  const origin = request.headers.get("origin")?.trim() ?? "";
   if (origins.includes("*")) return origin || "*";
   if (origin && origins.includes(origin)) return origin;
-  return origins[0] || "*";
+  return "";
 }
 
 /**
@@ -54,7 +70,8 @@ function allowOrigin(request, origins) {
  */
 function withCors(request, origins, response) {
   const headers = new Headers(response.headers);
-  headers.set("Access-Control-Allow-Origin", allowOrigin(request, origins));
+  const allowed = allowOrigin(request, origins);
+  if (allowed) headers.set("Access-Control-Allow-Origin", allowed);
   headers.set("Vary", "Origin");
   headers.set(
     "Access-Control-Allow-Methods",
@@ -96,7 +113,17 @@ export default {
    */
   async fetch(request, env) {
     const url = new URL(request.url);
-    const origins = parseCorsOrigins(env.COPILOT_CORS_ORIGIN, DEFAULT_ORIGINS);
+    const origins = parseCorsOrigins(env.COPILOT_CORS_ORIGIN, []);
+
+    if (isRelayPath(url.pathname) && !originAllowed(request, origins)) {
+      return new Response(JSON.stringify({ error: "origin not allowed" }), {
+        status: 403,
+        headers: {
+          "Content-Type": "application/json",
+          Vary: "Origin",
+        },
+      });
+    }
 
     if (request.method === "OPTIONS" && !url.pathname.startsWith("/api/copilotkit")) {
       return withCors(request, origins, new Response(null, { status: 204 }));

@@ -79,11 +79,15 @@ Studio ships a CopilotKit-based assistant as part of the page library. **Enabled
 
 #### Deploy Runtime for GitHub Pages (or any static host)
 
-The hosted runtime is a Cloudflare Worker at `https://copilot.dannyxu.net/api/copilotkit`. Pages stays static; the SPA build points at the Worker via `VITE_COPILOT_RUNTIME_URL`.
+Pages stays static. Point the SPA at a Worker with the build-time variable `VITE_COPILOT_RUNTIME_URL` (for example `https://<host>/api/copilotkit`). Leave it unset and the app calls same-origin `/api/copilotkit`.
+
+That value is not in the repo. For GitHub Actions, set the repository variable of the same name. For a local checkout, put it in `.env.local` (gitignored).
+
+The Worker's chat routes accept only Origins listed in the runtime variable `COPILOT_CORS_ORIGIN`. That list lives in the Cloudflare Worker settings, not in the repo; with the variable unset, those requests get 403 and never reach the model. A browser on another site cannot change `Origin`. Local development uses the Node runtime below.
 
 Pushing `release/0.2.1` publishes both. That branch name is `RELEASE_BRANCH` in `.github/workflows/ci.yml`; the next release line changes it once for Pages and the Worker. The repo secret `CLOUDFLARE_API_TOKEN` is what the Worker deploy uses.
 
-Manual publish from a local checkout (same files `wrangler deploy` would upload):
+Manual publish from a local checkout (`wrangler deploy --keep-vars`, so dashboard variables stay in place):
 
 ```bash
 npx wrangler login     # once
@@ -104,7 +108,7 @@ Local Node runtime (Vite proxies `/api/copilotkit` to it):
 npm run copilot   # listens on :8200
 ```
 
-Health check: `GET https://copilot.dannyxu.net/api/health`
+Health check: `GET /api/health` on the Worker host.
 
 ### Three openness levels
 

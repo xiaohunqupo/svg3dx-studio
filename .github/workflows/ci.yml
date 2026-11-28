@@ -26,8 +26,11 @@ env:
   # Project Pages URL path: https://<owner>.github.io/svg3dx-studio/
   # Cloudflare custom domain at site root: set VITE_BASE=/ in that project instead.
   VITE_BASE: /svg3dx-studio/
-  # Copilot runtime is a Cloudflare Worker (see wrangler.jsonc). Pages cannot host it.
-  VITE_COPILOT_RUNTIME_URL: https://copilot.dannyxu.net/api/copilotkit
+  # Optional. Pages cannot host the runtime. Set repository variable
+  # VITE_COPILOT_RUNTIME_URL (Settings → Secrets and variables → Actions)
+  # to a Worker URL such as https://<host>/api/copilotkit.
+  # Unset → the SPA uses same-origin /api/copilotkit.
+  VITE_COPILOT_RUNTIME_URL: ${{ vars.VITE_COPILOT_RUNTIME_URL }}
 
 jobs:
   # Job-level `if` cannot read env, so this job turns RELEASE_BRANCH into an output.
@@ -124,4 +127,4 @@ jobs:
       - name: Deploy Copilot runtime
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx wrangler deploy
+        run: npx wrangler deploy --keep-vars
