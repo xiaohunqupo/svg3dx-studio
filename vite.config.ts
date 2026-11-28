@@ -46,7 +46,35 @@ function resolveViewerViewHelper() {
   };
 }
 
-export default defineConfig({
+/**
+ * Dev dep prebundling resolves this import inside esbuild, which skips the
+ * Vite plugin above. `vite build` (CI) does not use optimizeDeps.
+ */
+function viewHelperEsbuildPlugin() {
+  return {
+    name: "svg3dx-viewer-view-helper-dev",
+    setup(build: {
+      onResolve: (
+        options: { filter: RegExp },
+        callback: (args: { path: string; importer: string }) => {
+          path: string;
+        } | null
+      ) => void;
+    }) {
+      build.onResolve({ filter: /^\.\/vendor\/ViewHelper\.js$/ }, (args) => {
+        const normalized = args.importer.replaceAll("\\", "/");
+        if (!normalized.includes("/svg3dx-viewer/dist/")) return null;
+        const file = path.resolve(
+          path.dirname(args.importer),
+          "../src/vendor/ViewHelper.js"
+        );
+        return fs.existsSync(file) ? { path: file } : null;
+      });
+    },
+  };
+}
+
+export default defineConfig(({ command }) => ({
   base,
   plugins: [
     resolveViewerViewHelper(),
@@ -130,5 +158,8 @@ export default defineConfig({
   build: { target: "esnext" },
   optimizeDeps: {
     exclude: ["svg3dx-ffi-wasm"],
+    ...(command === "serve"
+      ? { esbuildOptions: { plugins: [viewHelperEsbuildPlugin()] } }
+      : {}),
   },
-});
+}));
